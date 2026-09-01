@@ -13,7 +13,7 @@ while True:
     messages.append({'role': 'user', 'content': a})
         
     # Get response from the Ollama model
-    response: ChatResponse = chat(model='deeprina:latest', messages=messages)
+    response: ChatResponse = chat(model='rina:latest ', messages=messages)
 
     # Append the model's response to the messages list
     messages.append({'role': 'assistant', 'content': response.message.content})
@@ -22,7 +22,7 @@ while True:
     reply = response.message.content.split("</think>", 1)[-1].strip()
 
     # Print the response
-    print(f"Rina-chan thought: {thought}")
+    print(f"Rina-chan thought: {thought[7:]}")
     print(f"Rina-chan speech: {reply}")
         #print(response.message.content)
 
