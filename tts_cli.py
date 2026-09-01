@@ -119,19 +119,32 @@ def main():
     net, hps = load_model(args.model, device)
 
     if args.serve:
+        # stdin protocol, one request per line, tab-separated:
+        #   <outpath>\t<text>              synth with the launch --speaker
+        #   <outpath>\t<speaker>\t<text>   synth with that speaker id (audition many voices)
+        #   <outpath>                      no-op ping, echoed back
+        # the outpath is echoed on success, or "ERR\t<msg>" on failure
         sys.stderr.write(f"tts ready ({args.model}/{args.lang}/s{args.speaker} on {device})\n")
         sys.stderr.flush()
         print("ready", flush=True)
         for line in sys.stdin:
-            line = line.rstrip("\n")
-            if not line:
+            parts = line.rstrip("\n").split("\t")
+            if not parts or not parts[0]:
                 continue
-            out_path, tab, text = line.partition("\t")
-            if not tab:  # just a path -> treat as a no-op ping
+            out_path = parts[0]
+            if len(parts) == 1:  # ping
                 print(out_path, flush=True)
                 continue
+            if len(parts) >= 3:
+                try:
+                    speaker = int(parts[1])
+                except ValueError:
+                    speaker = args.speaker
+                text = "\t".join(parts[2:])
+            else:
+                speaker, text = args.speaker, parts[1]
             try:
-                synth(net, hps, device, text, mark, args.speaker, args.speed, out_path)
+                synth(net, hps, device, text, mark, speaker, args.speed, out_path)
                 print(out_path, flush=True)
             except Exception as e:  # noqa: BLE001
                 print(f"ERR\t{e}", flush=True)

@@ -2,3 +2,6 @@ __pycache__/
 
 # cloned HF Space, keeps its own .git + ~1.5G of LFS model weights
 /VITS-Umamusume-voice-synthesizer/
+
+# voice audition clips + ratings (local data)
+/voice_audition/
