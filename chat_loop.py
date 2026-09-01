@@ -29,6 +29,13 @@ UMA_PY = os.path.expanduser("~/anaconda3/envs/uma-tts/bin/python")
 TTS_CLI = os.path.join(HERE, "tts_cli.py")
 TMP = tempfile.gettempdir()
 
+DEFAULT_SYSTEM = (
+    "You are Rina, the user's warm, playful, affectionate companion. "
+    "Talk in casual, everyday language and keep replies to one or two sentences. "
+    "Never narrate your own thoughts, never use stage directions, never use emojis. "
+    "Stay in character and don't mention being an AI."
+)
+
 
 def _ensure_cuda_libs():
     """ctranslate2 dlopen's libcublas/libcudnn from the nvidia-*-cu12 wheels, but
@@ -221,7 +228,9 @@ def main():
     ap.add_argument("--host", default=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
                     help="Ollama base URL (env OLLAMA_HOST), e.g. http://media:11434")
     ap.add_argument("--model", default="rina", help="Ollama model name (default: rina)")
-    ap.add_argument("--system", default=None, help="optional system prompt override")
+    ap.add_argument("--system", default=DEFAULT_SYSTEM,
+                    help="system prompt (defaults to the Rina persona); pass --system '' to send none, "
+                         "e.g. when the Ollama model already has its own persona")
     ap.add_argument("--think", action="store_true",
                     help="let reasoning models (qwen3, r1...) do their <think> pass — more coherent, much slower")
     ap.add_argument("--whisper-model", default="small", help="faster-whisper size (tiny/base/small/medium/large-v3)")
@@ -312,7 +321,8 @@ def main():
             messages.pop()
             continue
         messages.append({"role": "assistant", "content": reply})
-        print(f"\n{args.model}> {reply}\n")
+        #print(f"\n{args.model}> {reply}\n")
+        print(f"\nAI GF> {reply}\n")
         if voice:
             voice.say(reply)
 
