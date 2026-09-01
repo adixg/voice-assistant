@@ -123,12 +123,71 @@ def strip_think(text):
     return text.strip()
 
 
-def ask(client, model, messages):
-    resp = client.chat(model=model, messages=messages)
+def ask(client, model, messages, think):
+    # think=False makes qwen3 & other reasoning models skip the <think> pass
+    # (much faster); models that don't support the flag get a plain retry.
+    kw = {} if think is None else {"think": think}
+    try:
+        resp = client.chat(model=model, messages=messages, **kw)
+    except Exception as e:  # noqa: BLE001
+        if kw and "think" in str(e).lower():
+            resp = client.chat(model=model, messages=messages)
+        else:
+            raise
     return strip_think(resp["message"]["content"])
 
 
 # ---------------------------------------------------------------- TTS
+class Voice:
+    """Long-lived `tts_cli.py --serve` subprocess so the VITS model loads once."""
+
+    def __init__(self, args):
+        self.args = args
+        self.p = None
+        self.logpath = os.path.join(TMP, "tts_worker.log")
+
+    def start(self):
+        a = self.args
+        cmd = [UMA_PY, TTS_CLI, "--serve", "-m", a.tts_model,
+               "-s", str(a.speaker), "--device", a.tts_device]
+        if a.tts_model == "trilingual":
+            cmd += ["-l", a.tts_lang]
+        print(f"  starting VITS worker on {a.tts_device} ...", flush=True)
+        self.p = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=open(self.logpath, "w"), text=True, bufsize=1,
+        )
+        line = self.p.stdout.readline().strip()
+        if line != "ready":
+            tail = ""
+            try:
+                tail = open(self.logpath).read()[-800:]
+            except OSError:
+                pass
+            raise RuntimeError(f"VITS worker failed to start ({line!r})\n{tail}")
+
+    def say(self, text):
+        if self.p is None or self.p.poll() is not None:
+            self.start()
+        for i, chunk in enumerate(chunks(text)):
+            wav = os.path.join(TMP, f"rina_reply_{i}.wav")
+            self.p.stdin.write(f"{wav}\t{chunk.replace(chr(10), ' ')}\n")
+            self.p.stdin.flush()
+            resp = self.p.stdout.readline().strip()
+            if resp != wav:
+                print(f"  (tts: {resp or 'worker died'})")
+                return
+            play(wav)
+
+    def close(self):
+        if self.p and self.p.poll() is None:
+            try:
+                self.p.stdin.close()
+            except OSError:
+                pass
+            self.p.terminate()
+
+
 def chunks(text, limit=200):
     # sentence split, then hard-wrap any sentence that is still too long
     pieces = []
@@ -156,20 +215,6 @@ def chunks(text, limit=200):
     return parts or [text.strip()]
 
 
-def speak(text, args):
-    for i, chunk in enumerate(chunks(text)):
-        wav = os.path.join(TMP, f"rina_reply_{i}.wav")
-        cmd = [UMA_PY, TTS_CLI, chunk, "-m", args.tts_model,
-               "-s", str(args.speaker), "-o", wav, "--device", args.tts_device]
-        if args.tts_model == "trilingual":
-            cmd += ["-l", args.tts_lang]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            print("  (tts failed)\n" + (r.stderr or r.stdout)[-800:])
-            return
-        play(wav)
-
-
 # ---------------------------------------------------------------- main loop
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -177,13 +222,18 @@ def main():
                     help="Ollama base URL (env OLLAMA_HOST), e.g. http://media:11434")
     ap.add_argument("--model", default="rina", help="Ollama model name (default: rina)")
     ap.add_argument("--system", default=None, help="optional system prompt override")
+    ap.add_argument("--think", action="store_true",
+                    help="let reasoning models (qwen3, r1...) do their <think> pass — more coherent, much slower")
     ap.add_argument("--whisper-model", default="small", help="faster-whisper size (tiny/base/small/medium/large-v3)")
     ap.add_argument("--whisper-device", default="auto", choices=["auto", "cpu", "cuda"])
-    ap.add_argument("--stt-lang", default=None, help="force STT language (e.g. en, ja); default: autodetect")
+    ap.add_argument("--stt-lang", default="en",
+                    help="STT language: en, ja, ... or 'auto' to detect per utterance (default: en)")
     ap.add_argument("--tts-model", default="trilingual", choices=["trilingual", "japanese"])
     ap.add_argument("--tts-lang", default="en", choices=["ja", "zh", "en", "mix", "none"],
                     help="language token for the trilingual VITS model")
-    ap.add_argument("--tts-device", default="cuda", help="torch device for VITS (cuda/cpu)")
+    ap.add_argument("--tts-device", default="cpu",
+                    help="torch device for VITS (default cpu: ~0.8s and leaves the 4GB GPU to whisper; "
+                         "use cuda if VRAM is free)")
     ap.add_argument("--speaker", type=int, default=10, help="VITS speaker id")
     ap.add_argument("--no-voice", action="store_true", help="text only, skip VITS")
     args = ap.parse_args()
@@ -213,6 +263,12 @@ def main():
         sys.exit(1)
 
     stt = load_stt(args.whisper_model, args.whisper_device)
+    stt_lang = None if args.stt_lang == "auto" else args.stt_lang
+
+    voice = None
+    if not args.no_voice:
+        voice = Voice(args)
+        voice.start()  # pay the model-load cost now, not on the first reply
 
     messages = []
     if args.system:
@@ -233,14 +289,14 @@ def main():
             print("  (history cleared)")
             continue
         if cmd.startswith("/say "):
-            speak(cmd[5:], args)
+            (voice.say if voice else print)(cmd[5:])
             continue
         if cmd.startswith("/text "):
             user_text = cmd[6:].strip()
         elif cmd == "":
             wav = record(os.path.join(TMP, "chat_in.wav"))
             t0 = time.time()
-            user_text = transcribe(stt, wav, args.stt_lang)
+            user_text = transcribe(stt, wav, stt_lang)
             print(f"  you said ({time.time()-t0:.1f}s): {user_text or '(nothing heard)'}")
             if not user_text:
                 continue
@@ -250,15 +306,18 @@ def main():
 
         messages.append({"role": "user", "content": user_text})
         try:
-            reply = ask(client, args.model, messages)
+            reply = ask(client, args.model, messages, None if args.think else False)
         except Exception as e:  # noqa: BLE001
             print(f"  ! ollama error: {e}")
             messages.pop()
             continue
         messages.append({"role": "assistant", "content": reply})
         print(f"\n{args.model}> {reply}\n")
-        if not args.no_voice:
-            speak(reply, args)
+        if voice:
+            voice.say(reply)
+
+    if voice:
+        voice.close()
 
 
 if __name__ == "__main__":
