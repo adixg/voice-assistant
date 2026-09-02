@@ -14,15 +14,24 @@ In-loop commands:  /text <msg>   type instead of speak
                    /say <text>   just test the voice
                    /reset        clear conversation history
                    /quit
+
+An animated "speech orb" window (speech_orb.py) shows idle/listening/thinking/
+speaking and pulses with the live mic and TTS levels. It appears automatically
+when a display and PySide6 are available; --no-orb keeps everything in the
+terminal. The terminal prompts still work with the orb up.
 """
 import argparse
+import array
+import math
 import os
 import re
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 UMA_PY = os.path.expanduser("~/anaconda3/envs/uma-tts/bin/python")
@@ -62,30 +71,96 @@ def _ensure_cuda_libs():
 _ensure_cuda_libs()
 
 
+# ---------------------------------------------------------------- orb hooks
+class Hooks:
+    """No-op sink for orb state/level updates; the headless run uses this as-is."""
+
+    def state(self, name):
+        pass
+
+    def level(self, x):
+        pass
+
+
+def _rms16(raw, gain=8.0):
+    """Normalised 0..1 loudness of a little-endian s16 mono buffer."""
+    if len(raw) < 2:
+        return 0.0
+    a = array.array("h")
+    a.frombytes(raw[: len(raw) & ~1])
+    if not a:
+        return 0.0
+    mean_sq = sum(v * v for v in a) / len(a)
+    return min(1.0, (math.sqrt(mean_sq) / 32768.0) * gain)
+
+
 # ---------------------------------------------------------------- audio capture
-def record(path):
-    """Record from the default pulse source until the user presses Enter."""
+def record(path, hooks=Hooks()):
+    """Record the default pulse source until the user presses Enter, streaming the
+    live level to `hooks` and writing a 16 kHz mono wav at `path`."""
     proc = subprocess.Popen(
-        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-         "-f", "pulse", "-i", "default", "-ac", "1", "-ar", "16000", path],
-        stdin=subprocess.DEVNULL,
+        ["ffmpeg", "-hide_banner", "-loglevel", "error",
+         "-f", "pulse", "-i", "default", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"],
+        stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
     )
+    buf = bytearray()
+
+    def pump():
+        while True:
+            chunk = proc.stdout.read(3200)  # ~0.1 s
+            if not chunk:
+                break
+            buf.extend(chunk)
+            hooks.level(_rms16(chunk))
+
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
     try:
         input("  ● recording — Enter to stop ")
     finally:
-        proc.send_signal(signal.SIGINT)  # lets ffmpeg flush the wav trailer
+        proc.send_signal(signal.SIGINT)
         proc.wait()
+        t.join(timeout=1.0)
+        hooks.level(0.0)
+
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(bytes(buf))
     return path
 
 
-def play(path):
-    subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", path])
+def play(path, hooks=Hooks()):
+    """Play `path` with ffplay, pushing per-frame level to `hooks` in real time."""
+    try:
+        with wave.open(path, "rb") as w:
+            sr, sw = w.getframerate(), w.getsampwidth()
+            raw = w.readframes(w.getnframes())
+    except Exception:  # noqa: BLE001
+        raw, sr, sw = b"", 22050, 2
+
+    proc = subprocess.Popen(
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", path],
+        stdin=subprocess.DEVNULL,
+    )
+    if raw and sw == 2:
+        step = max(1, int(sr * 0.03)) * 2  # 30 ms of s16
+        t0 = time.time()
+        for off in range(0, len(raw), step):
+            hooks.level(_rms16(raw[off:off + step]))
+            slp = t0 + (off / 2) / sr - time.time()
+            if slp > 0:
+                time.sleep(slp)
+            if proc.poll() is not None:
+                break
+    proc.wait()
+    hooks.level(0.0)
 
 
 # ---------------------------------------------------------------- STT
 def _silent_wav():
     import struct
-    import wave
     path = os.path.join(TMP, "stt_probe.wav")
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
@@ -148,8 +223,9 @@ def ask(client, model, messages, think):
 class Voice:
     """Long-lived `tts_cli.py --serve` subprocess so the VITS model loads once."""
 
-    def __init__(self, args):
+    def __init__(self, args, hooks=None):
         self.args = args
+        self.hooks = hooks or Hooks()
         self.p = None
         self.logpath = os.path.join(TMP, "tts_worker.log")
 
@@ -184,7 +260,7 @@ class Voice:
             if resp != wav:
                 print(f"  (tts: {resp or 'worker died'})")
                 return
-            play(wav)
+            play(wav, self.hooks)
 
     def close(self):
         if self.p and self.p.poll() is None:
@@ -222,7 +298,127 @@ def chunks(text, limit=200):
     return parts or [text.strip()]
 
 
-# ---------------------------------------------------------------- main loop
+# ---------------------------------------------------------------- conversation
+def converse(client, stt, stt_lang, voice, args, hooks):
+    """The blocking talk/listen/think/speak loop. Runs on the main thread when
+    headless, or on a worker thread when the orb window is up."""
+    messages = []
+    if args.system:
+        messages.append({"role": "system", "content": args.system})
+
+    hooks.state("idle")
+    print("\nready. Enter = talk, /text <msg>, /say <text>, /reset, /quit\n")
+    while True:
+        try:
+            cmd = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if cmd in ("/quit", "/exit", "/q"):
+            break
+        if cmd == "/reset":
+            messages = [m for m in messages if m["role"] == "system"]
+            print("  (history cleared)")
+            continue
+        if cmd.startswith("/say "):
+            if voice:
+                hooks.state("speaking")
+                voice.say(cmd[5:])
+                hooks.state("idle")
+            else:
+                print(cmd[5:])
+            continue
+        if cmd.startswith("/text "):
+            user_text = cmd[6:].strip()
+        elif cmd == "":
+            hooks.state("listening")
+            wav = record(os.path.join(TMP, "chat_in.wav"), hooks)
+            hooks.state("thinking")
+            t0 = time.time()
+            user_text = transcribe(stt, wav, stt_lang)
+            print(f"  you said ({time.time()-t0:.1f}s): {user_text or '(nothing heard)'}")
+            if not user_text:
+                hooks.state("idle")
+                continue
+        else:
+            print("  unknown command; press Enter to talk or use /text <msg>")
+            continue
+
+        hooks.state("thinking")
+        messages.append({"role": "user", "content": user_text})
+        try:
+            reply = ask(client, args.model, messages, None if args.think else False)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! ollama error: {e}")
+            messages.pop()
+            hooks.state("idle")
+            continue
+        messages.append({"role": "assistant", "content": reply})
+        print(f"\nAI GF> {reply}\n")
+        if voice:
+            hooks.state("speaking")
+            voice.say(reply)
+        hooks.state("idle")
+
+    if voice:
+        voice.close()
+
+
+def run_with_orb(client, stt, stt_lang, voice, args):
+    """Show the speech orb on the main thread; run `converse` on a worker."""
+    from PySide6.QtCore import QObject, QThread, QTimer, Signal
+    from PySide6.QtWidgets import QApplication
+    from speech_orb import SpeechOrb
+
+    app = QApplication.instance() or QApplication([])
+
+    class QtHooks(QObject):
+        _s = Signal(str)
+        _l = Signal(float)
+
+        def state(self, name):
+            self._s.emit(name)
+
+        def level(self, x):
+            self._l.emit(float(x))
+
+    orb = SpeechOrb()
+    orb.setWindowTitle(args.model)
+    orb.setStyleSheet("background:#0e1116;")
+    orb.resize(360, 360)
+    orb.show()
+
+    hooks = QtHooks()
+    hooks._s.connect(orb.set_state)      # cross-thread -> queued to the GUI thread
+    hooks._l.connect(orb.push_level)
+    if voice:
+        voice.hooks = hooks
+
+    class Worker(QThread):
+        def run(self):
+            converse(client, stt, stt_lang, voice, args, hooks)
+
+    def shutdown():
+        try:
+            if voice:
+                voice.close()
+        finally:
+            os._exit(0)
+
+    app.aboutToQuit.connect(shutdown)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)   # let Ctrl-C kill it
+    keepalive = QTimer()
+    keepalive.start(200)
+    keepalive.timeout.connect(lambda: None)         # keep the interpreter ticking
+
+    worker = Worker()
+    worker.finished.connect(app.quit)
+    worker.start()
+    app.exec()
+
+
+# ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
@@ -245,6 +441,8 @@ def main():
                          "use cuda if VRAM is free)")
     ap.add_argument("--speaker", type=int, default=10, help="VITS speaker id")
     ap.add_argument("--no-voice", action="store_true", help="text only, skip VITS")
+    ap.add_argument("--no-orb", action="store_true",
+                    help="don't show the animated speech orb (also skipped when no display / PySide6)")
     args = ap.parse_args()
 
     import socket
@@ -279,55 +477,15 @@ def main():
         voice = Voice(args)
         voice.start()  # pay the model-load cost now, not on the first reply
 
-    messages = []
-    if args.system:
-        messages.append({"role": "system", "content": args.system})
-
-    print("\nready. Enter = talk, /text <msg>, /say <text>, /reset, /quit\n")
-    while True:
+    want_orb = not args.no_orb and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if want_orb:
         try:
-            cmd = input("you> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
+            run_with_orb(client, stt, stt_lang, voice, args)
+            return
+        except ImportError as e:
+            print(f"  (orb off: {e}); running in the terminal only")
 
-        if cmd in ("/quit", "/exit", "/q"):
-            break
-        if cmd == "/reset":
-            messages = [m for m in messages if m["role"] == "system"]
-            print("  (history cleared)")
-            continue
-        if cmd.startswith("/say "):
-            (voice.say if voice else print)(cmd[5:])
-            continue
-        if cmd.startswith("/text "):
-            user_text = cmd[6:].strip()
-        elif cmd == "":
-            wav = record(os.path.join(TMP, "chat_in.wav"))
-            t0 = time.time()
-            user_text = transcribe(stt, wav, stt_lang)
-            print(f"  you said ({time.time()-t0:.1f}s): {user_text or '(nothing heard)'}")
-            if not user_text:
-                continue
-        else:
-            print("  unknown command; press Enter to talk or use /text <msg>")
-            continue
-
-        messages.append({"role": "user", "content": user_text})
-        try:
-            reply = ask(client, args.model, messages, None if args.think else False)
-        except Exception as e:  # noqa: BLE001
-            print(f"  ! ollama error: {e}")
-            messages.pop()
-            continue
-        messages.append({"role": "assistant", "content": reply})
-        #print(f"\n{args.model}> {reply}\n")
-        print(f"\nAI GF> {reply}\n")
-        if voice:
-            voice.say(reply)
-
-    if voice:
-        voice.close()
+    converse(client, stt, stt_lang, voice, args, Hooks())
 
 
 if __name__ == "__main__":
