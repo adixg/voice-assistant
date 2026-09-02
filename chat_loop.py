@@ -24,6 +24,7 @@ import argparse
 import array
 import math
 import os
+import queue
 import re
 import signal
 import subprocess
@@ -82,6 +83,30 @@ class Hooks:
         pass
 
 
+class Gate:
+    """One queue fed by both the terminal (a stdin reader thread) and the orb
+    window (its Enter key). converse() and record() block on .get() for the next
+    line; the orb pushes "" to mean 'toggle talking'."""
+
+    def __init__(self):
+        self._q = queue.Queue()
+
+    def push(self, item=""):
+        self._q.put(item)
+
+    def get(self):
+        return self._q.get()
+
+
+def _stdin_pump(gate):
+    try:
+        for line in sys.stdin:
+            gate.push(line.rstrip("\n"))
+    except Exception:  # noqa: BLE001
+        pass
+    gate.push(None)  # EOF / Ctrl-D sentinel
+
+
 def _rms16(raw, gain=8.0):
     """Normalised 0..1 loudness of a little-endian s16 mono buffer."""
     if len(raw) < 2:
@@ -95,9 +120,9 @@ def _rms16(raw, gain=8.0):
 
 
 # ---------------------------------------------------------------- audio capture
-def record(path, hooks=Hooks()):
-    """Record the default pulse source until the user presses Enter, streaming the
-    live level to `hooks` and writing a 16 kHz mono wav at `path`."""
+def record(path, hooks=Hooks(), gate=None):
+    """Record the default pulse source until Enter (terminal or orb window),
+    streaming the live level to `hooks` and writing a 16 kHz mono wav at `path`."""
     proc = subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error",
          "-f", "pulse", "-i", "default", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"],
@@ -116,7 +141,12 @@ def record(path, hooks=Hooks()):
     t = threading.Thread(target=pump, daemon=True)
     t.start()
     try:
-        input("  ● recording — Enter to stop ")
+        if gate is None:
+            input("  ● recording — Enter to stop ")
+        else:
+            stop = gate.get()
+            if stop not in (None, ""):      # a typed command, not just Enter
+                gate.push(stop)             # hand it back to the main loop
     finally:
         proc.send_signal(signal.SIGINT)
         proc.wait()
@@ -299,21 +329,32 @@ def chunks(text, limit=200):
 
 
 # ---------------------------------------------------------------- conversation
-def converse(client, stt, stt_lang, voice, args, hooks):
+def converse(client, stt, stt_lang, voice, args, hooks, gate=None):
     """The blocking talk/listen/think/speak loop. Runs on the main thread when
-    headless, or on a worker thread when the orb window is up."""
+    headless, or on a worker thread when the orb window is up. Input lines come
+    through `gate` — fed by a stdin reader and, in orb mode, the orb's Enter key."""
+    if gate is None:
+        gate = Gate()
+    threading.Thread(target=_stdin_pump, args=(gate,), daemon=True).start()
+
     messages = []
     if args.system:
         messages.append({"role": "system", "content": args.system})
 
     hooks.state("idle")
-    print("\nready. Enter = talk, /text <msg>, /say <text>, /reset, /quit\n")
+    print("\nready. Enter (here or in the orb) = talk, /text <msg>, /say <text>, /reset, /quit\n")
     while True:
+        sys.stdout.write("you> ")
+        sys.stdout.flush()
         try:
-            cmd = input("you> ").strip()
-        except (EOFError, KeyboardInterrupt):
+            cmd = gate.get()
+        except KeyboardInterrupt:
             print()
             break
+        if cmd is None:            # Ctrl-D / stdin closed
+            print()
+            break
+        cmd = cmd.strip()
 
         if cmd in ("/quit", "/exit", "/q"):
             break
@@ -333,7 +374,8 @@ def converse(client, stt, stt_lang, voice, args, hooks):
             user_text = cmd[6:].strip()
         elif cmd == "":
             hooks.state("listening")
-            wav = record(os.path.join(TMP, "chat_in.wav"), hooks)
+            print("  ● recording — Enter to stop")
+            wav = record(os.path.join(TMP, "chat_in.wav"), hooks, gate)
             hooks.state("thinking")
             t0 = time.time()
             user_text = transcribe(stt, wav, stt_lang)
@@ -383,11 +425,22 @@ def run_with_orb(client, stt, stt_lang, voice, args):
         def level(self, x):
             self._l.emit(float(x))
 
+    try:
+        from speech_orb import BASE_BG
+    except ImportError:
+        BASE_BG = "#24273a"
+
+    gate = Gate()
+
     orb = SpeechOrb()
     orb.setWindowTitle(args.model)
-    orb.setStyleSheet("background:#0e1116;")
+    orb.setStyleSheet(f"background:{BASE_BG};")
     orb.resize(360, 360)
+    orb.on_enter = gate.push            # Enter/Space in the orb window == Enter in the terminal
     orb.show()
+    orb.raise_()
+    orb.activateWindow()
+    orb.setFocus()
 
     hooks = QtHooks()
     hooks._s.connect(orb.set_state)      # cross-thread -> queued to the GUI thread
@@ -397,7 +450,7 @@ def run_with_orb(client, stt, stt_lang, voice, args):
 
     class Worker(QThread):
         def run(self):
-            converse(client, stt, stt_lang, voice, args, hooks)
+            converse(client, stt, stt_lang, voice, args, hooks, gate)
 
     def shutdown():
         try:

@@ -26,13 +26,22 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QCheckBox
 )
 
+# Catppuccin Macchiato
+MACCHIATO = dict(
+    base="#24273a", crust="#181926", text="#cad3f5", subtext0="#a5adcb",
+    blue="#8aadf4", sapphire="#7dc4e4", sky="#91d7e3", teal="#8bd5ca",
+    green="#a6da95", yellow="#eed49f", peach="#f5a97f", maroon="#ee99a0",
+    mauve="#c6a0f6", pink="#f5bde6", lavender="#b7bdf8", rosewater="#f4dbd6",
+)
+BASE_BG = MACCHIATO["base"]
+
 # per-state look: core colour, glow colour, how strongly audio deforms the rim,
-# and the idle "breathing" depth
+# and the idle "breathing" depth  (colours are Macchiato accents)
 STATES = {
-    "idle":      dict(core="#4aa3ff", glow="#1e5cff", reactivity=0.05, breathe=0.06),
-    "listening": dict(core="#37e0a0", glow="#12b981", reactivity=0.85, breathe=0.05),
-    "thinking":  dict(core="#ffb038", glow="#ff7a3d", reactivity=0.12, breathe=0.10),
-    "speaking":  dict(core="#ff6ca8", glow="#ff3d6e", reactivity=1.00, breathe=0.05),
+    "idle":      dict(core=MACCHIATO["blue"],  glow=MACCHIATO["sapphire"], reactivity=0.05, breathe=0.06),
+    "listening": dict(core=MACCHIATO["green"], glow=MACCHIATO["teal"],     reactivity=0.85, breathe=0.05),
+    "thinking":  dict(core=MACCHIATO["yellow"], glow=MACCHIATO["peach"],   reactivity=0.12, breathe=0.10),
+    "speaking":  dict(core=MACCHIATO["mauve"], glow=MACCHIATO["pink"],     reactivity=1.00, breathe=0.05),
 }
 
 
@@ -54,6 +63,8 @@ class SpeechOrb(QWidget):
         super().__init__(parent)
         self.setMinimumSize(220, 220)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.on_enter = None       # callback(str) — Enter/Space while focused
 
         self._state = "idle"
         self._cfg = STATES["idle"]
@@ -148,19 +159,21 @@ class SpeechOrb(QWidget):
         p.setPen(Qt.NoPen)
         p.drawPath(path)
 
-        # ---- specular highlight
+        # ---- specular highlight (soft rosewater sheen, not pure white)
+        sheen = QColor(MACCHIATO["rosewater"])
         spec = QRadialGradient(QPointF(cx - radius * 0.35, cy - radius * 0.4), radius * 0.9)
-        white = QColor(255, 255, 255, 150)
-        spec.setColorAt(0.0, white)
-        spec.setColorAt(0.4, QColor(255, 255, 255, 30))
-        spec.setColorAt(1.0, QColor(255, 255, 255, 0))
+        spec.setColorAt(0.0, QColor(sheen.red(), sheen.green(), sheen.blue(), 130))
+        spec.setColorAt(0.4, QColor(sheen.red(), sheen.green(), sheen.blue(), 26))
+        spec.setColorAt(1.0, QColor(sheen.red(), sheen.green(), sheen.blue(), 0))
         p.setBrush(spec)
         p.drawEllipse(QPointF(cx - radius * 0.28, cy - radius * 0.32),
                       radius * 0.55, radius * 0.55)
 
         # ---- "thinking": a rotating dashed ring
         if self._state == "thinking":
-            pen = QPen(QColor(255, 255, 255, 180), max(2.0, base * 0.03))
+            ring = QColor(MACCHIATO["text"])
+            ring.setAlpha(190)
+            pen = QPen(ring, max(2.0, base * 0.03))
             pen.setDashPattern([1.0, 3.5])
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)
@@ -174,8 +187,15 @@ class SpeechOrb(QWidget):
 
         p.end()
 
-    # ---- frameless-mode dragging --------------------------------------------
+    # ---- input --------------------------------------------------------------
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space) and callable(self.on_enter):
+            self.on_enter("")
+        else:
+            super().keyPressEvent(e)
+
     def mousePressEvent(self, e):
+        self.setFocus()
         self._drag = e.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
 
     def mouseMoveEvent(self, e):
@@ -235,18 +255,20 @@ def _demo(frameless: bool) -> int:
         win.setAttribute(Qt.WA_TranslucentBackground)
         win.resize(260, 260)
     else:
-        win.setStyleSheet("background:#0e1116;")
+        win.setStyleSheet(f"background:{BASE_BG};")
         row = QHBoxLayout()
         for name in STATES:
             b = QPushButton(name)
             b.clicked.connect(lambda _=False, n=name: orb.set_state(n))
-            b.setStyleSheet("color:#ddd;background:#232833;border:1px solid #333;"
-                            "padding:6px 10px;border-radius:6px;")
+            b.setStyleSheet(
+                f"color:{MACCHIATO['text']};background:{MACCHIATO['crust']};"
+                f"border:1px solid {MACCHIATO['blue']};padding:6px 10px;border-radius:6px;"
+            )
             row.addWidget(b)
         layout.addLayout(row)
 
         mic = QCheckBox("use microphone (drives the level live)")
-        mic.setStyleSheet("color:#bbb;padding:6px;")
+        mic.setStyleSheet(f"color:{MACCHIATO['subtext0']};padding:6px;")
 
         def toggle_mic(on):
             if on:
