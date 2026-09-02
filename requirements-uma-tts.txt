@@ -1,0 +1,36 @@
+# tts_cli.py — headless VITS-Umamusume voice synthesizer (plain torch path).
+# conda env "uma-tts", Python 3.10.  torch comes from the CUDA 12.1 wheel index,
+# which the --extra-index-url line below adds:
+#
+#   conda run -n uma-tts python -m pip install -r requirements-uma-tts.txt
+#
+# Needs the cloned HF Space next to tts_cli.py at VITS-Umamusume-voice-synthesizer/
+# (setup_envs.sh clones it).
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
+
+numpy==1.26.4               # VITS + numba pin; do NOT let this float to 2.x
+scipy==1.15.3
+soundfile==0.14.0          # wav writing
+librosa==0.11.0
+numba==0.67.0
+
+# text front-end: JA/ZH/EN/KO phonemizers the VITS cleaners import
+pyopenjtalk-prebuilt==0.3.0
+jamo==0.4.1
+pypinyin==0.55.0
+ko_pron==1.3
+jieba==0.42.1
+cn2an==0.5.24
+inflect==7.5.0
+eng_to_ipa==0.0.2
+indic_transliteration==2.3.82
+num_thai==0.0.5
+OpenCC==1.4.2
+Unidecode==1.4.0
+
+# pyopenjtalk-prebuilt still imports pkg_resources, dropped in setuptools 81
+setuptools<81
