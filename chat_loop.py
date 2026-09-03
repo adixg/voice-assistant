@@ -33,35 +33,12 @@ import time
 
 from voicepipe.audio import Hooks, record
 from voicepipe.llm import DEFAULT_SYSTEM, ask
-from voicepipe.stt import load_stt, transcribe
+from voicepipe.stt import ensure_cuda_libs, load_stt, transcribe
 from voicepipe.tts import Voice
 
 TMP = tempfile.gettempdir()
 
-
-def _ensure_cuda_libs():
-    """ctranslate2 dlopen's libcublas/libcudnn from the nvidia-*-cu12 wheels, but
-    only if they're on LD_LIBRARY_PATH at process start. Add them and re-exec once."""
-    if os.environ.get("_CHAT_LOOP_REEXEC") or not os.path.isfile(sys.argv[0]):
-        return
-    import importlib.util
-    import pathlib
-    dirs = []
-    for pkg in ("nvidia.cublas", "nvidia.cudnn"):
-        spec = importlib.util.find_spec(pkg)
-        if spec and spec.submodule_search_locations:
-            d = pathlib.Path(spec.submodule_search_locations[0]) / "lib"
-            if d.is_dir():
-                dirs.append(str(d))
-    if not dirs:
-        return
-    cur = os.environ.get("LD_LIBRARY_PATH", "")
-    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(dirs + ([cur] if cur else []))
-    os.environ["_CHAT_LOOP_REEXEC"] = "1"
-    os.execv(sys.executable, [sys.executable, *sys.argv])
-
-
-_ensure_cuda_libs()
+ensure_cuda_libs()
 
 
 # ---------------------------------------------------------------- orb glue

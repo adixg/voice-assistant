@@ -39,6 +39,27 @@ archive/                superseded experiments (OpenVoice, Kokoro) kept for refe
 VITS-Umamusume-voice-synthesizer/   cloned HF Space (model code + weights)
 ```
 
+## Running the tests
+
+```bash
+conda activate chat
+pytest tests/
+```
+
+Covers the pure/mockable logic: `voicepipe.llm` (`strip_think`, `ask` against a
+mocked Ollama client), `voicepipe.audio` (`_rms16`), `voicepipe.tts` (`chunks`),
+and `bridge_server.py`'s wire protocol (`Session.handle_utterance`,
+`handle_client`) with STT/LLM/TTS and the WebSocket mocked out — no GPU, model,
+or network needed, runs in well under a second. Run it after any change to
+`voicepipe/` or `bridge_server.py`.
+
+What's deliberately **not** covered: `voicepipe.stt.load_stt`/`transcribe`
+(needs a real faster-whisper model), `voicepipe.tts.Voice` (needs the real
+`uma-tts` subprocess), and anything in `firmware/` (no practical way to unit
+test ESP32/M5Unified C++ without a hardware simulator or a large native-mock
+scaffold — not worth building for a project this size). The three-tier
+hardware test path below is the practical equivalent for the firmware side.
+
 ## Debugging the speech pipeline
 
 Each `voicepipe` module runs standalone:

@@ -27,8 +27,10 @@ import wave
 import websockets
 
 from voicepipe.llm import DEFAULT_SYSTEM, ask
-from voicepipe.stt import load_stt, transcribe
+from voicepipe.stt import ensure_cuda_libs, load_stt, transcribe
 from voicepipe.tts import TMP, Voice
+
+ensure_cuda_libs()
 
 SAMPLE_RATE = 16000
 MIN_UTTERANCE_BYTES = SAMPLE_RATE * 2 // 4  # ignore stray <0.25s blips

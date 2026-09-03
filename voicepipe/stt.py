@@ -4,10 +4,36 @@ Standalone debug use:
     conda run -n chat python -m voicepipe.stt some.wav [--model small] [--lang en]
 """
 import os
+import sys
 import tempfile
 import wave
 
 TMP = tempfile.gettempdir()
+
+
+def ensure_cuda_libs():
+    """ctranslate2 dlopen's libcublas/libcudnn from the nvidia-*-cu12 wheels, but
+    only if they're on LD_LIBRARY_PATH at process start. Add them and re-exec
+    once. Call this once, early, from any entrypoint that wants GPU whisper
+    (chat_loop.py and bridge_server.py both do) — it's a no-op if the libs are
+    already reachable or just aren't installed (CPU-only box)."""
+    if os.environ.get("_VOICEPIPE_CUDA_REEXEC") or not os.path.isfile(sys.argv[0]):
+        return
+    import importlib.util
+    import pathlib
+    dirs = []
+    for pkg in ("nvidia.cublas", "nvidia.cudnn"):
+        spec = importlib.util.find_spec(pkg)
+        if spec and spec.submodule_search_locations:
+            d = pathlib.Path(spec.submodule_search_locations[0]) / "lib"
+            if d.is_dir():
+                dirs.append(str(d))
+    if not dirs:
+        return
+    cur = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(dirs + ([cur] if cur else []))
+    os.environ["_VOICEPIPE_CUDA_REEXEC"] = "1"
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 def _silent_wav():
