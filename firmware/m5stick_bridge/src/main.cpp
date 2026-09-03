@@ -316,6 +316,11 @@ static void connectNetwork() {
 }
 
 // ---------------------------------------------------------------- standby
+// Beyond cutting Wi-Fi/mic/speaker: draw the standby screen once instead of
+// redrawing an unchanging frame at 25fps forever, put the panel itself in
+// its low-power sleep mode (not just dim — M5GFX's sleep() also sends the
+// controller its own SLPIN command), and underclock the CPU, since standby
+// is doing nothing but polling one button.
 static void enterStandby() {
   uiState = UI_SLEEPING;
   setStatus("standby", "hold BtnB to wake");
@@ -324,11 +329,14 @@ static void enterStandby() {
   WiFi.mode(WIFI_OFF);
   M5.Mic.end();
   M5.Speaker.end();
-  M5.Display.setBrightness(20);
+  drawFace();
+  M5.Display.sleep();
+  setCpuFrequencyMhz(80);
 }
 
 static void wakeFromStandby() {
-  M5.Display.setBrightness(200);
+  setCpuFrequencyMhz(240);
+  M5.Display.wakeup();
   connectNetwork();
 }
 
@@ -400,8 +408,7 @@ void loop() {
   }
 
   if (uiState == UI_SLEEPING) {
-    maybeDrawFace();
-    return;  // no Wi-Fi/mic/speaker work while in standby
+    return;  // screen was drawn once on entry and is now asleep; nothing to update
   }
 
   webSocket.loop();

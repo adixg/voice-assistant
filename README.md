@@ -28,12 +28,25 @@ tools/
                          STT/Ollama/VITS entirely — mic audio goes straight
                          back to the speaker. Use this to tell a network/
                          firmware problem apart from a model problem.
+  make_face_sprites.py  extracts the pixel-art face sheet into sprites.h
+  make_test_clip.sh     regenerates m5stick_speak_test's embedded voice clip
+  termux_relay.py        + termux_relay_setup.md — lets the Stick reach the
+                         laptop over Tailscale when they're not on the same
+                         Wi-Fi (runs on the phone, in Termux)
 
 firmware/
   m5stick_bridge/        the real push-to-talk firmware (talks to bridge_server.py)
   m5stick_echo_test/     mic -> speaker loopback, on-device only, no Wi-Fi at
                          all — the fastest way to sanity-check the hardware
                          (mic, codec, speaker, volume) in isolation
+  m5stick_speak_test/    plays one fixed pre-baked sentence (real Rina voice)
+                         on button press — isolates the speaker/volume path
+  m5stick_http_test/     standalone Wi-Fi/HTTP connectivity smoke test, no
+                         relation to the WebSocket protocol — GETs a plain
+                         HTTP server and reports Wi-Fi/TCP/HTTP status
+
+tests/                  pytest suite for voicepipe/ and bridge_server.py's
+                         wire protocol — see "Running the tests" below
 
 archive/                superseded experiments (OpenVoice, Kokoro) kept for reference
 VITS-Umamusume-voice-synthesizer/   cloned HF Space (model code + weights)
@@ -86,6 +99,15 @@ From most to least isolated:
 
 See `firmware/m5stick_bridge/include/secrets.h.example` for the Wi-Fi/server
 config the Stick needs (copy to `secrets.h`, gitignored).
+
+## Using the Stick away from the laptop
+
+By default the Stick and this laptop need to be on the same Wi-Fi (`WS_HOST`
+in `secrets.h` is the laptop's IP on that network). When they're not — the
+Stick and phone are elsewhere while the laptop stays put — see
+`tools/termux_relay_setup.md`: a small relay running on the phone (in Termux)
+forwards the Stick's WebSocket traffic to the laptop over Tailscale, so the
+Stick still only ever talks to a plain `ws://` address on its own hotspot.
 
 ## Setup
 
