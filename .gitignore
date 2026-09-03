@@ -5,3 +5,7 @@ __pycache__/
 
 # voice audition clips + ratings (local data)
 /voice_audition/
+
+# M5StickS3 firmware: PlatformIO build artifacts + real WiFi/host creds
+/firmware/*/.pio/
+/firmware/*/include/secrets.h

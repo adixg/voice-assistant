@@ -9,6 +9,7 @@
 faster-whisper==1.2.1        # pulls ctranslate2, tokenizers, onnxruntime (VAD), av, numpy
 ollama==0.6.2                # pulls httpx, pydantic
 PySide6==6.11.2              # the speech orb; pulls shiboken6
+websockets==15.0.1           # bridge_server.py talks to the M5StickS3 over this
 
 # CUDA runtime libs ctranslate2 dlopen()s for GPU whisper; chat_loop.py adds their
 # wheel dirs to LD_LIBRARY_PATH and re-execs once.  Harmless on a CPU-only box.
