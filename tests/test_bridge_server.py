@@ -6,27 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import bridge_server
-
-
-class FakeWebSocket:
-    """Stand-in for a websockets ServerConnection: async-iterable over a
-    preset message sequence, and collects everything sent back."""
-
-    def __init__(self, incoming=()):
-        self._incoming = list(incoming)
-        self.sent = []
-        self.remote_address = ("203.0.113.5", 12345)
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if not self._incoming:
-            raise StopAsyncIteration
-        return self._incoming.pop(0)
-
-    async def send(self, msg):
-        self.sent.append(msg)
+from conftest import FakeWebSocket
 
 
 def make_session(voice=None):
@@ -73,8 +53,9 @@ class TestHandleUtterance:
 
         await session.handle_utterance(ws, LOUD_PCM)
 
-        assert ws.sent[0] == "reply:hi, how are you"
-        assert ws.sent[1:-1] == [b"\x01\x02\x03\x04"]
+        assert ws.sent[0] == "heard:hello there"
+        assert ws.sent[1] == "reply:hi, how are you"
+        assert ws.sent[2:-1] == [b"\x01\x02\x03\x04"]
         assert ws.sent[-1] == "end"
         voice.synth.assert_called_once_with("hi, how are you")
         assert session.messages[-2:] == [
@@ -94,7 +75,7 @@ class TestHandleUtterance:
 
         await session.handle_utterance(ws, LOUD_PCM)
 
-        audio_frames = ws.sent[1:-1]
+        audio_frames = ws.sent[2:-1]
         assert len(audio_frames) == 2
         assert audio_frames[0] == big[:bridge_server.SEND_CHUNK]
         assert audio_frames[1] == big[bridge_server.SEND_CHUNK:]
@@ -107,7 +88,7 @@ class TestHandleUtterance:
 
         await session.handle_utterance(ws, LOUD_PCM)
 
-        assert ws.sent == ["reply:ok", "end"]
+        assert ws.sent == ["heard:hi", "reply:ok", "end"]
 
     async def test_ollama_error_reports_and_rolls_back_history(self, monkeypatch):
         session = make_session()
@@ -118,7 +99,7 @@ class TestHandleUtterance:
 
         await session.handle_utterance(ws, LOUD_PCM)
 
-        assert ws.sent == ["reply:(ollama error: connection refused)", "end"]
+        assert ws.sent == ["heard:hi", "reply:(ollama error: connection refused)", "end"]
         assert session.messages == before  # the user turn was rolled back, not left dangling
 
 

@@ -13,6 +13,9 @@ websockets==15.0.1           # bridge_server.py talks to the M5StickS3 over this
 
 pytest==8.3.5                 # tests/ — run with: pytest tests/
 pytest-asyncio==0.25.3        # for bridge_server.py's async handlers
+Pillow==11.1.0                 # only for tests/test_make_face_sprites.py; the tool itself
+scipy==1.15.3                  # is normally run standalone (see tools/make_face_sprites.py).
+                                # scipy is for its connected-component character detection.
 
 # CUDA runtime libs ctranslate2 dlopen()s for GPU whisper; chat_loop.py adds their
 # wheel dirs to LD_LIBRARY_PATH and re-execs once.  Harmless on a CPU-only box.

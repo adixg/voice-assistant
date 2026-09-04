@@ -10,3 +10,31 @@ imports bridge_server makes it a no-op here.
 import os
 
 os.environ["_VOICEPIPE_CUDA_REEXEC"] = "1"
+
+
+class FakeWebSocket:
+    """Stand-in for a websockets connection, shared by every wire-protocol
+    test (bridge_server.py, tools/echo_server.py, tools/termux_relay.py all
+    speak variants of the same start/binary/stop/reset framing): async-
+    iterable over a preset message sequence, and collects everything sent
+    back or closed."""
+
+    def __init__(self, incoming=()):
+        self._incoming = list(incoming)
+        self.sent = []
+        self.closed = False
+        self.remote_address = ("203.0.113.5", 12345)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._incoming:
+            raise StopAsyncIteration
+        return self._incoming.pop(0)
+
+    async def send(self, msg):
+        self.sent.append(msg)
+
+    async def close(self):
+        self.closed = True

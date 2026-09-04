@@ -7,8 +7,11 @@ version of this that skips STT/LLM/TTS entirely (mic straight back out) —
 useful for isolating a hardware/network problem from a model problem.
 
 Wire protocol (one persistent WS connection, PCM16 mono @ 16kHz both ways):
-  Stick -> server: text "start", then binary mic PCM chunks, then text "stop"
-  server -> Stick: text "reply:<text>", then binary reply PCM chunks, then text "end"
+  Stick -> server: text "start", then binary mic PCM chunks, then text "stop";
+                   or text "reset" any time, to clear conversation history
+  server -> Stick: text "heard:<transcript>" as soon as STT finishes, then
+                   text "reply:<text>", then binary reply PCM chunks, then
+                   text "end"
 
 Run in the `chat` conda env (same as chat_loop.py):
 
@@ -77,6 +80,11 @@ class Session:
             await ws.send("reply:(didn't catch that)")
             await ws.send("end")
             return
+
+        # Not truly live/word-by-word (faster-whisper transcribes the
+        # completed utterance, not a stream) — sent as soon as it's ready,
+        # which lands right as the Stick's UI moves from listening to thinking.
+        await ws.send(f"heard:{text}")
 
         self.messages.append({"role": "user", "content": text})
         try:
