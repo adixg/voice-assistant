@@ -12,7 +12,7 @@ changes: point it at the phone's own gateway IP (WiFi.gatewayIP() on the
 Stick) instead of the laptop's, then reflash. See
 tools/termux_relay_setup.md for the full procedure.
 
-    python termux_relay.py --laptop-host 100.70.0.38
+    python termux_relay.py --laptop-host main
 
 No conda env needed — stdlib + `websockets` only (pip install websockets
 inside Termux; see the setup doc).
@@ -21,6 +21,13 @@ import argparse
 import asyncio
 
 import websockets
+
+# Tailscale IPs of the machines that can run bridge_server.py — --laptop-host
+# takes either of these names or a raw IP (e.g. for a laptop not listed here).
+KNOWN_HOSTS = {
+    "main": "100.70.0.38",     # this laptop
+    "arch": "100.108.216.68",  # the other laptop
+}
 
 
 async def pump(src, dst):
@@ -64,10 +71,12 @@ async def main_async(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--laptop-host", required=True, help="laptop's Tailscale IP, e.g. 100.70.0.38")
+    ap.add_argument("--laptop-host", required=True,
+                     help=f"one of {sorted(KNOWN_HOSTS)}, or a raw Tailscale IP")
     ap.add_argument("--laptop-port", type=int, default=8765)
     ap.add_argument("--listen-port", type=int, default=8765, help="port the Stick connects to, on the phone")
     args = ap.parse_args()
+    args.laptop_host = KNOWN_HOSTS.get(args.laptop_host, args.laptop_host)
     try:
         asyncio.run(main_async(args))
     except KeyboardInterrupt:

@@ -68,7 +68,7 @@ pushed somewhere reachable, `adb push`, etc. — use whichever's easiest.)
 ## 3. Run it
 
 ```bash
-python ~/termux_relay.py --laptop-host 100.70.0.38
+python ~/termux_relay.py --laptop-host main
 ```
 
 Leave this running. You should see `listening on ws://0.0.0.0:8765/ ...`.
