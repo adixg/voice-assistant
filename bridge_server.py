@@ -24,14 +24,14 @@ Needs the `uma-tts` env for tts_cli.py (shelled out, same as chat_loop.py).
 import argparse
 import asyncio
 import os
-import sys
 import wave
 
 import websockets
 
-from voicepipe.llm import DEFAULT_SYSTEM, ask
-from voicepipe.stt import ensure_cuda_libs, load_stt, transcribe
-from voicepipe.tts import TMP, Voice
+from voicepipe.llm import DEFAULT_PERSONA, PERSONAS  # also registers the "ollama" LLM backend
+from voicepipe.registry import LLM, STT, TTS
+from voicepipe.stt import ensure_cuda_libs  # also registers the "faster-whisper" STT backend
+from voicepipe.tts import TMP  # also registers the "vits" TTS backend
 
 ensure_cuda_libs()
 
@@ -54,8 +54,8 @@ async def resample_to_pcm16(wav_path):
 class Session:
     """One M5StickS3's conversation state (this bridge assumes a single Stick)."""
 
-    def __init__(self, client, stt, stt_lang, voice, args):
-        self.client = client
+    def __init__(self, llm, stt, stt_lang, voice, args):
+        self.llm = llm
         self.stt = stt
         self.stt_lang = stt_lang
         self.voice = voice
@@ -74,7 +74,7 @@ class Session:
             w.setframerate(SAMPLE_RATE)
             w.writeframes(pcm)
 
-        text = transcribe(self.stt, wav_in, self.stt_lang)
+        text = self.stt.transcribe(wav_in, self.stt_lang)
         print(f"  you said: {text or '(nothing heard)'}")
         if not text:
             await ws.send("reply:(didn't catch that)")
@@ -88,12 +88,11 @@ class Session:
 
         self.messages.append({"role": "user", "content": text})
         try:
-            reply = ask(self.client, self.args.model, self.messages,
-                        None if self.args.think else False)
+            reply = self.llm.ask(self.messages, None if self.args.think else False)
         except Exception as e:  # noqa: BLE001
             self.messages.pop()
-            print(f"  ! ollama error: {e}")
-            await ws.send(f"reply:(ollama error: {e})")
+            print(f"  ! llm error: {e}")
+            await ws.send(f"reply:(llm error: {e})")
             await ws.send("end")
             return
         self.messages.append({"role": "assistant", "content": reply})
@@ -131,33 +130,20 @@ async def handle_client(ws, session):
 
 
 async def main_async(args):
-    import socket
-    from urllib.parse import urlparse
-    import ollama
+    llm = LLM.create(args.llm_backend, host=args.host, model=args.model)
+    if hasattr(llm, "check"):
+        llm.check()
 
-    u = urlparse(args.host)
-    try:
-        with socket.create_connection((u.hostname, u.port or 11434), timeout=4):
-            pass
-    except OSError as e:
-        print(f"  ! can't reach {args.host}: {e}")
-        sys.exit(1)
-
-    client = ollama.Client(host=args.host, timeout=120)
-    names = [m.model for m in client.list().models]
-    print(f"  ollama @ {args.host} — {len(names)} models")
-    if args.model not in names and f"{args.model}:latest" not in names:
-        print(f"  ! '{args.model}' not found. available: {', '.join(names) or '(none)'}")
-
-    stt = load_stt(args.whisper_model, args.whisper_device)
+    stt = STT.create(args.stt_backend, model=args.whisper_model, device=args.whisper_device)
     stt_lang = None if args.stt_lang == "auto" else args.stt_lang
 
     voice = None
     if not args.no_voice:
-        voice = Voice(args)
-        voice.start()
+        voice = TTS.create(args.tts_backend, args)
+        if hasattr(voice, "start"):
+            voice.start()
 
-    session = Session(client, stt, stt_lang, voice, args)
+    session = Session(llm, stt, stt_lang, voice, args)
 
     print(f"  listening on ws://{args.ws_host}:{args.ws_port} — waiting for the Stick...", flush=True)
     async with websockets.serve(lambda ws: handle_client(ws, session),
@@ -170,9 +156,15 @@ def main():
     ap.add_argument("--host", default=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
                      help="Ollama base URL (env OLLAMA_HOST), e.g. http://media:11434")
     ap.add_argument("--model", default="rina", help="Ollama model name (default: rina)")
-    ap.add_argument("--system", default=DEFAULT_SYSTEM,
-                     help="system prompt (defaults to the Rina persona); pass --system '' to send none")
+    ap.add_argument("--persona", default=DEFAULT_PERSONA, choices=sorted(PERSONAS),
+                     help=f"built-in system prompt: 'partner' (romantic companion) or "
+                          f"'assistant' (neutral helper) (default: {DEFAULT_PERSONA})")
+    ap.add_argument("--system", default=None,
+                     help="override --persona with a custom system prompt; pass --system '' to send none")
     ap.add_argument("--think", action="store_true")
+    ap.add_argument("--llm-backend", default="ollama", choices=LLM.names())
+    ap.add_argument("--stt-backend", default="faster-whisper", choices=STT.names())
+    ap.add_argument("--tts-backend", default="vits", choices=TTS.names())
     ap.add_argument("--whisper-model", default="small")
     ap.add_argument("--whisper-device", default="auto", choices=["auto", "cpu", "cuda"])
     ap.add_argument("--stt-lang", default="en")
@@ -184,6 +176,8 @@ def main():
     ap.add_argument("--ws-host", default="0.0.0.0", help="bind address for the Stick's WebSocket")
     ap.add_argument("--ws-port", type=int, default=8765)
     args = ap.parse_args()
+    if args.system is None:
+        args.system = PERSONAS[args.persona]
 
     try:
         asyncio.run(main_async(args))

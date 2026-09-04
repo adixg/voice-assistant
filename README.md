@@ -10,10 +10,15 @@ an M5StickS3 over Wi-Fi (`bridge_server.py` + `firmware/m5stick_bridge/`).
 voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
                        CLI, no audio I/O assumptions. This is the thing to
                        import when debugging "is it the speech pipeline?"
-  stt.py                 faster-whisper load/transcribe
-  llm.py                 ollama ask() + the default persona
-  tts.py                 VITS worker wrapper (Voice.synth() -> wav paths)
-  audio.py               local mic/speaker helpers (pulse/ffplay), used by
+  registry.py             STTBackend/LLMBackend/TTSBackend interfaces + a
+                          name -> factory registry (see "Swapping backends"
+                          below) — stt.py/llm.py/tts.py each register their
+                          backend as a side effect of being imported
+  stt.py                  faster-whisper load/transcribe, + FasterWhisperSTT
+  llm.py                  ollama ask() + the default persona, + OllamaLLM
+  tts.py                   VITS worker wrapper (Voice.synth() -> wav paths),
+                          registered directly as the "vits" TTS backend
+  audio.py                local mic/speaker helpers (pulse/ffplay), used by
                           chat_loop.py only — bridge_server.py's audio comes
                           over a WebSocket instead
 
@@ -72,6 +77,38 @@ What's deliberately **not** covered: `voicepipe.stt.load_stt`/`transcribe`
 test ESP32/M5Unified C++ without a hardware simulator or a large native-mock
 scaffold — not worth building for a project this size). The three-tier
 hardware test path below is the practical equivalent for the firmware side.
+
+## Swapping backends
+
+`chat_loop.py` and `bridge_server.py` don't import a concrete STT/LLM/TTS
+implementation — they ask `voicepipe.registry` for one by name:
+
+```bash
+python chat_loop.py --llm-backend ollama --stt-backend faster-whisper --tts-backend vits
+```
+
+Those are the only backends registered today (hence the only `--help`
+choices), but adding one is just a class + a registration call, e.g. in a new
+`voicepipe/hermes.py`:
+
+```python
+from voicepipe.registry import LLM
+
+class HermesLLM:
+    def ask(self, messages, think=None):
+        ...  # e.g. an Ollama call with tools=[...] and a tool-execution loop
+    def check(self):  # optional — see OllamaLLM.check() for the pattern
+        ...
+
+LLM.register("hermes")(HermesLLM)
+```
+
+Import that module once (from an entrypoint, or add it next to the other
+`from voicepipe.llm import ...` lines) and `--llm-backend hermes` becomes a
+valid choice — nothing else in `chat_loop.py`/`bridge_server.py` changes. The
+interfaces (`STTBackend.transcribe`, `LLMBackend.ask`, `TTSBackend.synth`/
+`close`) are structural (`typing.Protocol`), so a backend class doesn't need
+to inherit from anything, just match the method(s).
 
 ## Debugging the speech pipeline
 

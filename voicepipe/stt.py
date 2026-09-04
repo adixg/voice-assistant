@@ -8,6 +8,8 @@ import sys
 import tempfile
 import wave
 
+from .registry import STT
+
 TMP = tempfile.gettempdir()
 
 
@@ -75,6 +77,20 @@ def load_stt(model_name, want_device):
 def transcribe(model, path, lang):
     segs, _ = model.transcribe(path, language=lang or None, vad_filter=True)
     return " ".join(s.text.strip() for s in segs).strip()
+
+
+class FasterWhisperSTT:
+    """STTBackend: faster-whisper. Loads the model once at construction (see
+    load_stt() above for the cuda->cpu fallback)."""
+
+    def __init__(self, model="small", device="auto"):
+        self.model = load_stt(model, device)
+
+    def transcribe(self, wav_path, lang):
+        return transcribe(self.model, wav_path, lang)
+
+
+STT.register("faster-whisper")(FasterWhisperSTT)
 
 
 if __name__ == "__main__":

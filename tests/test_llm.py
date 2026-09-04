@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from voicepipe.llm import ask, strip_think
+from voicepipe.llm import OllamaLLM, ask, strip_think
 
 
 class TestStripThink:
@@ -68,3 +68,28 @@ class TestAsk:
         chat = Mock(return_value={"message": {"content": "<think>hmm</think>final answer"}})
         client = self._client(chat)
         assert ask(client, "rina", [], think=None) == "final answer"
+
+
+class TestOllamaLLM:
+    """The LLMBackend wrapper: a bound client + model, delegating to ask()
+    above. `client` is injected so this never needs the real `ollama`
+    package or a reachable server."""
+
+    def test_ask_delegates_to_the_bound_client_and_model(self):
+        chat = Mock(return_value={"message": {"content": "hi"}})
+        backend = OllamaLLM(model="rina", client=Mock(chat=chat))
+
+        result = backend.ask([{"role": "user", "content": "hey"}], think=False)
+
+        assert result == "hi"
+        chat.assert_called_once_with(
+            model="rina", messages=[{"role": "user", "content": "hey"}], think=False
+        )
+
+    def test_default_think_is_none_so_no_kwarg_is_sent(self):
+        chat = Mock(return_value={"message": {"content": "hi"}})
+        backend = OllamaLLM(model="rina", client=Mock(chat=chat))
+
+        backend.ask([])
+
+        chat.assert_called_once_with(model="rina", messages=[])

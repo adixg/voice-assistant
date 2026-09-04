@@ -9,6 +9,8 @@ import re
 import subprocess
 import tempfile
 
+from .registry import TTS
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
 UMA_PY = os.path.expanduser("~/anaconda3/envs/uma-tts/bin/python")
 TTS_CLI = os.path.join(HERE, "tts_cli.py")
@@ -105,6 +107,10 @@ class Voice:
             except OSError:
                 pass
             self.p.terminate()
+
+
+# Voice already has the TTSBackend shape (synth/close); no wrapper needed.
+TTS.register("vits")(Voice)
 
 
 if __name__ == "__main__":

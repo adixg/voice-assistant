@@ -11,7 +11,7 @@ from conftest import FakeWebSocket
 
 def make_session(voice=None):
     args = SimpleNamespace(model="rina", system="be nice", think=False)
-    return bridge_server.Session(client=Mock(), stt=Mock(), stt_lang="en", voice=voice, args=args)
+    return bridge_server.Session(llm=Mock(), stt=Mock(), stt_lang="en", voice=voice, args=args)
 
 
 # a couple bytes over MIN_UTTERANCE_BYTES so the length gate in
@@ -20,20 +20,18 @@ LOUD_PCM = b"\x10\x00" * (bridge_server.MIN_UTTERANCE_BYTES // 2 + 100)
 
 
 class TestHandleUtterance:
-    async def test_short_utterance_is_ignored(self, monkeypatch):
+    async def test_short_utterance_is_ignored(self):
         session = make_session()
-        transcribe = Mock()
-        monkeypatch.setattr(bridge_server, "transcribe", transcribe)
         ws = FakeWebSocket()
 
         await session.handle_utterance(ws, b"\x00\x00")  # well under MIN_UTTERANCE_BYTES
 
-        transcribe.assert_not_called()
+        session.stt.transcribe.assert_not_called()
         assert ws.sent == []
 
-    async def test_nothing_heard_sends_apology_and_no_history_change(self, monkeypatch):
+    async def test_nothing_heard_sends_apology_and_no_history_change(self):
         session = make_session()
-        monkeypatch.setattr(bridge_server, "transcribe", Mock(return_value=""))
+        session.stt.transcribe = Mock(return_value="")
         ws = FakeWebSocket()
         before = list(session.messages)
 
@@ -46,8 +44,8 @@ class TestHandleUtterance:
         voice = Mock()
         voice.synth = Mock(return_value=["/tmp/reply_0.wav"])
         session = make_session(voice=voice)
-        monkeypatch.setattr(bridge_server, "transcribe", Mock(return_value="hello there"))
-        monkeypatch.setattr(bridge_server, "ask", Mock(return_value="hi, how are you"))
+        session.stt.transcribe = Mock(return_value="hello there")
+        session.llm.ask = Mock(return_value="hi, how are you")
         monkeypatch.setattr(bridge_server, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02\x03\x04"))
         ws = FakeWebSocket()
 
@@ -68,8 +66,8 @@ class TestHandleUtterance:
         voice.synth = Mock(return_value=["/tmp/reply_0.wav"])
         session = make_session(voice=voice)
         big = b"\x00" * (bridge_server.SEND_CHUNK + 500)
-        monkeypatch.setattr(bridge_server, "transcribe", Mock(return_value="hi"))
-        monkeypatch.setattr(bridge_server, "ask", Mock(return_value="ok"))
+        session.stt.transcribe = Mock(return_value="hi")
+        session.llm.ask = Mock(return_value="ok")
         monkeypatch.setattr(bridge_server, "resample_to_pcm16", AsyncMock(return_value=big))
         ws = FakeWebSocket()
 
@@ -80,26 +78,26 @@ class TestHandleUtterance:
         assert audio_frames[0] == big[:bridge_server.SEND_CHUNK]
         assert audio_frames[1] == big[bridge_server.SEND_CHUNK:]
 
-    async def test_no_voice_sends_no_audio(self, monkeypatch):
+    async def test_no_voice_sends_no_audio(self):
         session = make_session(voice=None)
-        monkeypatch.setattr(bridge_server, "transcribe", Mock(return_value="hi"))
-        monkeypatch.setattr(bridge_server, "ask", Mock(return_value="ok"))
+        session.stt.transcribe = Mock(return_value="hi")
+        session.llm.ask = Mock(return_value="ok")
         ws = FakeWebSocket()
 
         await session.handle_utterance(ws, LOUD_PCM)
 
         assert ws.sent == ["heard:hi", "reply:ok", "end"]
 
-    async def test_ollama_error_reports_and_rolls_back_history(self, monkeypatch):
+    async def test_llm_error_reports_and_rolls_back_history(self):
         session = make_session()
-        monkeypatch.setattr(bridge_server, "transcribe", Mock(return_value="hi"))
-        monkeypatch.setattr(bridge_server, "ask", Mock(side_effect=RuntimeError("connection refused")))
+        session.stt.transcribe = Mock(return_value="hi")
+        session.llm.ask = Mock(side_effect=RuntimeError("connection refused"))
         ws = FakeWebSocket()
         before = list(session.messages)
 
         await session.handle_utterance(ws, LOUD_PCM)
 
-        assert ws.sent == ["heard:hi", "reply:(ollama error: connection refused)", "end"]
+        assert ws.sent == ["heard:hi", "reply:(llm error: connection refused)", "end"]
         assert session.messages == before  # the user turn was rolled back, not left dangling
 
 

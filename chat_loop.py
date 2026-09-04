@@ -32,9 +32,10 @@ import threading
 import time
 
 from voicepipe.audio import Hooks, record
-from voicepipe.llm import DEFAULT_SYSTEM, ask
-from voicepipe.stt import ensure_cuda_libs, load_stt, transcribe
-from voicepipe.tts import Voice
+from voicepipe.llm import DEFAULT_PERSONA, PERSONAS  # also registers the "ollama" LLM backend
+from voicepipe.registry import LLM, STT, TTS
+from voicepipe.stt import ensure_cuda_libs  # also registers the "faster-whisper" STT backend
+import voicepipe.tts  # noqa: F401 - also registers the "vits" TTS backend
 
 TMP = tempfile.gettempdir()
 
@@ -67,7 +68,7 @@ def _stdin_pump(gate):
 
 
 # ---------------------------------------------------------------- conversation
-def converse(client, stt, stt_lang, voice, args, hooks, gate=None):
+def converse(llm, stt, stt_lang, voice, args, hooks, gate=None):
     """The blocking talk/listen/think/speak loop. Runs on the main thread when
     headless, or on a worker thread when the orb window is up. Input lines come
     through `gate` — fed by a stdin reader and, in orb mode, the orb's Enter key."""
@@ -116,7 +117,7 @@ def converse(client, stt, stt_lang, voice, args, hooks, gate=None):
             wav = record(os.path.join(TMP, "chat_in.wav"), hooks, gate)
             hooks.state("thinking")
             t0 = time.time()
-            user_text = transcribe(stt, wav, stt_lang)
+            user_text = stt.transcribe(wav, stt_lang)
             print(f"  you said ({time.time()-t0:.1f}s): {user_text or '(nothing heard)'}")
             if not user_text:
                 hooks.state("idle")
@@ -128,9 +129,9 @@ def converse(client, stt, stt_lang, voice, args, hooks, gate=None):
         hooks.state("thinking")
         messages.append({"role": "user", "content": user_text})
         try:
-            reply = ask(client, args.model, messages, None if args.think else False)
+            reply = llm.ask(messages, None if args.think else False)
         except Exception as e:  # noqa: BLE001
-            print(f"  ! ollama error: {e}")
+            print(f"  ! llm error: {e}")
             messages.pop()
             hooks.state("idle")
             continue
@@ -145,7 +146,7 @@ def converse(client, stt, stt_lang, voice, args, hooks, gate=None):
         voice.close()
 
 
-def run_with_orb(client, stt, stt_lang, voice, args):
+def run_with_orb(llm, stt, stt_lang, voice, args):
     """Show the speech orb on the main thread; run `converse` on a worker."""
     from PySide6.QtCore import QObject, QThread, QTimer, Signal
     from PySide6.QtWidgets import QApplication
@@ -188,7 +189,7 @@ def run_with_orb(client, stt, stt_lang, voice, args):
 
     class Worker(QThread):
         def run(self):
-            converse(client, stt, stt_lang, voice, args, hooks, gate)
+            converse(llm, stt, stt_lang, voice, args, hooks, gate)
 
     def shutdown():
         try:
@@ -215,11 +216,20 @@ def main():
     ap.add_argument("--host", default=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
                     help="Ollama base URL (env OLLAMA_HOST), e.g. http://media:11434")
     ap.add_argument("--model", default="rina", help="Ollama model name (default: rina)")
-    ap.add_argument("--system", default=DEFAULT_SYSTEM,
-                    help="system prompt (defaults to the Rina persona); pass --system '' to send none, "
-                         "e.g. when the Ollama model already has its own persona")
+    ap.add_argument("--persona", default=DEFAULT_PERSONA, choices=sorted(PERSONAS),
+                    help=f"built-in system prompt: 'partner' (romantic companion) or "
+                         f"'assistant' (neutral helper) (default: {DEFAULT_PERSONA})")
+    ap.add_argument("--system", default=None,
+                    help="override --persona with a custom system prompt; pass --system '' to send "
+                         "none at all, e.g. when the Ollama model already has its own persona")
     ap.add_argument("--think", action="store_true",
                     help="let reasoning models (qwen3, r1...) do their <think> pass — more coherent, much slower")
+    ap.add_argument("--llm-backend", default="ollama", choices=LLM.names(),
+                    help="LLM backend (default: ollama)")
+    ap.add_argument("--stt-backend", default="faster-whisper", choices=STT.names(),
+                    help="STT backend (default: faster-whisper)")
+    ap.add_argument("--tts-backend", default="vits", choices=TTS.names(),
+                    help="TTS backend (default: vits)")
     ap.add_argument("--whisper-model", default="small", help="faster-whisper size (tiny/base/small/medium/large-v3)")
     ap.add_argument("--whisper-device", default="auto", choices=["auto", "cpu", "cuda"])
     ap.add_argument("--stt-lang", default="en",
@@ -235,48 +245,31 @@ def main():
     ap.add_argument("--no-orb", action="store_true",
                     help="don't show the animated speech orb (also skipped when no display / PySide6)")
     args = ap.parse_args()
+    if args.system is None:
+        args.system = PERSONAS[args.persona]
 
-    import socket
-    from urllib.parse import urlparse
-    import ollama
+    llm = LLM.create(args.llm_backend, host=args.host, model=args.model)
+    if hasattr(llm, "check"):
+        llm.check()
 
-    u = urlparse(args.host)
-    try:
-        with socket.create_connection((u.hostname, u.port or 11434), timeout=4):
-            pass
-    except OSError as e:
-        print(f"  ! can't reach {args.host}: {e}")
-        print("    check `tailscale status` (peer online?) and that `ollama serve` is up there,")
-        print("    and that OLLAMA_HOST=0.0.0.0 on that box so it listens on the tailnet.")
-        sys.exit(1)
-
-    client = ollama.Client(host=args.host, timeout=120)
-    try:
-        names = [m.model for m in client.list().models]
-        print(f"  ollama @ {args.host} — {len(names)} models")
-        if args.model not in names and f"{args.model}:latest" not in names:
-            print(f"  ! '{args.model}' not found. available: {', '.join(names) or '(none)'}")
-    except Exception as e:  # noqa: BLE001
-        print(f"  ! ollama on {args.host} answered but /api/tags failed: {e}")
-        sys.exit(1)
-
-    stt = load_stt(args.whisper_model, args.whisper_device)
+    stt = STT.create(args.stt_backend, model=args.whisper_model, device=args.whisper_device)
     stt_lang = None if args.stt_lang == "auto" else args.stt_lang
 
     voice = None
     if not args.no_voice:
-        voice = Voice(args)
-        voice.start()  # pay the model-load cost now, not on the first reply
+        voice = TTS.create(args.tts_backend, args)
+        if hasattr(voice, "start"):
+            voice.start()  # pay the model-load cost now, not on the first reply
 
     want_orb = not args.no_orb and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
     if want_orb:
         try:
-            run_with_orb(client, stt, stt_lang, voice, args)
+            run_with_orb(llm, stt, stt_lang, voice, args)
             return
         except ImportError as e:
             print(f"  (orb off: {e}); running in the terminal only")
 
-    converse(client, stt, stt_lang, voice, args, Hooks())
+    converse(llm, stt, stt_lang, voice, args, Hooks())
 
 
 if __name__ == "__main__":
