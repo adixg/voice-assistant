@@ -1,8 +1,104 @@
 # aigf
 
-A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → VITS-Umamusume (TTS) → speaker.
+A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → Chatterbox Turbo (TTS) → speaker.
 Runs either through this machine's local mic/speaker (`chat_loop.py`) or through
-an M5StickS3 over Wi-Fi (`bridge_server.py` + `firmware/m5stick_bridge/`).
+an M5StickS3 over Wi-Fi (`bridge_server.py` + `firmware/m5stick_bridge/`). TTS is
+swappable (`--tts-backend chatterbox` (default) or `vits`, the older
+VITS-Umamusume synthesizer) — see "Swapping backends" below.
+
+## Architecture
+
+Two entrypoints share one pipeline. They differ only in where audio comes from
+and goes back to — everything below the dashed line is identical for both.
+
+```mermaid
+flowchart TB
+    stick["<b>M5StickS3</b><br>push-to-talk, mic + speaker<br>240×135 pixel-art UI"]
+    local["<b>Local mic + speaker</b><br>ffmpeg / ffplay"]
+
+    relay["<b>tools/termux_relay.py</b><br>on the phone, in Termux<br>picks which laptop"]
+
+    bridge["<b>bridge_server.py</b><br>WebSocket server<br>PCM16 mono @ 16 kHz"]
+    loop["<b>chat_loop.py</b><br>terminal + speech orb"]
+
+    cli["<b>voicepipe/cli.py</b><br>shared flags, assembled<br>from the registries"]
+    reg{{"<b>voicepipe/registry.py</b><br>STT / LLM / TTS<br>name → backend"}}
+
+    stt["backends/whisper.py<br><i>faster-whisper, GPU</i>"]
+    llmb["backends/ollama.py"]
+    cbb["backends/chatterbox.py"]
+    vitsb["backends/vits.py"]
+
+    ollama[("<b>Ollama</b><br>rina model")]
+    cbw["<b>chatterbox_cli.py --serve</b><br>chatterbox-tts env, GPU<br>voice cloned from a<br>reference clip"]
+    vitsw["<b>tts_cli.py --serve</b><br>uma-tts env, CPU"]
+
+    stick <-->|"Wi-Fi hotspot"| relay
+    relay <-->|"Tailscale"| bridge
+    local <--> loop
+
+    bridge --> cli
+    loop --> cli
+    cli --> reg
+    reg --> stt
+    reg --> llmb
+    reg --> cbb
+    reg --> vitsb
+
+    llmb -->|HTTP| ollama
+    cbb -->|"stdin/stdout<br>line protocol"| cbw
+    vitsb -->|"stdin/stdout<br>line protocol"| vitsw
+
+    classDef device fill:#eff1f5,stroke:#7287fd,stroke-width:2px,color:#4c4f69
+    classDef entry fill:#e6e9ef,stroke:#8839ef,stroke-width:2px,color:#4c4f69
+    classDef core fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
+    classDef backend fill:#eff1f5,stroke:#40a02b,color:#4c4f69
+    classDef worker fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
+    class stick,local,relay device
+    class bridge,loop entry
+    class cli,reg core
+    class stt,llmb,cbb,vitsb backend
+    class ollama,cbw,vitsw worker
+```
+
+The heavy TTS models each run in their **own conda env** as a long-lived
+subprocess, because their torch/CUDA pins conflict with each other and with
+the `chat` env. `voicepipe/subproc.py` owns that plumbing, so a backend only
+declares the command to run. faster-whisper and Ollama need no such isolation
+— whisper runs in-process, Ollama is just HTTP.
+
+One turn over the Stick's WebSocket, including where the on-device UI changes
+state:
+
+```mermaid
+sequenceDiagram
+    participant S as M5StickS3
+    participant B as bridge_server.py
+    participant W as whisper
+    participant O as Ollama
+    participant T as TTS worker
+
+    Note over S: BtnA held → listening
+    S->>B: "start"
+    S->>B: mic PCM chunks
+    Note over S: release → thinking
+    S->>B: "stop"
+    B->>W: utterance.wav
+    W-->>B: transcript
+    B->>S: "heard:<transcript>"
+    B->>O: messages + system prompt
+    O-->>B: reply text
+    B->>S: "reply:<text>"
+    Note over S: speaking
+    B->>T: text (one line per chunk)
+    T-->>B: wav paths
+    B->>S: reply PCM chunks
+    B->>S: "end"
+    Note over S: idle
+```
+
+Every turn sends exactly one `end`, including failures — the Stick stays in
+its speaking state until it arrives.
 
 ## Layout
 
@@ -10,30 +106,62 @@ an M5StickS3 over Wi-Fi (`bridge_server.py` + `firmware/m5stick_bridge/`).
 voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
                        CLI, no audio I/O assumptions. This is the thing to
                        import when debugging "is it the speech pipeline?"
-  registry.py             STTBackend/LLMBackend/TTSBackend interfaces + a
-                          name -> factory registry (see "Swapping backends"
-                          below) — stt.py/llm.py/tts.py each register their
-                          backend as a side effect of being imported
-  stt.py                  faster-whisper load/transcribe, + FasterWhisperSTT
-  llm.py                  ollama ask() + the default persona, + OllamaLLM
-  tts.py                   VITS worker wrapper (Voice.synth() -> wav paths),
-                          registered directly as the "vits" TTS backend
+  registry.py             STTBackend/LLMBackend/TTSBackend interfaces + the
+                          name -> backend registry, including the per-backend
+                          CLI plumbing (see "Swapping backends" below)
+  backends/               the concrete engines, one file each, discovered
+                          automatically — adding a file here is all it takes
+    whisper.py              faster-whisper           ("faster-whisper", STT)
+    ollama.py               Ollama chat + check()    ("ollama", LLM)
+    hermes_agent.py         Hermes Agent, or any OpenAI-compatible
+                            endpoint (OpenRouter, vLLM, llama.cpp,
+                            LM Studio, LiteLLM)      ("hermes-agent", LLM)
+    chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS, default)
+    vits.py                 VITS-Umamusume           ("vits", TTS)
+  cli.py                  the flags every entrypoint shares, assembled from
+                          the registries — this is why no entrypoint mentions
+                          a concrete backend
+  __main__.py             `python -m voicepipe speak/transcribe/ask`, for
+                          running one stage on its own
+  subproc.py              shared worker plumbing for engines that live in
+                          their own conda env (spawn, handshake, teardown)
+  text.py                 sentence-aware chunking, shared by every TTS backend
+  personas.py             the built-in system prompts
+  encouragement.py        the unprompted lines behind `--encourage`
   audio.py                local mic/speaker helpers (pulse/ffplay), used by
                           chat_loop.py only — bridge_server.py's audio comes
                           over a WebSocket instead
+  cuda.py                 LD_LIBRARY_PATH setup for GPU whisper
 
 chat_loop.py           local-mic terminal (+ optional "speech orb" GUI) entrypoint
 bridge_server.py       M5StickS3 WebSocket bridge entrypoint
-tts_cli.py              headless VITS worker, shelled out to from voicepipe.tts
-                         (own conda env, see requirements-uma-tts.txt)
-speech_orb.py           the animated PySide6 orb chat_loop.py shows
+chatterbox_cli.py       headless Chatterbox Turbo worker, shelled out to from
+                         backends/chatterbox.py (own conda env, see
+                         requirements-chatterbox.txt) — default TTS backend
+tts_cli.py              headless VITS worker, shelled out to from
+                         backends/vits.py (own conda env, see
+                         requirements-uma-tts.txt) — --tts-backend vits
+speech_orb.py           the desktop face chat_loop.py shows — a port of the
+                         Stick's own UI (same sprites, palette, particle
+                         field and waveform bars), not a lookalike
+
+assets/sprites/         the extracted pixel art, written by
+                         tools/make_face_sprites.py alongside sprites.h —
+                         the same crops, as PNGs, for speech_orb.py
+
+memory/about-me.md      hand-written facts about you, appended to the system
+                         prompt every conversation so she doesn't have to be
+                         told them again (--profile / --no-profile)
 
 tools/
   echo_server.py        same WebSocket protocol as bridge_server.py, but skips
                          STT/Ollama/VITS entirely — mic audio goes straight
                          back to the speaker. Use this to tell a network/
                          firmware problem apart from a model problem.
-  make_face_sprites.py  extracts the pixel-art face sheet into sprites.h
+  make_face_sprites.py  extracts the pixel-art face sheet into both
+                         firmware/.../sprites.h (RGB565) and assets/sprites/
+                         (PNGs) — one run, one set of crops, so the Stick and
+                         speech_orb.py can't drift apart
   make_test_clip.sh     regenerates m5stick_speak_test's embedded voice clip
   termux_relay.py        + termux_relay_setup.md — lets the Stick reach the
                          laptop over Tailscale when they're not on the same
@@ -64,62 +192,135 @@ conda activate chat
 pytest tests/
 ```
 
-Covers the pure/mockable logic: `voicepipe.llm` (`strip_think`, `ask` against a
-mocked Ollama client), `voicepipe.audio` (`_rms16`), `voicepipe.tts` (`chunks`),
-and `bridge_server.py`'s wire protocol (`Session.handle_utterance`,
-`handle_client`) with STT/LLM/TTS and the WebSocket mocked out — no GPU, model,
-or network needed, runs in well under a second. Run it after any change to
-`voicepipe/` or `bridge_server.py`.
+Covers the pure and mockable logic: the backend registry and its CLI plumbing,
+`voicepipe.text` (chunking), `voicepipe.personas`, `voicepipe.backends.ollama`
+(`strip_think`, `ask`/`check` against a mocked client), `voicepipe.audio`
+(`_rms16`), `voicepipe.subproc` (the worker lifecycle, against a fake worker
+script), and `bridge_server.py`'s wire protocol with STT/LLM/TTS and the
+WebSocket mocked out — no GPU, model, or network needed, runs in about a
+second. Run it after any change to `voicepipe/` or `bridge_server.py`.
 
-What's deliberately **not** covered: `voicepipe.stt.load_stt`/`transcribe`
-(needs a real faster-whisper model), `voicepipe.tts.Voice` (needs the real
-`uma-tts` subprocess), and anything in `firmware/` (no practical way to unit
-test ESP32/M5Unified C++ without a hardware simulator or a large native-mock
-scaffold — not worth building for a project this size). The three-tier
-hardware test path below is the practical equivalent for the firmware side.
+What's deliberately **not** covered: loading a real faster-whisper, VITS or
+Chatterbox model (each needs its own conda env and a GPU), and anything in
+`firmware/` (no practical way to unit test ESP32/M5Unified C++ without a
+hardware simulator or a large native-mock scaffold — not worth building for a
+project this size). The three-tier hardware test path below is the practical
+equivalent for the firmware side.
 
 ## Swapping backends
 
-`chat_loop.py` and `bridge_server.py` don't import a concrete STT/LLM/TTS
+`chat_loop.py` and `bridge_server.py` never name a concrete STT/LLM/TTS
 implementation — they ask `voicepipe.registry` for one by name:
 
 ```bash
-python chat_loop.py --llm-backend ollama --stt-backend faster-whisper --tts-backend vits
+python chat_loop.py --llm-backend ollama --stt-backend faster-whisper --tts-backend chatterbox
 ```
 
-Those are the only backends registered today (hence the only `--help`
-choices), but adding one is just a class + a registration call, e.g. in a new
-`voicepipe/hermes.py`:
+**Adding a backend is one file.** Drop it in `voicepipe/backends/` and it is
+discovered, registered, listed in `--help`, and constructible with no edit to
+any entrypoint:
 
 ```python
+# voicepipe/backends/hermes.py
 from voicepipe.registry import LLM
 
+@LLM.register("hermes")
 class HermesLLM:
+    @staticmethod
+    def add_arguments(group):        # optional: your own CLI flags
+        group.add_argument("--hermes-tools", default="all")
+
+    @classmethod
+    def from_args(cls, args):        # optional: build from those flags
+        return cls(tools=args.hermes_tools)
+
+    def __init__(self, tools="all"):
+        self.tools = tools
+
     def ask(self, messages, think=None):
         ...  # e.g. an Ollama call with tools=[...] and a tool-execution loop
-    def check(self):  # optional — see OllamaLLM.check() for the pattern
-        ...
-
-LLM.register("hermes")(HermesLLM)
 ```
 
-Import that module once (from an entrypoint, or add it next to the other
-`from voicepipe.llm import ...` lines) and `--llm-backend hermes` becomes a
-valid choice — nothing else in `chat_loop.py`/`bridge_server.py` changes. The
-interfaces (`STTBackend.transcribe`, `LLMBackend.ask`, `TTSBackend.synth`/
-`close`) are structural (`typing.Protocol`), so a backend class doesn't need
-to inherit from anything, just match the method(s).
+`--llm-backend hermes` is now a valid choice everywhere, `--hermes-tools`
+shows up under its own heading in `--help`, and `python -m voicepipe ask
+--llm-backend hermes` works too. The interfaces (`STTBackend.transcribe`,
+`LLMBackend.ask`, `TTSBackend.synth`/`close`) are structural
+(`typing.Protocol`), so a backend inherits from nothing — it just needs the
+methods. Backends take ordinary keyword arguments rather than an argparse
+namespace, so they stay usable from plain Python; `from_args` is only the
+adapter between the two.
+
+A TTS engine that needs its own conda env (conflicting torch/CUDA pins, as
+both current ones have) gets the subprocess plumbing for free by subclassing
+`voicepipe.subproc.WorkerVoice` and implementing one method:
+
+```python
+@TTS.register("piper")
+class PiperVoice(WorkerVoice):
+    name = "piper"
+
+    def command(self):
+        return [PIPER_PYTHON, PIPER_CLI, "--serve", "--voice", self.voice]
+```
+
+## Unprompted lines
+
+Nothing in the wire protocol cares who started a turn, so the server can speak
+without the button being pressed — no firmware change needed.
+
+```bash
+python tools/say.py "the build finished"      # one-off, via the announce socket
+
+python bridge_server.py --encourage           # a line of encouragement every 15-20 min
+python bridge_server.py --encourage --encourage-interval 30 45
+```
+
+TTS audio is run through ffmpeg's `speechnorm` before it reaches the Stick —
+the speaker is already at full volume, but the synthesizer leaves several dB
+of headroom unused (a measured reply went from -4.5 dB peak to -0.4 dB).
+`--no-normalize` sends it raw.
+
+The encouragement lines live in `voicepipe/encouragement.py` — edit that list
+to change what she says. They are static rather than model-generated on
+purpose: instant, free, offline, and they can't wander off-persona at 3am.
+The interval is drawn fresh from the range each time so it doesn't read as a
+cron job, and an unprompted line waits for any turn in flight rather than
+interleaving its audio with the reply's.
 
 ## Debugging the speech pipeline
 
-Each `voicepipe` module runs standalone:
+Each stage runs on its own, with every backend's flags available:
 
 ```bash
 conda activate chat
-python -m voicepipe.stt some.wav                       # STT only
-python -m voicepipe.llm "hi there" --model rina         # LLM only
-python -m voicepipe.tts "hello there" -s 10 -o /tmp/hi.wav  # TTS only (writes wavs, doesn't play)
+python -m voicepipe transcribe some.wav                  # STT only
+python -m voicepipe ask "hi there" --model rina           # LLM only
+python -m voicepipe speak "hello there"                   # TTS only (writes wavs, doesn't play)
+python -m voicepipe speak "hello" --tts-backend vits --vits-speaker 10
 ```
+
+## The desktop face
+
+`chat_loop.py` opens `speech_orb.py`'s window automatically when a display and
+PySide6 are available (`--no-orb` keeps everything in the terminal). It isn't a
+separate design: it draws into the Stick's own 240×135 canvas using the same
+sprites, the same Catppuccin Macchiato palette, the same procedural particle
+field and waveform bars, then scales that up nearest-neighbour — so the two
+screens show the same thing at different sizes.
+
+```bash
+python speech_orb.py              # demo: state buttons + live mic
+python speech_orb.py --frameless  # translucent, draggable, always-on-top
+```
+
+If the window shows "no sprites", the art hasn't been extracted yet:
+
+```bash
+python tools/make_face_sprites.py
+```
+
+Because both outputs come from that one command, the Stick and the window
+can't drift apart — changing a crop changes both.
 
 ## Debugging the M5StickS3
 
@@ -137,16 +338,21 @@ From most to least isolated:
 See `firmware/m5stick_bridge/include/secrets.h.example` for the Wi-Fi/server
 config the Stick needs (copy to `secrets.h`, gitignored).
 
-## Using the Stick away from the laptop
+## Using the Stick with either laptop
 
-By default the Stick and this laptop need to be on the same Wi-Fi (`WS_HOST`
-in `secrets.h` is the laptop's IP on that network). When they're not — the
-Stick and phone are elsewhere while the laptop stays put — see
-`tools/termux_relay_setup.md`: a small relay running on the phone (in Termux)
-forwards the Stick's WebSocket traffic to the laptop over Tailscale, so the
-Stick still only ever talks to a plain `ws://` address on its own hotspot.
+The Stick always joins the phone's own hotspot and talks to a small relay
+running there (in Termux, `tools/termux_relay.py`) — never a laptop's Wi-Fi
+directly. The relay forwards over Tailscale to whichever laptop is running
+`bridge_server.py`, chosen with `--laptop-host main`/`arch` (see
+`tools/termux_relay_setup.md`). This is also what makes switching backends
+(this laptop vs. the other one) a one-flag change on the phone instead of a
+firmware reflash: the Stick finds the relay automatically (it's always its
+own Wi-Fi's gateway, i.e. `WiFi.gatewayIP()` — see `connectNetwork()` in
+`firmware/m5stick_bridge/src/main.cpp`), and the relay is what actually picks
+the laptop.
 
 ## Setup
 
-`./setup_envs.sh` creates the two conda envs (`chat`, `uma-tts`) and clones the
-VITS-Umamusume Space. See its header comment and `requirements-*.txt` for details.
+`./setup_envs.sh` creates the three conda envs (`chat`, `chatterbox-tts`,
+`uma-tts`) and clones the VITS-Umamusume Space. See its header comment and
+`requirements-*.txt` for details.
