@@ -13,13 +13,20 @@ import wave
 
 
 class Hooks:
-    """No-op sink for state/level updates; callers that don't care (headless
-    runs, debug scripts) can pass nothing and record()/play() still work."""
+    """No-op sink for UI updates; callers that don't care (headless runs,
+    debug scripts) can pass nothing and record()/play() still work.
+
+    The three signals mirror what the M5StickS3's screen shows: which state
+    it's in, the live audio level driving the waveform, and the caption line
+    (transcript while listening, reply while speaking)."""
 
     def state(self, name):
         pass
 
     def level(self, x):
+        pass
+
+    def caption(self, text):
         pass
 
 

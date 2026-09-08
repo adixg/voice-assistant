@@ -6,6 +6,16 @@ __pycache__/
 # voice audition clips + ratings (local data)
 /voice_audition/
 
+# tools/bench_tts.py's running log (local data)
+/bench_tts_log.csv
+
 # M5StickS3 firmware: PlatformIO build artifacts + real WiFi/host creds
 /firmware/*/.pio/
 /firmware/*/include/secrets.h
+
+# enrollment audio + voiceprint: personal biometric data, stays local
+/memory/voiceprint_samples/
+/memory/voiceprint.json
+
+# stray nohup log from launching the bridge by hand
+/nohup.out

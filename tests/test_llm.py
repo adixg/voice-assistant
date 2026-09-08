@@ -1,10 +1,11 @@
-"""voicepipe.llm — pure logic (strip_think) and ask() against a mocked
-Ollama client (no network, no real model)."""
-from unittest.mock import Mock
+"""voicepipe.backends.ollama — pure logic (strip_think) and ask()/check()
+against a mocked Ollama client (no network, no real model)."""
+from unittest.mock import Mock, patch
 
 import pytest
 
-from voicepipe.llm import OllamaLLM, ask, strip_think
+from voicepipe.backends.ollama import OllamaLLM, OllamaUnavailable
+from voicepipe.text import strip_think
 
 
 class TestStripThink:
@@ -23,28 +24,37 @@ class TestStripThink:
         assert strip_think("no opener</think>reply") == "reply"
 
 
-class TestAsk:
-    def _client(self, chat_mock):
-        c = Mock()
-        c.chat = chat_mock
-        return c
+def backend(chat, model="rina"):
+    """An OllamaLLM whose client is a mock — no `ollama` package, no server."""
+    return OllamaLLM(model=model, client=Mock(chat=chat))
 
+
+class TestAsk:
     def test_think_none_sends_no_think_kwarg(self):
         chat = Mock(return_value={"message": {"content": "hi"}})
-        client = self._client(chat)
-        result = ask(client, "rina", [{"role": "user", "content": "hey"}], think=None)
+
+        result = backend(chat).ask([{"role": "user", "content": "hey"}], think=None)
+
         assert result == "hi"
         chat.assert_called_once_with(model="rina", messages=[{"role": "user", "content": "hey"}])
 
+    def test_default_think_is_none_so_no_kwarg_is_sent(self):
+        chat = Mock(return_value={"message": {"content": "hi"}})
+
+        backend(chat).ask([])
+
+        chat.assert_called_once_with(model="rina", messages=[])
+
     def test_think_false_sends_think_kwarg(self):
         chat = Mock(return_value={"message": {"content": "hi"}})
-        client = self._client(chat)
-        ask(client, "rina", [], think=False)
+
+        backend(chat).ask([], think=False)
+
         chat.assert_called_once_with(model="rina", messages=[], think=False)
 
     def test_falls_back_when_model_rejects_think_kwarg(self):
-        # first call (with think=) raises because the model doesn't support it;
-        # ask() should retry once without the kwarg rather than propagating
+        # the first call (with think=) raises because the model doesn't support
+        # it; ask() should retry once without the kwarg rather than propagate
         calls = []
 
         def chat(*, model, messages, think=None):
@@ -53,43 +63,82 @@ class TestAsk:
                 raise ValueError("unknown parameter: think")
             return {"message": {"content": "ok"}}
 
-        client = self._client(chat)
-        result = ask(client, "some-model", [], think=False)
-        assert result == "ok"
+        assert backend(chat, model="some-model").ask([], think=False) == "ok"
         assert calls == [False, None]  # first attempt with think=, then the bare retry
 
     def test_unrelated_error_propagates(self):
         chat = Mock(side_effect=RuntimeError("ollama is down"))
-        client = self._client(chat)
+
         with pytest.raises(RuntimeError, match="ollama is down"):
-            ask(client, "rina", [], think=False)
+            backend(chat).ask([], think=False)
 
     def test_reply_with_think_block_is_stripped(self):
         chat = Mock(return_value={"message": {"content": "<think>hmm</think>final answer"}})
-        client = self._client(chat)
-        assert ask(client, "rina", [], think=None) == "final answer"
+
+        assert backend(chat).ask([], think=None) == "final answer"
 
 
-class TestOllamaLLM:
-    """The LLMBackend wrapper: a bound client + model, delegating to ask()
-    above. `client` is injected so this never needs the real `ollama`
-    package or a reachable server."""
+class TestCheck:
+    """check() reports problems by raising, never by exiting the process, so
+    an embedding caller decides what a failure means."""
 
-    def test_ask_delegates_to_the_bound_client_and_model(self):
-        chat = Mock(return_value={"message": {"content": "hi"}})
-        backend = OllamaLLM(model="rina", client=Mock(chat=chat))
+    def _backend(self, models=("rina",), model="rina"):
+        client = Mock()
+        client.list.return_value = Mock(models=[Mock(model=m) for m in models])
+        return OllamaLLM(host="http://localhost:11434", model=model, client=client)
 
-        result = backend.ask([{"role": "user", "content": "hey"}], think=False)
+    def test_unreachable_server_raises(self):
+        with patch("socket.create_connection", side_effect=OSError("connection refused")):
+            with pytest.raises(OllamaUnavailable, match="can't reach"):
+                self._backend().check()
 
-        assert result == "hi"
-        chat.assert_called_once_with(
-            model="rina", messages=[{"role": "user", "content": "hey"}], think=False
-        )
+    def test_tags_failure_raises(self):
+        llm = self._backend()
+        llm.client.list.side_effect = RuntimeError("500 server error")
 
-    def test_default_think_is_none_so_no_kwarg_is_sent(self):
-        chat = Mock(return_value={"message": {"content": "hi"}})
-        backend = OllamaLLM(model="rina", client=Mock(chat=chat))
+        with patch("socket.create_connection"):
+            with pytest.raises(OllamaUnavailable, match="/api/tags failed"):
+                llm.check()
 
-        backend.ask([])
+    def test_reachable_with_the_model_present_returns_no_warning(self):
+        with patch("socket.create_connection"):
+            assert self._backend(models=("rina", "qwen3")).check() is None
 
-        chat.assert_called_once_with(model="rina", messages=[])
+    def test_missing_model_warns_but_does_not_raise(self):
+        with patch("socket.create_connection"):
+            warning = self._backend(models=("qwen3",), model="rina").check()
+
+        assert "not found" in warning and "qwen3" in warning
+
+    def test_latest_tag_counts_as_present(self):
+        with patch("socket.create_connection"):
+            assert self._backend(models=("rina:latest",), model="rina").check() is None
+
+    def test_socket_uses_the_hosts_port(self):
+        llm = OllamaLLM(host="http://media:9999", model="rina", client=Mock())
+        llm.client.list.return_value = Mock(models=[Mock(model="rina")])
+
+        with patch("socket.create_connection") as conn:
+            llm.check()
+
+        assert conn.call_args[0][0] == ("media", 9999)
+
+    def test_default_port_when_the_host_omits_one(self):
+        llm = OllamaLLM(host="http://media", model="rina", client=Mock())
+        llm.client.list.return_value = Mock(models=[Mock(model="rina")])
+
+        with patch("socket.create_connection") as conn:
+            llm.check()
+
+        assert conn.call_args[0][0] == ("media", 11434)
+
+
+class TestFromArgs:
+    def test_builds_from_the_shared_host_and_model_flags(self):
+        args = Mock(host="http://media:11434", model="qwen3")
+
+        with patch.object(OllamaLLM, "_make_client", return_value=Mock()) as make:
+            llm = OllamaLLM.from_args(args)
+
+        assert (llm.host, llm.model) == ("http://media:11434", "qwen3")
+        make.assert_called_once()

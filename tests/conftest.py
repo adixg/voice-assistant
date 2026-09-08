@@ -1,6 +1,6 @@
 """Shared test setup.
 
-Both chat_loop.py and bridge_server.py call voicepipe.stt.ensure_cuda_libs()
+Both chat_loop.py and bridge_server.py call voicepipe.cuda.ensure_cuda_libs()
 at import time, which re-execs the process (os.execv) if it finds CUDA libs
 that need adding to LD_LIBRARY_PATH. That's fine for those entrypoints but
 would hijack the pytest process itself the moment a test imports

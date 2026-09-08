@@ -1,0 +1,27 @@
+# chatterbox_cli.py — Chatterbox Turbo TTS (Resemble AI), MIT licensed.
+# conda env "chatterbox-tts", Python 3.11 (what the upstream project is
+# developed/tested against — see https://pypi.org/project/chatterbox-tts/):
+#
+#   conda run -n chatterbox-tts python -m pip install -r requirements-chatterbox.txt
+#
+# Unlike requirements-uma-tts.txt, torch isn't pinned to a specific CUDA
+# wheel here: chatterbox-tts pulls in its own (recent) torch/torchaudio, and
+# the default PyPI Linux wheels already bundle CUDA — no --extra-index-url
+# needed. Downloads its ~350M-param weights from Hugging Face on first run
+# (ResembleAI/chatterbox-turbo), not vendored here.
+
+# From git, NOT PyPI: Chatterbox Nano (110M, --chatterbox-nano) exists only on
+# the git main branch. Both declare version 0.1.7, so a version bump will never
+# pick it up — PyPI's 0.1.7 has from_pretrained(device) with no `nano` argument.
+# Measured 2026-09-05: Nano on GPU uses 948 MiB less VRAM than Turbo *and* is
+# faster per reply (1.18s vs 1.53s), so there is no reason to prefer Turbo here.
+chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git
+
+# resemble-perth (chatterbox-tts's output watermarker) silently degrades its
+# PerthImplicitWatermarker to None on any ImportError in its submodule, and
+# chatterbox-tts doesn't check for that — it just crashes on first use
+# (TypeError: 'NoneType' object is not callable). Two separate causes, same
+# symptom — both needed:
+onnxruntime                 # perth_net's real dependency; not pulled in by chatterbox-tts itself
+setuptools<81                # perth_net still imports pkg_resources, dropped in setuptools 81 —
+                              # same issue as requirements-uma-tts.txt's pyopenjtalk-prebuilt pin
