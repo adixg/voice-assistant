@@ -60,6 +60,7 @@ static const gpio_num_t BTN_B_PIN = GPIO_NUM_12;
 static const uint32_t LONG_PRESS_MS = 500;
 
 WebSocketsClient webSocket;
+static IPAddress relayHost;  // the phone's gateway IP, resolved fresh in connectNetwork()
 static M5Canvas canvas(&M5.Display);
 
 // ---------------------------------------------------------------- palette
@@ -77,6 +78,18 @@ static const uint16_t COL_TEAL      = rgb565(0x8B, 0xD5, 0xCA);  // done
 static const uint16_t COL_RED       = rgb565(0xED, 0x87, 0x96);  // error / offline
 static const uint16_t COL_PEACH     = rgb565(0xF5, 0xA9, 0x7F);  // interrupted / battery / charging
 static const uint16_t COL_SAPPHIRE  = rgb565(0x7D, 0xC4, 0xE4);  // connecting
+static const uint16_t COL_LAVENDER  = rgb565(0xB7, 0xBD, 0xF8);  // idle sparkles' second color
+
+static inline uint16_t lerp565(uint16_t c0, uint16_t c1, float t) {
+  if (t <= 0.0f) return c0;
+  if (t >= 1.0f) return c1;
+  int r0 = (c0 >> 11) & 0x1F, g0 = (c0 >> 5) & 0x3F, b0 = c0 & 0x1F;
+  int r1 = (c1 >> 11) & 0x1F, g1 = (c1 >> 5) & 0x3F, b1 = c1 & 0x1F;
+  int r = r0 + (int)((r1 - r0) * t);
+  int g = g0 + (int)((g1 - g0) * t);
+  int b = b0 + (int)((b1 - b0) * t);
+  return ((r & 0x1F) << 11) | ((g & 0x3F) << 5) | (b & 0x1F);
+}
 
 enum UiState {
   UI_CONNECTING, UI_IDLE, UI_LISTENING, UI_THINKING, UI_SPEAKING,
@@ -130,34 +143,81 @@ static void setStatus(const String &line1, const String &line2 = "") {
   Serial.printf("[status] %s %s\n", line1.c_str(), line2.c_str());
 }
 
-// ---------------------------------------------------------------- idle blink
-// Every few seconds, one quick blink. Deliberately the only motion while
-// idle: everything else about the frame is pinned, since anything busier
-// reads as her fidgeting.
-static uint32_t blinkAtMs = 0;
-static uint32_t blinkEndMs = 0;
+// ---------------------------------------------------------------- idle animation
+// pixelart_idle.png's curated gesture frames (see tools/make_face_sprites.py's
+// extract_idle_anim): a continuous slow breathing loop, interrupted every few
+// seconds by one randomly chosen gesture — blink most often, look/smile/yawn/
+// sleepy as rarer flourishes — that plays through its own short sequence once
+// and returns to breathing. These frames are a different, smaller size than
+// the rest of the sprites (kIdleAnimW x kIdleAnimH, not kSpriteW x kSpriteH)
+// since they're tight headshots with no side art of their own — the sheet's
+// cells sit too close together for that (see the python tool's comment) —
+// so drawFace() special-cases IDLE to push this frame at its own size
+// instead of the usual one.
+enum IdleGesture { GESTURE_NONE, GESTURE_BLINK, GESTURE_LOOK, GESTURE_SMILE, GESTURE_YAWN, GESTURE_SLEEPY };
 
-static const uint16_t *idleSprite(uint32_t t) {
-  if (t >= blinkEndMs && t >= blinkAtMs) {  // schedule the next one
-    blinkAtMs = t + 3500 + random(4000);
-    blinkEndMs = blinkAtMs + 260;
+struct GestureFrames { const uint16_t *const *frames; int count; };
+
+static GestureFrames framesForGesture(IdleGesture g) {
+  switch (g) {
+    case GESTURE_BLINK:  return {kIdleBlink,  kIdleBlinkCount};
+    case GESTURE_LOOK:   return {kIdleLook,   kIdleLookCount};
+    case GESTURE_SMILE:  return {kIdleSmile,  kIdleSmileCount};
+    case GESTURE_YAWN:   return {kIdleYawn,   kIdleYawnCount};
+    case GESTURE_SLEEPY: return {kIdleSleepy, kIdleSleepyCount};
+    default:             return {kIdleBreathe, kIdleBreatheCount};
   }
-  if (t >= blinkAtMs && t < blinkEndMs) {
-    return (blinkAtMs % 5 == 0) ? kSprite_blink2 : kSprite_blink;
+}
+
+static const uint32_t BREATHE_FRAME_MS = 550;
+static const uint32_t GESTURE_FRAME_MS = 110;
+
+static IdleGesture activeGesture = GESTURE_NONE;
+static uint32_t gestureFrameStart = 0;
+static uint32_t nextGestureAtMs = 4000;  // a few seconds of breathing before the first gesture
+
+// Weighted pick — blink is by far the most common (roughly what the old
+// single-blink idleSprite() did), the rest are rare enough to read as
+// occasional flourishes rather than a tic.
+static IdleGesture pickGesture() {
+  int r = random(100);
+  if (r < 55) return GESTURE_BLINK;
+  if (r < 70) return GESTURE_LOOK;
+  if (r < 82) return GESTURE_SMILE;
+  if (r < 92) return GESTURE_YAWN;
+  return GESTURE_SLEEPY;
+}
+
+static const uint16_t *idleAnimSprite(uint32_t t) {
+  if (activeGesture == GESTURE_NONE) {
+    if (t < nextGestureAtMs) {
+      GestureFrames b = framesForGesture(GESTURE_NONE);
+      return b.frames[(t / BREATHE_FRAME_MS) % b.count];
+    }
+    activeGesture = pickGesture();
+    gestureFrameStart = t;
   }
-  return kSprite_idle;
+  GestureFrames g = framesForGesture(activeGesture);
+  int idx = (t - gestureFrameStart) / GESTURE_FRAME_MS;
+  if (idx >= g.count) {  // gesture finished — back to breathing, schedule the next one
+    activeGesture = GESTURE_NONE;
+    nextGestureAtMs = t + 3500 + random(5000);
+    return framesForGesture(GESTURE_NONE).frames[0];
+  }
+  return g.frames[idx];
 }
 
 // ---------------------------------------------------------------- character sprite
 // One sprite per state, drawn at a fixed position — the sheet's own design is
 // a steady character with the state conveyed by the effects around her, and
 // tools/make_face_sprites.py normalises every frame to the same size and
-// position so nothing shifts as states change. The two exceptions are the
-// blink and the mouth, which are real animation rather than drift.
+// position so nothing shifts as states change. The exceptions are the mouth
+// (real animation, not drift) and IDLE, which drawFace() special-cases
+// entirely — see idleAnimSprite() above — since its frames are a different
+// size, so it never reaches this function.
 static const uint16_t *characterSpriteFor(uint32_t t) {
   switch (uiState) {
     case UI_CONNECTING:   return kSprite_disconnected;  // no "connecting" frame; not-yet-connected
-    case UI_IDLE:          return idleSprite(t);
     case UI_LISTENING:     return kSprite_listening;
     case UI_THINKING:      return kSprite_thinking;
     case UI_SPEAKING:  // mouth shape follows the TTS audio's live amplitude
@@ -178,7 +238,10 @@ static const uint16_t *characterSpriteFor(uint32_t t) {
 
 // ---------------------------------------------------------------- status line
 // Small procedural glyphs — the default font has no ● ◆ ♪ etc.
-enum Glyph { GLYPH_NONE, GLYPH_DOT, GLYPH_DIAMOND, GLYPH_NOTE, GLYPH_CHECK, GLYPH_WARN, GLYPH_BOLT, GLYPH_OFFLINE };
+enum Glyph {
+  GLYPH_NONE, GLYPH_DOT, GLYPH_DIAMOND, GLYPH_CROSS, GLYPH_STAR, GLYPH_SQUARE,
+  GLYPH_NOTE, GLYPH_CHECK, GLYPH_WARN, GLYPH_BOLT, GLYPH_OFFLINE,
+};
 
 static void drawGlyph(Glyph g, int cx, int cy, uint16_t color) {
   switch (g) {
@@ -188,6 +251,19 @@ static void drawGlyph(Glyph g, int cx, int cy, uint16_t color) {
     case GLYPH_DIAMOND:
       canvas.fillTriangle(cx, cy - 4, cx - 4, cy, cx, cy + 4, color);
       canvas.fillTriangle(cx, cy - 4, cx + 4, cy, cx, cy + 4, color);
+      break;
+    case GLYPH_CROSS:  // the particle field's mid-bloom shape — small "+"
+      canvas.fillRect(cx - 3, cy, 7, 1, color);
+      canvas.fillRect(cx, cy - 3, 1, 7, color);
+      break;
+    case GLYPH_STAR:  // the particle field's peak shape — bigger diamond + "+"
+      canvas.fillTriangle(cx, cy - 5, cx - 5, cy, cx, cy + 5, color);
+      canvas.fillTriangle(cx, cy - 5, cx + 5, cy, cx, cy + 5, color);
+      canvas.fillRect(cx - 5, cy, 11, 1, color);
+      canvas.fillRect(cx, cy - 5, 1, 11, color);
+      break;
+    case GLYPH_SQUARE:  // thinking's tiny drifting pixel motes
+      canvas.fillRect(cx - 1, cy - 1, 3, 3, color);
       break;
     case GLYPH_NOTE:
       canvas.fillCircle(cx - 2, cy + 3, 3, color);
@@ -246,34 +322,41 @@ static void showTransient(UiState st, uint32_t ms) {
   setStatus(statusFor(st).text);
 }
 
-static const int CHAR_TOP = 2;     // sprite height (96) covers most of the 135px canvas
-static const int STATUS_Y = 100;
-static const int CAPTION_Y = 110;
-
-static void drawStatusLine() {
-  if (uiState == UI_SLEEPING) return;
-  StatusInfo s = statusFor(uiState);
-  if (!s.text[0]) return;
-  int glyphW = s.glyph == GLYPH_NONE ? 0 : 12;
-  int textW = (int)strlen(s.text) * 6;
-  int x = canvas.width() / 2 - (glyphW + textW) / 2;
-  if (s.glyph != GLYPH_NONE) {
-    drawGlyph(s.glyph, x + 4, STATUS_Y + 4, s.color);
-    x += glyphW;
-  }
-  canvas.setTextColor(s.color);
-  canvas.setTextSize(1);
-  canvas.setTextDatum(top_left);
-  canvas.setCursor(x, STATUS_Y);
-  canvas.print(s.text);
-}
+// The sprite is 220x116 on a 240x135 canvas, cropped with a trimmed top
+// margin (tools/make_face_sprites.py's TOP_MARGIN) so she sits higher in the
+// frame instead of leaving a gap above her ears. Her chin lands at canvas
+// y~98-105 depending on state (measured directly off the generated sprite,
+// not assumed) — TEXT_BAND_Y is set past the worst of those with a real
+// shoulder-height margin, checked against a montage of every state, not just
+// one or two, since the SPEAKING mouth-shape frames come from a different
+// reference sheet (v2, not v3) that happens to frame her a bit higher, so a
+// gap that looks fine there can still crop the rest. drawFace() paints a
+// solid banner over the bottom of her portrait from TEXT_BAND_Y down, and
+// the caption text goes on top of that. If FINAL_H or TOP_MARGIN change,
+// re-check the montage and move TEXT_BAND_Y again — don't just eyeball one
+// state, that's what cropped the text into her face last time.
+//
+// There's no status line at all any more: expression, colour, and the side
+// effects (waveform / particle field) are the only things that say what
+// state she's in — see updateAndDrawSideParticles() and drawAmplitudePulses()
+// below. statusFor()/StatusInfo above still exist purely to label Serial
+// debug output (setStatus()), never drawn to the screen.
+static const int CHAR_TOP = 2;
+static const int TEXT_BAND_Y = 110;
 
 // ---------------------------------------------------------------- amplitude pulses
 // Live amplitude, both directions: green while she's hearing you, yellow
-// while she's talking (where it doubles up with her mouth shape). Drawn
-// flanking her the way the sheet's own design does, in the side margins
-// she doesn't occupy (120px wide on a 240px screen), which keeps it clear
-// of both the sprite and the caption text.
+// while she's talking (where it doubles up with her mouth shape). Flanking
+// her at headphone height. Her earcups (the sheet's own biggest connected
+// blob per cell, same measure tools/make_face_sprites.py uses, restricted to
+// the headphone y-band) sit at local sprite-x 74-152 in the worst-case state
+// checked, i.e. canvas x ~84-162 once centered — but the brightness threshold
+// that measurement uses doesn't catch the earcup's anti-aliased edge pixels,
+// so bars right up against that measured edge still visibly overlapped it.
+// nearEdge below leaves a real ~29px gap, not just a clean-on-paper one.
+// HEADPHONE_CY is her earcups' vertical center (local y ~45-80, measured the
+// same way) in canvas coordinates.
+static const int HEADPHONE_CY = CHAR_TOP + 63;
 static void drawAmplitudePulses() {
   uint16_t colour;
   if (uiState == UI_LISTENING) {
@@ -283,13 +366,215 @@ static void drawAmplitudePulses() {
   } else {
     return;
   }
-  const int bars = 5, barW = 5, step = 8;
-  int cy = CHAR_TOP + kSpriteH / 2;
+  const int bars = 5, barW = 6, step = 8;
+  const int nearEdge = 55;  // clear of her earcups (~84 at headphone height)
+  int cy = HEADPHONE_CY;
   for (int i = 0; i < bars; i++) {
     int idx = (histPos + HIST_N - 1 - i) % HIST_N;  // newest nearest her
     int h = 4 + (int)(levelHist[idx] * 40);
-    canvas.fillRoundRect(34 - i * step, cy - h / 2, barW, h, 2, colour);
-    canvas.fillRoundRect(201 + i * step, cy - h / 2, barW, h, 2, colour);
+    int x = nearEdge - barW - i * step;
+    canvas.fillRoundRect(x, cy - h / 2, barW, h, 2, colour);
+    canvas.fillRoundRect(canvas.width() - x - barW, cy - h / 2, barW, h, 2, colour);
+  }
+}
+
+// ---------------------------------------------------------------- baked sparkle twinkle
+// DONE/ERROR/INTERRUPTED/LOW_BATTERY/CHARGING keep animating the sheet's own
+// baked-in sparkles/icons flanking her — tools/make_face_sprites.py finds
+// their real positions (any blob too small to be her, clear of her own
+// body's x-range) and bakes them into sprites.h as kSparkles_<name>. This
+// picks a few indices that shift every tick and only draws them for half of
+// each tick, so they visibly blink rather than just relocate.
+//
+// IDLE/LISTENING/THINKING/SPEAKING don't use this any more — they run the
+// fully procedural particle field below instead (updateAndDrawSideParticles),
+// which is what the sheet either has no baked art for (SPEAKING's v2-sourced
+// mouth frames) or where the brief asked for randomized/dynamic motion the
+// fixed baked positions can't give.
+static bool sparklesForState(UiState st, const SparkleDot **dots, int *count) {
+  switch (st) {
+    case UI_DONE:        *dots = kSparkles_done;        *count = kSparkleCount_done;        return true;
+    case UI_ERROR:       *dots = kSparkles_error;       *count = kSparkleCount_error;       return true;
+    case UI_INTERRUPTED: *dots = kSparkles_surprised;   *count = kSparkleCount_surprised;   return true;  // INTERRUPTED draws kSprite_surprised — see characterSpriteFor()
+    case UI_LOW_BATTERY: *dots = kSparkles_low_battery; *count = kSparkleCount_low_battery; return true;
+    case UI_CHARGING:    *dots = kSparkles_charging;    *count = kSparkleCount_charging;    return true;
+    default: return false;
+  }
+}
+
+static void drawSparkleTwinkle() {
+  int spriteX = (canvas.width() - kSpriteW) / 2;
+  uint32_t t = millis();
+  const SparkleDot *dots;
+  int count;
+  if (!sparklesForState(uiState, &dots, &count) || count == 0) return;
+  const int kActive = 3;  // how many of her real sparkles twinkle at once
+  for (int k = 0; k < count && k < kActive; k++) {
+    uint32_t phase = t / 300 + k * 7;  // stagger which dot each slot shows
+    if ((phase / 2) % 2 != 0) continue;  // on for one tick, off for the next
+    const SparkleDot &d = dots[phase % count];
+    drawGlyph(GLYPH_DIAMOND, spriteX + d.x, CHAR_TOP + d.y, COL_TEXT);
+  }
+}
+
+// ---------------------------------------------------------------- side particle field
+// IDLE/LISTENING/THINKING/SPEAKING's effects: a small pool of particles drawn
+// only in the background strips flanking her (never over her own body — x is
+// always within FLANK_MARGIN of an edge), never a status word. One pool and
+// one update loop serve all four states; only the "profile" (colours, count,
+// life span, whether particles drift or mix in tiny squares, whether they
+// avoid the headphone-height waveform band) changes per state, so switching
+// states always reads as the same system changing mood, never a different
+// effect popping in.
+//
+// Each sparkle-shaped particle runs a fixed life cycle — blank -> dot ->
+// small cross -> bright star -> small cross -> dot -> blank — via a
+// triangular brightness envelope (0 at birth/death, 1 at the midpoint) that
+// picks both which glyph to draw and a background->colour fade, then goes
+// inactive for a random respawn delay before reappearing at a fresh random
+// position. THINKING's tiny squares skip the shape progression and just fade
+// in/out on the same envelope while drifting slowly within their flank.
+// Position, phase, life span, and respawn delay are all randomized
+// per-particle and independent of the others, so the field never looks
+// synchronized.
+static const int MAX_PARTICLES = 8;
+static const int FLANK_MARGIN = 46;  // spawn x stays within this of the left/right edge
+
+enum ParticleShape { PSHAPE_SPARKLE, PSHAPE_SQUARE };
+
+struct Particle {
+  bool active;
+  float x, y, vx, vy;
+  uint32_t bornAt, lifeMs, respawnAt;
+  uint16_t color;
+  ParticleShape shape;
+};
+static Particle particles[MAX_PARTICLES];
+
+struct ParticleProfile {
+  int count;
+  const uint16_t *colors;
+  int nColors;
+  uint32_t minLifeMs, maxLifeMs;
+  uint32_t minRespawnMs, maxRespawnMs;
+  bool drift;            // THINKING's slow floating motion
+  bool mixSquares;       // half the pool renders as tiny fading squares instead of sparkles
+  bool avoidHeadphones;  // push spawn points clear of the waveform bars' y-band
+  int yLo, yHi;
+};
+
+static const uint16_t kIdleColors[]      = { COL_SAPPHIRE, COL_LAVENDER };
+static const uint16_t kListeningColors[] = { COL_GREEN, COL_SAPPHIRE };
+static const uint16_t kThinkingColors[]  = { COL_MAUVE };
+static const uint16_t kSpeakingColors[]  = { COL_YELLOW, COL_PEACH };
+
+static ParticleProfile profileFor(UiState st, bool *ok) {
+  *ok = true;
+  switch (st) {
+    // sparse, slow, roams the whole flank height — the calmest profile
+    case UI_IDLE:      return {8, kIdleColors,      2, 2600, 4200,  500, 2500, false, false, false, 8, 100};
+    // dominated by drawAmplitudePulses()'s waveform — this is just the "a few
+    // subtle sparkles farther out" the brief asked for, kept clear of the
+    // bars' band around HEADPHONE_CY
+    case UI_LISTENING: return {3, kListeningColors, 2, 1800, 2800,  800, 2000, false, false, true,  8, 100};
+    // busiest and fastest profile, with drifting squares mixed in
+    case UI_THINKING:  return {8, kThinkingColors,  1, 1400, 2400,  300, 1200, true,  true,  false, 8, 100};
+    // same shape as LISTENING's, warm-coloured, also clear of the bars
+    case UI_SPEAKING:  return {3, kSpeakingColors,  2, 1800, 2800,  800, 2000, false, false, true,  8, 100};
+    default:
+      *ok = false;
+      return {0, kIdleColors, 0, 0, 0, 0, 0, false, false, false, 0, 0};
+  }
+}
+
+static float pickSpawnX() {
+  bool leftSide = random(2) == 0;
+  float local = 6 + (float)random(1000) / 1000.0f * (FLANK_MARGIN - 6);  // 6..FLANK_MARGIN
+  return leftSide ? local : (canvas.width() - local);
+}
+
+static float pickSpawnY(int yLo, int yHi, bool avoidHeadphones) {
+  float y = yLo + (float)random(1000) / 1000.0f * (yHi - yLo);
+  if (avoidHeadphones) {
+    const int bandLo = HEADPHONE_CY - 22, bandHi = HEADPHONE_CY + 22;
+    if (y > bandLo && y < bandHi) y = (y < HEADPHONE_CY) ? bandLo - 6 : bandHi + 6;
+  }
+  return y;
+}
+
+// immediate=false staggers a freshly-entered state's first appearance instead
+// of popping every slot on at once.
+static void spawnParticle(Particle &p, const ParticleProfile &prof, uint32_t now, bool immediate) {
+  p.x = pickSpawnX();
+  p.y = pickSpawnY(prof.yLo, prof.yHi, prof.avoidHeadphones);
+  p.vx = p.vy = 0;
+  if (prof.drift) {
+    p.vx = (random(200) - 100) / 4000.0f;  // px/ms, tiny
+    p.vy = (random(200) - 100) / 6000.0f;
+  }
+  p.color = prof.colors[random(prof.nColors)];
+  p.shape = (prof.mixSquares && random(2) == 0) ? PSHAPE_SQUARE : PSHAPE_SPARKLE;
+  p.lifeMs = prof.minLifeMs + random(prof.maxLifeMs - prof.minLifeMs + 1);
+  p.bornAt = now;
+  if (immediate) {
+    p.active = true;
+    p.respawnAt = 0;
+  } else {
+    p.active = false;
+    p.respawnAt = now + random(prof.maxRespawnMs);
+  }
+}
+
+static UiState particleProfileState = UI_CONNECTING;  // sentinel: forces (re)init on first real use
+static uint32_t lastParticleFrameMs = 0;
+
+static void updateAndDrawSideParticles() {
+  bool ok;
+  ParticleProfile prof = profileFor(uiState, &ok);
+  if (!ok) {
+    particleProfileState = UI_CONNECTING;  // re-arm the reinit for next time one of the 4 states is entered
+    return;
+  }
+
+  uint32_t now = millis();
+  if (uiState != particleProfileState) {
+    particleProfileState = uiState;
+    lastParticleFrameMs = 0;  // avoid one huge drift step from a stale timestamp
+    for (int i = 0; i < MAX_PARTICLES; i++) particles[i].active = false;
+    for (int i = 0; i < prof.count && i < MAX_PARTICLES; i++) spawnParticle(particles[i], prof, now, false);
+  }
+  uint32_t dt = lastParticleFrameMs ? (now - lastParticleFrameMs) : 0;
+  lastParticleFrameMs = now;
+
+  for (int i = 0; i < prof.count && i < MAX_PARTICLES; i++) {
+    Particle &p = particles[i];
+    if (!p.active) {
+      if (now >= p.respawnAt) spawnParticle(p, prof, now, true);
+      continue;
+    }
+    uint32_t age = now - p.bornAt;
+    if (age >= p.lifeMs) {
+      p.active = false;
+      p.respawnAt = now + prof.minRespawnMs + random(prof.maxRespawnMs - prof.minRespawnMs + 1);
+      continue;
+    }
+    if (prof.drift && dt) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      // bounce back toward its own edge if drift carries it over her body
+      if (p.x > FLANK_MARGIN && p.x < canvas.width() - FLANK_MARGIN) p.vx = -p.vx;
+      if (p.y < 8 || p.y > 100) p.vy = -p.vy;
+    }
+    float t = (float)age / (float)p.lifeMs;          // 0..1 across the whole life
+    float env = 1.0f - fabsf(2.0f * t - 1.0f);        // triangular envelope, peaks at t=0.5
+    if (env <= 0.06f) continue;                        // effectively blank
+    uint16_t c = lerp565(COL_BASE, p.color, env);
+    if (p.shape == PSHAPE_SQUARE) {
+      drawGlyph(GLYPH_SQUARE, (int)p.x, (int)p.y, c);
+    } else {
+      Glyph g = env < 0.28f ? GLYPH_DOT : (env < 0.62f ? GLYPH_CROSS : GLYPH_STAR);
+      drawGlyph(g, (int)p.x, (int)p.y, c);
+    }
   }
 }
 
@@ -314,9 +599,21 @@ static String wrapLine(const String &text, int maxChars, int startIdx, int &next
   return text.substring(startIdx, cut);
 }
 
-static const int MAX_CAPTION_LINES = 2;
 static const int MAX_CAPTION_CHARS = 36;
 
+// There's no status line taking up a row any more (see the note above
+// TEXT_BAND_Y), so the whole banner below it is the caption's: fixed at 3
+// lines since replies are intentionally short, and 111 + 3*CAPTION_LINE_H
+// lands exactly on the canvas's bottom edge (135) — checked against
+// TEXT_BAND_Y, not eyeballed, same rule as that constant.
+static const int CAPTION_Y = 111;
+static const int CAPTION_LINE_H = 8;
+static const int MAX_CAPTION_LINES = 3;
+
+// Listening shows the transcript once STT delivers it ("heard:" — see the
+// protocol note at the top of this file); thinking keeps that same text
+// visible until "reply:" replaces it; speaking/done show the reply. No
+// separate state word anywhere — this is the only text on screen.
 static void drawCaptionText() {
   if (captionText.length() == 0) return;
   if (uiState == UI_CONNECTING || uiState == UI_SLEEPING || uiState == UI_DISCONNECTED) return;
@@ -333,7 +630,7 @@ static void drawCaptionText() {
       while (l.length() > (unsigned)(MAX_CAPTION_CHARS - 3)) l.remove(l.length() - 1);
       l += "...";  // the spec asks for "…"; ASCII "..." renders correctly on any font, "…" (U+2026) may not
     }
-    canvas.setCursor(4, CAPTION_Y + line * 9);
+    canvas.setCursor(4, CAPTION_Y + line * CAPTION_LINE_H);
     canvas.println(l);
     idx = next;
   }
@@ -345,11 +642,24 @@ static void drawFace() {
 
   // Fixed position, no bob: the sprites are normalised to a common size and
   // position at build time, so she stays put and only her expression changes.
-  canvas.pushImage((canvas.width() - kSpriteW) / 2, CHAR_TOP, kSpriteW, kSpriteH,
-                   characterSpriteFor(millis()));
+  // IDLE alone uses its own smaller, differently-proportioned frames (see
+  // idleAnimSprite()'s comment), so it gets its own pushImage size here.
+  if (uiState == UI_IDLE) {
+    canvas.pushImage((canvas.width() - kIdleAnimW) / 2, CHAR_TOP, kIdleAnimW, kIdleAnimH,
+                     idleAnimSprite(millis()));
+  } else {
+    canvas.pushImage((canvas.width() - kSpriteW) / 2, CHAR_TOP, kSpriteW, kSpriteH,
+                     characterSpriteFor(millis()));
+  }
 
-  drawAmplitudePulses();
-  drawStatusLine();
+  // Solid banner over the bottom of her portrait — see TEXT_BAND_Y's comment —
+  // so the caption text always sits on a clean background regardless of what's
+  // drawn there in the sprite underneath.
+  canvas.fillRect(0, TEXT_BAND_Y, canvas.width(), canvas.height() - TEXT_BAND_Y, COL_BASE);
+
+  drawAmplitudePulses();          // listening/speaking: waveform beside the headphones
+  updateAndDrawSideParticles();   // idle/listening/thinking/speaking: procedural particle field
+  drawSparkleTwinkle();           // done/error/interrupted/low_battery/charging: baked sparkle art
   drawCaptionText();
 
   canvas.pushSprite(0, 0);
@@ -358,7 +668,7 @@ static void drawFace() {
 static uint32_t lastDraw = 0;
 static void maybeDrawFace() {
   uint32_t now = millis();
-  if (now - lastDraw >= 40) {  // ~25fps
+  if (now - lastDraw >= 90) {  // ~11fps — plenty for this animation, easy on the S3
     lastDraw = now;
     drawFace();
   }
@@ -393,7 +703,7 @@ static void maybeCheckBattery() {
 static void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
-      setStatus("connected", WS_HOST);
+      setStatus("connected", relayHost.toString());
       if (uiState == UI_DISCONNECTED || uiState == UI_CONNECTING) uiState = UI_IDLE;
       break;
     case WStype_DISCONNECTED:
@@ -405,6 +715,14 @@ static void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
       if (msg.startsWith("heard:")) {
         captionText = msg.substring(6);
         setStatus("heard", captionText);
+      } else if (msg.startsWith("status:")) {
+        // An agent backend reporting a tool it is running ("searching the
+        // web"). Only the caption changes: the state stays THINKING, so the
+        // mauve particle field keeps running underneath and the screen shows
+        // work happening instead of a frozen transcript. Plain chat backends
+        // never send this.
+        captionText = msg.substring(7);
+        setStatus("status", captionText);
       } else if (msg.startsWith("reply:")) {
         captionText = msg.substring(6);
         lastReplyWasError = captionText.startsWith("(");
@@ -451,9 +769,34 @@ static void connectNetwork() {
     if (M5.BtnB.wasReleasedAfterHold()) return;  // bail out of a stuck reconnect; loop() sends it to sleep
   }
   setStatus("wifi ok", WiFi.localIP().toString());
-  webSocket.begin(WS_HOST, WS_PORT, WS_PATH);
+  // The phone (running tools/termux_relay.py) IS this Wi-Fi's AP, so it's
+  // always our DHCP-assigned gateway — no hardcoded IP to go stale every
+  // time Android rotates the hotspot's subnet on restart, and nothing to
+  // reflash for. (Only valid because the Stick always joins the phone's own
+  // hotspot now, never a laptop's Wi-Fi directly — see the header comment.)
+  relayHost = WiFi.gatewayIP();
+  Serial.printf("[status] relay %s\n", relayHost.toString().c_str());
+  webSocket.begin(relayHost, WS_PORT, WS_PATH);
   M5.Mic.begin();
   uiState = UI_IDLE;
+}
+
+// ---------------------------------------------------------------- audio config
+// Called once, from setup(). The board's defaults are not ours, so this has to
+// run — but it does NOT need repeating on every M5.Mic.begin(), even though the
+// mic and speaker share one I2S peripheral and playback tears the mic down
+// (M5.Mic.end() before M5.Speaker.begin()). M5Unified's Mic_Class keeps _cfg as
+// a plain member; end() uninstalls the I2S driver but never touches it, and
+// begin() reinstalls from those same retained values. A re-assert between turns
+// was tried as a fix for speaker verification scoring the same person 0.75 on
+// her first utterance and 0.17-0.60 after — it was a self-assignment and fixed
+// nothing. The real cause was an enrollment captured with no playback between
+// samples; see CLAUDE.md.
+static void applyMicConfig() {
+  auto mic_cfg = M5.Mic.config();
+  mic_cfg.sample_rate = SAMPLE_RATE;
+  mic_cfg.stereo = false;
+  M5.Mic.config(mic_cfg);
 }
 
 // ---------------------------------------------------------------- deep sleep
@@ -483,6 +826,13 @@ static void enterDeepSleep() {
   M5.Speaker.end();
   drawFace();
   M5.Display.sleep();
+  // The M5PM1 companion chip is its own power domain — it isn't reset or
+  // powered down by esp_deep_sleep_start() at all, so its 5V boost rail
+  // (speaker amp, external port) stays live drawing current through the
+  // whole sleep unless cut here. M5.begin() unconditionally re-enables it
+  // on wake (cfg.output_power defaults true), so nothing extra is needed
+  // in setup() to restore it.
+  M5.Power.setExtOutput(false);
   delay(50);  // let the WS close / display sleep command actually flush
   configureWakeAndSleep();
 }
@@ -527,16 +877,18 @@ void setup() {
   canvas.setSwapBytes(true);
 
   {
-    auto mic_cfg = M5.Mic.config();
-    mic_cfg.sample_rate = SAMPLE_RATE;
-    mic_cfg.stereo = false;
-    M5.Mic.config(mic_cfg);
+    applyMicConfig();
 
     auto spk_cfg = M5.Speaker.config();
     spk_cfg.sample_rate = SAMPLE_RATE;
     spk_cfg.stereo = false;
     M5.Speaker.config(spk_cfg);
-    M5.Speaker.setVolume(255);  // M5Unified defaults to a conservative volume
+    // Full volume, per request. M5Stack's own hardware notice for this board
+    // says to stay below 75% (191/255) on battery (no USB) to avoid an
+    // excessive-draw brownout reboot — this Stick does run on battery away
+    // from the laptop, so that risk is real, not just theoretical. Drop back
+    // to 190 if reboots start happening during loud playback on battery.
+    M5.Speaker.setVolume(255);
   }
 
   replyCap = 200 * 1024;
@@ -580,7 +932,7 @@ void loop() {
     uiState = UI_LISTENING;
     captionText = "";
     M5.Speaker.end();
-    M5.Mic.begin();
+    M5.Mic.begin();  // _cfg survives the speaker cycle; no re-config needed
     webSocket.sendTXT("start");
     setStatus("listening...");
   }

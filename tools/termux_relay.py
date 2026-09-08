@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""WebSocket relay for when the M5StickS3 and laptop are NOT on the same
-Wi-Fi. Runs on the phone (in Termux), and chains:
+"""WebSocket relay letting the M5StickS3 reach bridge_server.py on whichever
+laptop is currently running it, over Tailscale. Runs on the phone (in
+Termux), and chains:
 
     Stick --(phone hotspot, plain WebSocket)--> this relay
           --(Tailscale)--> ws://<laptop tailnet IP>:8765/ (bridge_server.py)
 
-The Stick still just connects to a plain ws:// address on its own hotspot
-(same as talking to bridge_server.py directly) — it never needs to know
-about Tailscale. Only WS_HOST in firmware/m5stick_bridge/include/secrets.h
-changes: point it at the phone's own gateway IP (WiFi.gatewayIP() on the
-Stick) instead of the laptop's, then reflash. See
+The Stick always joins the phone's own hotspot and finds this relay by
+itself (it's always the Stick's Wi-Fi gateway — see WiFi.gatewayIP() in
+connectNetwork(), firmware/m5stick_bridge/src/main.cpp) — nothing on the
+firmware side ever needs to change. Switching which laptop is live is just
+restarting this script with a different --laptop-host. See
 tools/termux_relay_setup.md for the full procedure.
 
     python termux_relay.py --laptop-host main

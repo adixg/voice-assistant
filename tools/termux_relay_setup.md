@@ -84,23 +84,17 @@ still kill it eventually, or on app swipe-away. For anything more durable
 (auto-restart on boot, survive being swiped from recents), that's
 Termux:Boot + a proper service script — ask if you want that set up too.
 
-## 4. Point the Stick at the relay instead of the laptop
+## 4. Nothing to do on the Stick
 
-The Stick still just connects to a plain `ws://` address on its own
-hotspot — only the destination changes, from the laptop's IP to the phone's
-own gateway IP (itself, from the Stick's point of view). Edit
-`firmware/m5stick_bridge/include/secrets.h`:
+The firmware resolves the relay's address itself at connect time
+(`WiFi.gatewayIP()` in `connectNetwork()`, `firmware/m5stick_bridge/src/main.cpp`)
+— since the phone is always this Wi-Fi's own AP, it's also always the
+gateway, so there's no IP to hardcode or reflash, even when Android rotates
+the hotspot's subnet on restart. `secrets.h` only needs `WIFI_SSID`/`WIFI_PASS`
+for the phone's hotspot.
 
-```c
-#define WS_HOST     "10.58.220.243"   // the phone's own gateway IP, not the laptop's
-```
+## 5. Switching which laptop it talks to
 
-(That's the value `WiFi.gatewayIP()` returned in the earlier connectivity
-test — confirm it's still current, since it can change if the hotspot
-restarts. I'll reflash once you confirm this is the value to use.)
-
-## 5. Switching back
-
-To go back to talking to the laptop directly (same-Wi-Fi case), just set
-`WS_HOST` back to the laptop's hotspot-assigned IP and reflash — same as
-any other network-config change we've done this session.
+That's chosen entirely on the phone, not the Stick — just restart the relay
+with a different `--laptop-host` (see the top of this doc / `termux_relay.py`'s
+`KNOWN_HOSTS`). No firmware change either way.
