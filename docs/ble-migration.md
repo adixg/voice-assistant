@@ -311,16 +311,69 @@ simultaneously, not inferred from one side alone:
   `BluetoothGatt`'s single-operation queue as designed, reassembled and
   decoded correctly on the firmware side.
 
-**Not yet done in Phase 3**: bonding, the app-layer shared-secret AUTH
-handshake, and TIME_SYNC. Deliberately deferred until the codec round-trip
-itself was confirmed — now that it is, these are the next concrete step.
+## Phase 3 CLOSED — bonding, AUTH, TIME_SYNC all confirmed (2026-09-16)
+
+Bonding (`NimBLEDevice::setSecurityAuth(true, false, true)`, Just Works —
+see `main.cpp`'s header comment for why no MITM protection), the app-layer
+shared-secret AUTH handshake, and TIME_SYNC are all implemented and
+confirmed round-tripping on real hardware, captured on the Stick's serial
+log:
+
+    [spike] pairing complete: bonded=1 encrypted=1 authenticated=0
+    [spike] onSubscribe: subValue=1
+    [spike] MTU negotiated: 517
+    [spike] AUTH frame: accepted
+    [spike] TIME_SYNC: epoch=1789570999
+    [spike] RX frame type=0x04 len=26: test transcript from phone
+
+and on the phone's on-screen log: STATUS frames (including another padded,
+multi-packet one) resumed flowing immediately once `appAuthed` flipped
+true, confirming the "nothing streams pre-auth" gate works in both
+directions, not just that AUTH itself was accepted.
+
+Getting there took three real, reproducible bugs, each found and fixed
+against actual hardware rather than assumed away:
+
+1. **RX's bond-state `BroadcastReceiver` never fired with
+   `RECEIVER_NOT_EXPORTED`.** That's the generally-recommended flag for a
+   system-only protected broadcast like `ACTION_BOND_STATE_CHANGED`, and it
+   compiled/ran without error — but `adb shell dumpsys activity broadcasts`
+   showed zero delivery history for the app's receiver even after the
+   Bluetooth stack's own logs confirmed `BOND_BONDING -> BOND_BONDED`
+   completed. Switched to `RECEIVER_EXPORTED`; not fully root-caused (may be
+   this specific Samsung build), but verified working, not assumed.
+2. **`NIMBLE_PROPERTY::WRITE_ENC` on the RX characteristic made every write
+   fail with `ERROR_GATT_WRITE_NOT_ALLOWED` (200)**, reproducibly, even with
+   bonding+encryption genuinely complete on the Stick's own side first, and
+   even after 5 retries with a 300ms backoff (ruling out a transient
+   encryption-settling race — a real retry would have cleared it). Root
+   cause not fully isolated; fixed by dropping to plain `WRITE` and relying
+   on the AUTH frame as the actual access-control gate instead, which is
+   what it was already doing the real work of regardless of the ATT layer's
+   own encryption requirement. Full reasoning in `main.cpp`'s header
+   comment.
+3. **A stale bond after repeated reflashing.** Once bonding started failing
+   consistently (`bonded=0` on 4/4 attempts, disconnect reason 19) after an
+   otherwise-unrelated firmware change, the cause was the phone holding an
+   old bond record that no longer matched the Stick's actual keys. No clean
+   adb-only single-device unpair exists (only a full Bluetooth
+   `factoryReset`, which would also drop unrelated paired devices like
+   headphones — not something to do without being asked). Fixed with a
+   manual Forget/unpair on the phone's Bluetooth settings, then a clean
+   re-pair succeeded first try.
+
+`ble_envelope.h`'s header comment carries the final security-model writeup
+and is the source of truth going forward; this log is the story of getting
+there.
 
 ## Where it stands
 
-Phase 1 and 2 passed; Phase 3 (byte-envelope codec + two-characteristic
-split) is in progress, per above — bonding/AUTH/TIME_SYNC remain. The BLE
-work has lived entirely in the separate `firmware/m5stick_ble_flash_spike/`
-and `android_companion/` throwaway spike projects so far — `m5stick_bridge`
-itself needs no changes until Phase 4 actually merges BLE in, so normal
-Wi-Fi-based firmware development can continue in the meantime with zero
+Phase 1, 2, and 3 all passed — bonding, AUTH, TIME_SYNC, and the codec
+(including multi-packet reassembly) are all confirmed working together on
+real hardware. Phase 4 (merging BLE into the real `firmware/m5stick_bridge/`)
+is next. The BLE work has lived entirely in the separate
+`firmware/m5stick_ble_flash_spike/` and `android_companion/` throwaway spike
+projects so far — `m5stick_bridge` itself needs no changes until Phase 4
+actually merges BLE in, so normal Wi-Fi-based firmware development can
+continue in the meantime with zero
 interaction with this track. See `TODO.md` for the remaining phases.

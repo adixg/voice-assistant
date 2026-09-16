@@ -1,15 +1,22 @@
 package com.aigf.blespike
 
-// Phase 2 throughput spike, extended for Phase 3 -- the BLE-central
-// counterpart to firmware/m5stick_ble_flash_spike/src/main.cpp. Scans for
-// that firmware's service UUID, connects, negotiates 2M PHY + max MTU,
-// subscribes to its notify (TX) characteristic, and now also discovers the
-// write (RX) characteristic added in Phase 3: incoming notifications are
-// decoded with BleEnvelopeCodec.kt and logged, and a test HEARD frame gets
-// written back a few seconds after subscribing, to prove both directions of
-// the real envelope codec round-trip on actual hardware, not just kbps in
-// one direction. No Tailscale/WebSocket bridging here -- that's Phase 5's
-// job, once bonding/AUTH/TIME_SYNC (the rest of Phase 3) are also done. See
+// Phase 3 spike, part 2 -- extends the byte-envelope codec (confirmed
+// round-tripping on real hardware 2026-09-16) with bonding + the app-layer
+// shared-secret AUTH handshake + TIME_SYNC, mirroring
+// firmware/m5stick_ble_flash_spike/src/main.cpp's own header comment for
+// the full security model and payload formats -- read that first, this
+// side must match it exactly.
+//
+// New connect sequence: connect -> PHY/MTU -> discover services -> bond
+// (device.createBond() if not already bonded, waiting for
+// ACTION_BOND_STATE_CHANGED=BONDED) -> send AUTH, then TIME_SYNC, then a
+// test HEARD frame, one at a time over the RX characteristic -> only then
+// subscribe to TX notifications. Subscribing last isn't strictly required
+// by the firmware (it gates on appAuthed, not subscribe order) but keeps
+// the log linear and easy to read while testing.
+//
+// No Tailscale/WebSocket bridging here -- that's Phase 5's job, once all of
+// Phase 3 is done. See
 // /home/aditya/.claude/plans/tranquil-drifting-stream.md, Phases 2-3.
 
 import android.Manifest
@@ -27,6 +34,10 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.bluetooth.BluetoothStatusCodes
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -36,6 +47,9 @@ import android.util.Log
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
@@ -49,6 +63,9 @@ class MainActivity : AppCompatActivity() {
         val TX_CHAR_UUID: UUID = UUID.fromString("c0819f6b-f0b7-4db8-9dcb-9f58b2745f9c")
         val RX_CHAR_UUID: UUID = UUID.fromString("9e5d1e40-6b0a-4b7a-9c2e-5b7c9a6a0e11")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        // Must match main.cpp's SHARED_SECRET exactly -- spike-only placeholder,
+        // same caveat as that file's own comment on it.
+        const val SHARED_SECRET = "spike-shared-secret-change-me"
         const val REQUEST_PERMS = 1
         // Real logcat output (Log.d), unlike log() below which only appends to
         // the on-screen TextView -- adb logcat --pid=<p> never showed this
@@ -59,7 +76,37 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logView: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var gatt: BluetoothGatt? = null
+    private var txCharacteristic: BluetoothGattCharacteristic? = null
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
+
+    // Set while waiting for ACTION_BOND_STATE_CHANGED=BONDED; run once and
+    // cleared by bondReceiver below.
+    private var pendingBondAction: (() -> Unit)? = null
+
+    // Bonding is a device-level (Bluetooth stack) event, not a per-GATT-op
+    // callback -- this is the only way to know it actually completed rather
+    // than assuming createBond() succeeded just because it returned true
+    // (that return value only means "request accepted", same trap as every
+    // other BluetoothGatt call this file has already had to fix once).
+    private val bondReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
+            val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE)
+            val name = when (state) {
+                BluetoothDevice.BOND_BONDING -> "BONDING"
+                BluetoothDevice.BOND_BONDED -> "BONDED"
+                BluetoothDevice.BOND_NONE -> "NONE"
+                else -> "?($state)"
+            }
+            Log.d(TAG, "bond state -> $name")
+            log("Bond state -> $name")
+            if (state == BluetoothDevice.BOND_BONDED) {
+                val action = pendingBondAction
+                pendingBondAction = null
+                action?.invoke()
+            }
+        }
+    }
 
     private val bytesThisSecond = AtomicLong(0)
     private val notifiesThisSecond = AtomicLong(0)
@@ -77,7 +124,21 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         logView = findViewById(R.id.logView)
-        log("Phase 2 throughput spike starting")
+        log("Phase 3 spike starting")
+
+        // RECEIVER_EXPORTED, not RECEIVER_NOT_EXPORTED -- tried NOT_EXPORTED
+        // first (the generally-recommended flag for a system-only protected
+        // broadcast like this one) and confirmed via `adb shell dumpsys
+        // activity broadcasts` that bonding genuinely completed
+        // (BOND_BONDING -> BOND_BONDED in the Bluetooth stack's own logs)
+        // while this app's registered receiver showed zero delivery history
+        // -- the broadcast never reached it. Whatever this device/OEM build
+        // does differently, EXPORTED is what actually receives it in
+        // practice; verified against the real phone, not assumed from docs.
+        ContextCompat.registerReceiver(
+            this, bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
+            ContextCompat.RECEIVER_EXPORTED
+        )
 
         val needed = listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
             .filter { ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
@@ -182,39 +243,25 @@ class MainActivity : AppCompatActivity() {
                 log("Service/TX characteristic not found (status=$status)")
                 return
             }
+            txCharacteristic = characteristic
             rxCharacteristic = service.getCharacteristic(RX_CHAR_UUID)
             if (rxCharacteristic == null) {
                 log("RX characteristic not found -- write path won't work")
+                return
             }
-            g.setCharacteristicNotification(characteristic, true)
-            val cccd = characteristic.getDescriptor(CCCD_UUID)
-            if (cccd != null) {
-                // The old descriptor.value=...; writeDescriptor(descriptor) pair is
-                // deprecated since API 33 for exactly the failure mode this app hit:
-                // Google's own docs call it "not memory safe... relies on a
-                // BluetoothGattDescriptor object whose underlying fields are subject
-                // to change outside this method." The old writeDescriptor(descriptor)
-                // also returns a plain Boolean with no visibility into *why* it
-                // failed -- and the return value was never even checked here, so a
-                // false return (operation never queued) looked identical to a
-                // pending write: onDescriptorWrite legitimately never fires for a
-                // call that was rejected at the entry point, which is exactly the
-                // silent hang this app was stuck in (log stopped right after
-                // "Writing CCCD to subscribe...", no success, no failure, forever).
-                // The phone here is SDK 36, well past where this applies.
-                val value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val result = g.writeDescriptor(cccd, value)
-                    log("writeDescriptor() -> $result (SUCCESS=${BluetoothStatusCodes.SUCCESS}). Waiting for onDescriptorWrite...")
-                } else {
-                    @Suppress("DEPRECATION")
-                    cccd.value = value
-                    @Suppress("DEPRECATION")
-                    val queued = g.writeDescriptor(cccd)
-                    log("writeDescriptor() queued=$queued. Waiting for onDescriptorWrite...")
-                }
+
+            // RX is WRITE_ENC on the firmware side (see main.cpp), so the
+            // first write needs bonding first, not just a connection --
+            // explicit createBond() + waiting for the real broadcast, not
+            // relying on the write silently triggering it, for a
+            // deterministic and clearly-logged sequence.
+            if (g.device.bondState == BluetoothDevice.BOND_BONDED) {
+                log("Already bonded.")
+                startAuthSequence(g)
             } else {
-                log("CCCD descriptor missing -- cannot subscribe")
+                log("Not bonded -- requesting bond (may show a system pairing prompt)...")
+                pendingBondAction = { startAuthSequence(g) }
+                g.device.createBond()
             }
         }
 
@@ -226,12 +273,6 @@ class MainActivity : AppCompatActivity() {
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                 log("Subscribed (status=$status). Measuring throughput...")
-                // Delayed, and only after this callback (not fired alongside
-                // it) -- same single-operation-queue rule as the PHY/MTU/
-                // subscribe chain above: a write fired before this callback
-                // landed would silently vanish into the same dead-queue bug
-                // that took real debugging to find the first time.
-                handler.postDelayed({ sendTestHeardFrame() }, 3000)
             } else {
                 log("CCCD write FAILED (status=$status) -- not subscribed, no notifications will arrive")
             }
@@ -271,28 +312,120 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Encodes one HEARD frame and writes its packets to the RX characteristic
-    // in order, one write per packet, each waiting for onCharacteristicWrite
-    // before the next fires -- writeCharacteristic() joins the same queue as
-    // everything else on this BluetoothGatt (see the connect-time comment),
-    // so firing several packets back-to-back here would hit the identical
-    // silent-drop bug this file already spent real effort finding once.
-    private fun sendTestHeardFrame() {
-        val rx = rxCharacteristic
-        val g = gatt
-        if (rx == null || g == null) {
-            log("Can't send test frame -- RX characteristic or connection missing")
-            return
-        }
-        log("Sending test HEARD frame...")
-        val payload = "test transcript from phone".toByteArray(Charsets.UTF_8)
-        val packets = ArrayDeque<ByteArray>()
-        encodeFrame(FrameType.HEARD, payload) { packets.addLast(it); true }
-        writeNextPacket(g, rx, packets)
+    // Post-bonding sequence: AUTH (the shared secret, gates everything else
+    // on the firmware side -- see main.cpp), TIME_SYNC (current epoch
+    // seconds, 8 bytes little-endian, matching main.cpp's memcpy into an
+    // int64_t on this same little-endian platform), then one test HEARD
+    // frame. Each frame is only sent after the previous one's write(s) fully
+    // complete; once the queue drains, subscribeToNotifications() runs --
+    // see sendNextFrame().
+    private fun startAuthSequence(g: BluetoothGatt) {
+        log("Bonded -- sending AUTH, TIME_SYNC, then a test HEARD frame...")
+        val epochSeconds = System.currentTimeMillis() / 1000
+        val timeSyncPayload = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+            .putLong(epochSeconds).array()
+
+        outgoingFrames.addLast(FrameType.AUTH to SHARED_SECRET.toByteArray(Charsets.UTF_8))
+        outgoingFrames.addLast(FrameType.TIME_SYNC to timeSyncPayload)
+        outgoingFrames.addLast(FrameType.HEARD to "test transcript from phone".toByteArray(Charsets.UTF_8))
+        onAllFramesSent = { subscribeToNotifications(g) }
+        sendNextFrame(g)
     }
 
-    private fun writeNextPacket(g: BluetoothGatt, rx: BluetoothGattCharacteristic, packets: ArrayDeque<ByteArray>) {
-        val packet = packets.removeFirstOrNull() ?: return
+    private val outgoingFrames = ArrayDeque<Pair<Byte, ByteArray>>()
+    private var onAllFramesSent: (() -> Unit)? = null
+
+    private fun subscribeToNotifications(g: BluetoothGatt) {
+        val characteristic = txCharacteristic
+        if (characteristic == null) {
+            log("No TX characteristic -- can't subscribe")
+            return
+        }
+        g.setCharacteristicNotification(characteristic, true)
+        val cccd = characteristic.getDescriptor(CCCD_UUID)
+        if (cccd != null) {
+            // The old descriptor.value=...; writeDescriptor(descriptor) pair is
+            // deprecated since API 33 for exactly the failure mode this app hit:
+            // Google's own docs call it "not memory safe... relies on a
+            // BluetoothGattDescriptor object whose underlying fields are subject
+            // to change outside this method." The old writeDescriptor(descriptor)
+            // also returns a plain Boolean with no visibility into *why* it
+            // failed -- and the return value was never even checked here, so a
+            // false return (operation never queued) looked identical to a
+            // pending write: onDescriptorWrite legitimately never fires for a
+            // call that was rejected at the entry point, which is exactly the
+            // silent hang this app was stuck in (log stopped right after
+            // "Writing CCCD to subscribe...", no success, no failure, forever).
+            // The phone here is SDK 36, well past where this applies.
+            val value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val result = g.writeDescriptor(cccd, value)
+                log("writeDescriptor() -> $result (SUCCESS=${BluetoothStatusCodes.SUCCESS}). Waiting for onDescriptorWrite...")
+            } else {
+                @Suppress("DEPRECATION")
+                cccd.value = value
+                @Suppress("DEPRECATION")
+                val queued = g.writeDescriptor(cccd)
+                log("writeDescriptor() queued=$queued. Waiting for onDescriptorWrite...")
+            }
+        } else {
+            log("CCCD descriptor missing -- cannot subscribe")
+        }
+    }
+
+    // Pops and sends the next queued logical frame, splitting it into
+    // packets via encodeFrame() same as before. When the queue is empty,
+    // runs whatever onAllFramesSent was set to (startAuthSequence sets it
+    // to subscribeToNotifications) exactly once.
+    private fun sendNextFrame(g: BluetoothGatt) {
+        val rx = rxCharacteristic
+        if (rx == null) {
+            log("Can't send -- no RX characteristic")
+            return
+        }
+        val next = outgoingFrames.removeFirstOrNull()
+        if (next == null) {
+            val done = onAllFramesSent
+            onAllFramesSent = null
+            done?.invoke()
+            return
+        }
+        val (type, payload) = next
+        log("Sending frame type=0x%02X (%d B payload)...".format(type, payload.size))
+        val packets = ArrayDeque<ByteArray>()
+        encodeFrame(type, payload) { packets.addLast(it); true }
+        writeNextPacket(g, rx, packets) { sendNextFrame(g) }
+    }
+
+    // Writes packets to the RX characteristic in order, one write per
+    // packet, each waiting for onCharacteristicWrite before the next fires
+    // -- writeCharacteristic() joins the same queue as everything else on
+    // this BluetoothGatt (see the connect-time comment), so firing several
+    // packets back-to-back here would hit the identical silent-drop bug
+    // this file already spent real effort finding once. onFrameDone runs
+    // once this frame's packets are all confirmed sent.
+    //
+    // retriesLeft handles a real, reproducible failure: the very first
+    // write right after bonding completes can synchronously fail with
+    // ERROR_GATT_WRITE_NOT_ALLOWED (200), even though the Stick's own
+    // serial log already showed onAuthenticationComplete(encrypted=true)
+    // before this write was attempted. This is a documented Android quirk
+    // (Martijn van Welie's "Making Android BLE work" series: Android's own
+    // stack can lag briefly before it treats a just-completed encryption as
+    // settled for a write-permission check), not a bug in this app's
+    // sequencing -- confirmed by hitting it on real hardware immediately
+    // after "Already bonded." in this app's own log. ERROR_GATT_WRITE_
+    // REQUEST_BUSY (201) is the same kind of transient condition. Peek
+    // (not pop) the packet so a retry resends the same one, not the next.
+    private fun writeNextPacket(
+        g: BluetoothGatt, rx: BluetoothGattCharacteristic,
+        packets: ArrayDeque<ByteArray>, retriesLeft: Int = 5, onFrameDone: () -> Unit
+    ) {
+        val packet = packets.firstOrNull()
+        if (packet == null) {
+            onFrameDone()
+            return
+        }
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             g.writeCharacteristic(rx, packet, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
         } else {
@@ -303,12 +436,21 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             if (g.writeCharacteristic(rx)) BluetoothStatusCodes.SUCCESS else -1
         }
-        if (result != BluetoothStatusCodes.SUCCESS) {
-            log("writeCharacteristic() queue failed ($result), aborting frame")
-            return
+        when {
+            result == BluetoothStatusCodes.SUCCESS -> {
+                packets.removeFirst()  // only now -- the write was actually queued
+                // Chained from onCharacteristicWrite, not here -- see that callback.
+                pendingPacketQueues[rx.uuid] = { writeNextPacket(g, rx, packets, onFrameDone = onFrameDone) }
+            }
+            (result == BluetoothStatusCodes.ERROR_GATT_WRITE_NOT_ALLOWED ||
+                result == BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY) && retriesLeft > 0 -> {
+                log("write not ready yet ($result), retrying ($retriesLeft left)...")
+                handler.postDelayed({ writeNextPacket(g, rx, packets, retriesLeft - 1, onFrameDone) }, 300)
+            }
+            else -> {
+                log("writeCharacteristic() failed ($result), aborting frame")
+            }
         }
-        // Chained from onCharacteristicWrite, not here -- see that callback.
-        pendingPacketQueues[rx.uuid] = { writeNextPacket(g, rx, packets) }
     }
 
     // One characteristic writing at a time in practice (this spike only ever
@@ -358,6 +500,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
+        unregisterReceiver(bondReceiver)
         gatt?.close()
     }
 }
