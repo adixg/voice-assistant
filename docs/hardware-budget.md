@@ -75,14 +75,23 @@ realtime**.
 Conclusions from this table:
 
 - **Nano-on-GPU beats Turbo-on-GPU outright** — 948 MiB less VRAM *and*
-  faster (1.18s vs 1.53s). There is no reason to run Turbo here. Nano is now
-  the bridge's default via `--chatterbox-nano`.
+  faster (1.18s vs 1.53s). There is no reason to run Turbo over Nano when
+  Chatterbox is the chosen backend at all.
 - **Nano on CPU does not reach Resemble's claimed 3x realtime.** Measured
   **0.79x on 20 cores**, i.e. slower than realtime and a 3.7s wait per reply.
   Treat the vendor's "3x realtime on 8 CPU cores" as not reproducible here.
-- **VITS is the only genuinely free-on-VRAM option**, but it is speaker-id
-  based and **cannot clone a voice** — switching to it means giving up the
-  Hinata voice.
+- **VITS is the only genuinely free-on-VRAM option**, and it does not clone
+  a voice the way Chatterbox does — it picks from the VITS-Umamusume model's
+  built-in speaker set instead (default speaker id 10, Grass Wonder).
+
+**2026-09-16: the default TTS backend switched from Chatterbox to VITS**
+(Umamusume voice, requested outright rather than following from a VRAM
+argument — the Chatterbox-Nano-on-CUDA numbers above are unchanged and it
+remains available via `--tts-backend chatterbox --chatterbox-nano` for
+anyone who wants voice cloning back). Since VITS runs at 0 MiB on the CPU,
+the GPU is now free for STT + LLM only by default, which loosens the "LLM
+already spilling to CPU" finding below — worth re-measuring `GET /api/ps`
+against a clean idle card if that matters for a future change.
 
 ### Chatterbox Nano — needs a git install, not a PyPI version
 

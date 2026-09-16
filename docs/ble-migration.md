@@ -466,12 +466,30 @@ independently confirmed via `ss -tn state established` showing the live TCP
 connection — the same test methodology as every other milestone in this
 log, not just trusting the app's own status line.
 
-Not yet tested: a real STT/LLM/TTS conversation turn (needs `bridge_server.py`
-itself running, not just `tools/echo_server.py` as the stand-in) and the
-soak test (Phase 6).
+Not yet tested at that point: a real STT/LLM/TTS conversation turn (needs
+`bridge_server.py` itself running, not just `tools/echo_server.py` as the
+stand-in) and the soak test.
+
+**Phase 6 conversation test done (2026-09-16).** Ran the real
+`bridge_server.py` (not the echo stand-in) end to end over BLE against the
+already-flashed `m5stick_bridge` firmware and the Phase 5 Android app: two
+full turns completed, each independently confirmed in both the server log
+and the Stick's own serial log. Server log: `speaker score: 0.611 (accepted,
+threshold 0.6)` / `0.661 (accepted, ...)`, correct STT transcripts ("Good
+morning. How are you doing?", "Hi, what do you do today? I missed you"), and
+in-character LLM replies. Stick serial log independently showed the matching
+`listening... -> Processing -> heard <transcript> -> Generating <reply> ->
+Done` cycle for both turns, with no BLE drops. This also happened to be the
+first end-to-end test of the new default TTS backend (VITS-Umamusume,
+switched from Chatterbox the same day at the owner's request — see
+`CLAUDE.md`'s hardware-budget section and `docs/hardware-budget.md`); it
+worked over the BLE audio path with no changes needed on the firmware or
+transport side, confirming the TTS-backend swap is fully decoupled from the
+BLE transport as designed.
 
 ## Where it stands
 
-All of Phases 1-5 are done. Phase 6 (cutover: a full conversation test
-against the real `bridge_server.py`, then a soak test, then updating
-`README.md`'s architecture diagram) is what's left. See `TODO.md`.
+Phases 1-5 are done, and Phase 6's conversation test now is too. **Still
+remaining**: the soak test (hours-long connection, reconnect after BT
+toggle/reboot/deep-sleep) and updating `README.md`'s architecture diagram.
+See `TODO.md`.

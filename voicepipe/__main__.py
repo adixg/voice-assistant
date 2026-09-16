@@ -50,7 +50,7 @@ def build_parser():
 
     speak = sub.add_parser("speak", help="text -> wav via a TTS backend")
     speak.add_argument("text")
-    speak.add_argument("--tts-backend", default="chatterbox", choices=TTS.names())
+    speak.add_argument("--tts-backend", default="vits", choices=TTS.names())
     TTS.add_arguments(speak)
     speak.set_defaults(func=cmd_speak)
 

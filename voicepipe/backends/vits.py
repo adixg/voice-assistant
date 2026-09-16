@@ -1,9 +1,9 @@
-"""VITS-Umamusume — the original voice, kept as the CPU-friendly alternative.
+"""VITS-Umamusume — the default voice (Grass Wonder, speaker id 10).
 
 Runs in the `uma-tts` conda env (requirements/uma-tts.txt) via tts_cli.py,
 and needs the cloned Space at VITS-Umamusume-voice-synthesizer/. Fast enough
-on CPU to leave the GPU entirely to whisper, which is why it stays useful
-even though Chatterbox is the default.
+on CPU to leave the GPU entirely to whisper, which is also why it's the
+default over Chatterbox rather than just an alternative.
 
 Standalone debug use (writes wavs, doesn't play them):
     python -m voicepipe speak "hello there" --tts-backend vits --vits-speaker 10

@@ -1,10 +1,10 @@
 # aicompanion
 
-A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → Chatterbox Turbo (TTS) → speaker.
+A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → VITS-Umamusume (TTS) → speaker.
 Runs either through this machine's local mic/speaker (`chat_loop.py`) or through
 an M5StickS3 over Wi-Fi (`bridge_server.py` + `firmware/m5stick_bridge/`). TTS is
-swappable (`--tts-backend chatterbox` (default) or `vits`, the older
-VITS-Umamusume synthesizer) — see "Swapping backends" below.
+swappable (`--tts-backend vits` (default) or `chatterbox`, which can clone a
+voice from a reference clip) — see "Swapping backends" below.
 
 ## What the M5Stick does today
 
@@ -138,8 +138,8 @@ voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
     hermes_agent.py         Hermes Agent, or any OpenAI-compatible
                             endpoint (OpenRouter, vLLM, llama.cpp,
                             LM Studio, LiteLLM)      ("hermes-agent", LLM)
-    chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS, default)
-    vits.py                 VITS-Umamusume           ("vits", TTS)
+    chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS)
+    vits.py                 VITS-Umamusume           ("vits", TTS, default)
   cli.py                  the flags every entrypoint shares, assembled from
                           the registries — this is why no entrypoint mentions
                           a concrete backend
@@ -159,10 +159,10 @@ chat_loop.py           local-mic terminal (+ optional "speech orb" GUI) entrypoi
 bridge_server.py       M5StickS3 WebSocket bridge entrypoint
 chatterbox_cli.py       headless Chatterbox Turbo worker, shelled out to from
                          backends/chatterbox.py (own conda env, see
-                         requirements/chatterbox.txt) — default TTS backend
+                         requirements/chatterbox.txt) — --tts-backend chatterbox
 tts_cli.py              headless VITS worker, shelled out to from
                          backends/vits.py (own conda env, see
-                         requirements/uma-tts.txt) — --tts-backend vits
+                         requirements/uma-tts.txt) — default TTS backend
 speech_orb.py           the desktop face chat_loop.py shows — a port of the
                          Stick's own UI (same sprites, palette, particle
                          field and waveform bars), not a lookalike
@@ -278,7 +278,7 @@ and a `pio run` compile check of `firmware/m5stick_bridge/`.
 implementation — they ask `voicepipe.registry` for one by name:
 
 ```bash
-python chat_loop.py --llm-backend ollama --stt-backend faster-whisper --tts-backend chatterbox
+python chat_loop.py --llm-backend ollama --stt-backend faster-whisper --tts-backend vits
 ```
 
 **Adding a backend is one file.** Drop it in `voicepipe/backends/` and it is

@@ -1,4 +1,4 @@
-"""Chatterbox Turbo (Resemble AI) — the default voice.
+"""Chatterbox Turbo (Resemble AI) — voice-cloning alternative to the default VITS voice.
 
 350M params, MIT licensed, and able to clone a voice from a single reference
 clip with no training step: pass --chatterbox-prompt a clip of 10-20s of

@@ -45,8 +45,8 @@ def build_parser(description):
                     help="LLM backend (default: ollama)")
     ap.add_argument("--stt-backend", default="faster-whisper", choices=STT.names(),
                     help="STT backend (default: faster-whisper)")
-    ap.add_argument("--tts-backend", default="chatterbox", choices=TTS.names(),
-                    help="TTS backend (default: chatterbox)")
+    ap.add_argument("--tts-backend", default="vits", choices=TTS.names(),
+                    help="TTS backend (default: vits)")
     ap.add_argument("--stt-lang", default="en",
                     help="STT language: en, ja, ... or 'auto' to detect per utterance (default: en)")
     ap.add_argument("--no-voice", action="store_true", help="text only, skip TTS entirely")
