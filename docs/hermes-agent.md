@@ -584,8 +584,11 @@ table below.
 
 It warned: `Context file CLAUDE.md TRUNCATED: 49904 chars exceeds limit of
 20000`. So running `hermes` from this repo silently truncates `CLAUDE.md` at
-20K chars — the reason `CLAUDE.md` was later split into this `docs/` set with
-only a lean index left at the top level.
+20K chars — the first concrete symptom of the file having grown too large,
+though the actual reason it was later split into this `docs/` set (with only
+a lean index left at the top level) is that Claude Code itself loads
+`CLAUDE.md` in full every session regardless of what that session is about;
+Hermes isn't part of this project's pipeline.
 
 ## hermes3:8b RUNS AT 64K ENTIRELY ON THE GPU — measured 2026-09-07
 
