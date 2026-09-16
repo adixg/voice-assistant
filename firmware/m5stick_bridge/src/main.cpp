@@ -797,17 +797,19 @@ void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
 // call it; defined for real here, now that BleTransport::ready() exists.
 static bool bleLinkUp() { return BleTransport::ready(); }
 
+// Kicks off BLE advertising and returns immediately -- does NOT wait for a
+// connection. It used to block here in a while loop, which ran inside
+// setup(), before loop() (where BtnA's screen-cycling lives) ever started;
+// with the phone's companion app not running, the Stick would sit stuck on
+// this screen forever with no way to reach the clock or pomodoro screens,
+// neither of which need BLE at all (found live, 2026-09-16). loop()'s own
+// first iteration (see the bleReadyNow check there) picks up the moment the
+// connection actually completes and does what this used to do after the
+// wait: start the mic, leave UI_CONNECTING.
 static void connectNetwork() {
   uiState = UI_CONNECTING;
   setStatus("ble...", "advertising");
   BleTransport::begin();
-  while (!BleTransport::ready()) {
-    delay(150);
-    M5.update();
-    maybeDrawFace();
-  }
-  M5.Mic.begin();
-  uiState = UI_IDLE;
 }
 
 // ---------------------------------------------------------------- audio config
@@ -892,6 +894,18 @@ void setup() {
 void loop() {
   M5.update();
 
+  // The one-time transition connectNetwork() used to make synchronously,
+  // now made here on whichever loop() iteration first sees the connection
+  // actually up -- everything else in loop() (screen cycling included) has
+  // been running all along, connected or not.
+  static bool bleWasReady = false;
+  bool bleReadyNow = BleTransport::ready();
+  if (bleReadyNow && !bleWasReady) {
+    M5.Mic.begin();
+    if (uiState == UI_CONNECTING) uiState = UI_IDLE;
+  }
+  bleWasReady = bleReadyNow;
+
   if (transientUntil && millis() > transientUntil) {
     transientUntil = 0;
     if (uiState == transientState) uiState = UI_IDLE;  // else something else (e.g. a dropped
@@ -937,7 +951,10 @@ void loop() {
     }
     if (btnAArmed && recState == REC_IDLE && M5.BtnA.isPressed() &&
         millis() - btnAPressedMs >= TALK_HOLD_MS &&
-        uiState != UI_SPEAKING) {
+        uiState != UI_SPEAKING && bleReadyNow) {  // screen cycling works with
+        // no connection now (see loop()'s top); talking still needs one --
+        // silently swallow a hold with nothing connected rather than start
+        // "listening" that has nowhere to send frames to.
       btnAArmed = false;  // consumed as a hold, so the release won't toggle
       recState = RECORDING;
       uiState = UI_LISTENING;
