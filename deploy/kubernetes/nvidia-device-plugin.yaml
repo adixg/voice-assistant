@@ -1,0 +1,76 @@
+# Upstream https://github.com/NVIDIA/k8s-device-plugin static manifest
+# (deployments/static/nvidia-device-plugin.yml, v0.20.0), with
+# runtimeClassName: nvidia added -- see runtimeclass.yaml's comment for why
+# that's needed on k3s instead of a containerd default-runtime change. This
+# is what turns nvidia.com/gpu into an allocatable resource kubelet reports,
+# which ollama-gtx1650.yaml, ollama-rtx4060.yaml, and stt.yaml all request.
+#
+# Also carries a time-slicing ConfigMap: the GTX 1650 node has exactly one
+# physical GPU, but both ollama-gtx1650 and stt request nvidia.com/gpu: 1 on
+# it -- without time-slicing the device plugin treats that as one exclusive
+# claim and the second pod sits Pending ("Insufficient nvidia.com/gpu")
+# forever, confirmed against the live cluster. replicas: 2 matches exactly
+# those two pods (tts runs the vits backend and doesn't request a GPU at
+# all). Time-slicing only serializes CUDA scheduling -- it does not
+# partition VRAM -- but that's the same sharing bridge_server.py's single
+# process already does between STT/LLM/TTS on this card today, so it's not
+# a new risk, just the same one k8s wasn't told about.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nvidia-device-plugin-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    version: v1
+    sharing:
+      timeSlicing:
+        resources:
+        - name: nvidia.com/gpu
+          replicas: 2
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      runtimeClassName: nvidia
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      priorityClassName: "system-node-critical"
+      containers:
+        - image: nvcr.io/nvidia/k8s-device-plugin:v0.20.0
+          name: nvidia-device-plugin-ctr
+          env:
+            - name: CONFIG_FILE
+              value: /etc/nvidia-device-plugin/config.yaml
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: kubelet-device-plugins-dir
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: device-plugin-config
+              mountPath: /etc/nvidia-device-plugin
+      volumes:
+        - name: kubelet-device-plugins-dir
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: device-plugin-config
+          configMap:
+            name: nvidia-device-plugin-config

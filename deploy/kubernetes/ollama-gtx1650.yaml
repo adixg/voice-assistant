@@ -22,6 +22,7 @@ spec:
     spec:
       nodeSelector:
         gpu-tier: gtx1650
+      runtimeClassName: nvidia
       containers:
         - name: ollama
           image: ollama/ollama:latest

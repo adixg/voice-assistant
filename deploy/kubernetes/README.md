@@ -13,9 +13,26 @@ file is just the how-to-apply.
    `curl -sfL https://get.k3s.io | K3S_URL=https://<home-server>:6443 K3S_TOKEN=<token> sh -`.
    It's fine for this node to be offline most of the time; k3s just marks it
    `NotReady` and nothing gets scheduled there until it rejoins.
-3. Install the [NVIDIA device plugin](https://github.com/NVIDIA/k8s-device-plugin)
-   on both nodes so pods can request `nvidia.com/gpu: 1`.
-4. Label each node with which GPU it actually has — nothing in k3s infers
+
+   Use the home server's **Tailscale MagicDNS name** for `<home-server>`
+   (currently `arch-ssd.<tailnet>.ts.net`, confirm with `tailscale status`
+   on that box), not its LAN IP — the LAN address is DHCP-assigned with no
+   reservation, so it can change on a lease renewal and silently break this
+   join and anything else pointed at it. The home server is a laptop with
+   `chassis: laptop` in `hostnamectl` despite being the always-on node, so
+   its Wi-Fi address is exactly as unstable as any other laptop's.
+3. On each GPU node: install `nvidia-container-toolkit` (on Arch,
+   `pacman -S nvidia-container-toolkit`; it's in `extra`, no AUR needed),
+   then `systemctl restart k3s` (or `k3s-agent` on the laptop) so k3s
+   re-generates its containerd config and picks up `nvidia-container-runtime`
+   automatically. Verify with
+   `grep -A3 'runtimes.nvidia' /var/lib/rancher/k3s/agent/etc/containerd/config.toml`
+   — k3s adds it as an *additional* runtime named `nvidia`, not the default,
+   which is why `runtimeclass.yaml` and the `runtimeClassName: nvidia` on
+   the GPU pod specs below exist (see that file's comment for the reasoning).
+4. Apply `runtimeclass.yaml` and `nvidia-device-plugin.yaml` (below) so pods
+   can request `nvidia.com/gpu: 1`.
+5. Label each node with which GPU it actually has — nothing in k3s infers
    this automatically:
    ```
    kubectl label node <home-server-hostname> gpu-tier=gtx1650
@@ -54,6 +71,8 @@ pull them, pick one before `kubectl apply`:
 
 ```
 kubectl apply -f namespace.yaml
+kubectl apply -f runtimeclass.yaml
+kubectl apply -f nvidia-device-plugin.yaml
 kubectl apply -f ollama-gtx1650.yaml
 kubectl apply -f ollama-rtx4060.yaml
 kubectl apply -f stt.yaml

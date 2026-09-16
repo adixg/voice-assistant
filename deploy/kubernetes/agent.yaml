@@ -20,7 +20,7 @@ spec:
       containers:
         - name: agent
           image: ghcr.io/adixg/aicompanion-agent:latest
-          args: ["--llm-backend", "ollama", "--model", "rina"]
+          args: ["--llm-backend", "ollama", "--model", "qwen3.5:4b"]
           env:
             - name: OLLAMA_HOST
               value: "http://ollama-gtx1650:11434"
