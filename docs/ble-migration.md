@@ -295,14 +295,25 @@ subscribing, using the same single-operation-queue discipline (chain off
 each op's real completion callback) that Phase 2's debugging arc already
 established is required on `BluetoothGatt`.
 
+**Round-trip CONFIRMED on real hardware (2026-09-16).** Both sides flashed
+and run; captured via the Stick's serial log and the phone's `adb logcat`
+simultaneously, not inferred from one side alone:
+
+- **TX (Stick→phone)**: STATUS frames decoded correctly and continuously
+  (`decoded frame type=0x05 len=13: alive tick=N` every ~200ms), including
+  the padded frame every 25th tick reassembling correctly from two physical
+  packets — `onCharacteristicChanged` fired once for 500 bytes then once for
+  54 bytes, decoded as one `len=550` logical frame. Proves the continuation
+  path works on real hardware, not just the trivial single-packet case.
+- **RX (phone→Stick)**: the Stick's serial log showed
+  `[spike] RX frame type=0x04 len=26: test transcript from phone` a few
+  seconds after subscribing — the phone's write, chained through
+  `BluetoothGatt`'s single-operation queue as designed, reassembled and
+  decoded correctly on the firmware side.
+
 **Not yet done in Phase 3**: bonding, the app-layer shared-secret AUTH
-handshake, and TIME_SYNC. Deliberately deferred to the next increment —
-there's no point securing/time-syncing a channel that hasn't been confirmed
-to round-trip correctly yet. Next concrete step: flash both sides, confirm
-the STATUS/HEARD round trip (including the padded multi-packet STATUS
-frame) actually appears correctly on both the Stick's serial log and the
-phone's on-screen log, *then* add bonding/AUTH/TIME_SYNC on top of a
-verified-working codec.
+handshake, and TIME_SYNC. Deliberately deferred until the codec round-trip
+itself was confirmed — now that it is, these are the next concrete step.
 
 ## Where it stands
 
