@@ -6,9 +6,19 @@ was specific to an earlier dev session and no longer applies now that k3s
 actually runs here), labeled `gpu-tier=gtx1650`, with `ollama-gtx1650` and
 `stt` both `Running` and confirmed doing real CUDA inference inside their
 containers (2026-09-16, `kubectl exec ... nvidia-smi` and each pod's own
-startup log both show the GTX 1650). The RTX 4060 laptop hasn't joined as a
-second node yet. Treat this doc as the design + the code that implements it,
-plus now a partial live result — see each phase's status line.
+startup log both show the GTX 1650). **`agent` and `tts` are also applied
+and `Running`** (confirmed live via `kubectl -n aicompanion get pods/
+deployments` over SSH, 2026-09-16 — this had drifted out of sync with this
+doc, which still said "still open" for both; nothing about applying them was
+ever hard, they'd just been applied without a doc update). `agent`'s
+`OLLAMA_HOST` env is `http://ollama-gtx1650:11434`, confirming the home
+server is today's (only) target. `gateway` is **not** applied — nothing in
+the cluster speaks to the Stick yet, `bridge_server.py` remains what's
+actually flashed against. The RTX 4060 laptop hasn't joined as a second node
+yet, and `controller/gpu_scheduler/` is not deployed (still design +
+skeleton, per its own README). Treat this doc as the design + the code that
+implements it, plus now a partial live result — see each phase's status
+line.
 
 **GPU runtime chain, verified end to end on `arch-ssd`:**
 `nvidia-container-toolkit` (installed via pacman) → k3s auto-detects
@@ -141,11 +151,13 @@ automated-switching design.
    hardware.
 2. **Cluster bring-up + Helm + ArgoCD** — **partially done**: k3s installed
    and labeled on the home server, GPU runtime chain verified end to end
-   (see status section above), `ollama-gtx1650` and `stt` applied and
-   `Running` with confirmed GPU access. Still open: join the RTX 4060 laptop
-   as a second node, apply `tts`/`agent`/`gateway`, validate the gateway's
-   Phase-1 WS endpoint against a test client, chart into `deploy/helm/`,
-   wire `deploy/argocd/` for GitOps sync.
+   (see status section above), `ollama-gtx1650`, `stt`, `tts`, and `agent`
+   all applied and `Running` with confirmed GPU access. Still open: join the
+   RTX 4060 laptop as a second node, apply `ollama-rtx4060`/`gateway`, deploy
+   `controller/gpu_scheduler/` and validate the node-up/node-down switch
+   against the real two-node cluster, validate the gateway's Phase-1 WS
+   endpoint against a test client, chart into `deploy/helm/`, wire
+   `deploy/argocd/` for GitOps sync.
 3. **Observability** — `observability/prometheus/` + `observability/grafana/`,
    turning the hand-measured numbers this repo already tracks into live
    dashboards.
