@@ -6,6 +6,28 @@ an M5StickS3 over Wi-Fi (`bridge_server.py` + `firmware/m5stick_bridge/`). TTS i
 swappable (`--tts-backend chatterbox` (default) or `vits`, the older
 VITS-Umamusume synthesizer) — see "Swapping backends" below.
 
+## What the M5Stick does today
+
+- **Voice chatbot** — hold BtnA to talk, release to send; STT → LLM → TTS →
+  speaker, same pipeline as the desktop entrypoint.
+- **Speaker verification** ("voice recognition") — replies are gated to the
+  enrolled owner's voice (WeSpeaker ECAPA-TDNN-512), so someone else in the
+  room doesn't get an answer. See `docs/voice-pipeline.md`.
+- **Three screens, cycled by tapping BtnA** (a hold still talks from any of
+  them): Rina's animated pixel-art face, a Catppuccin-themed **clock**
+  (NTP-synced over Wi-Fi), and a **pomodoro timer** (50 min focus / 10 min
+  break by default — BtnB click starts/pauses, BtnB double-click resets).
+- **Proactive/unprompted speech** — reminders, encouragement, or a
+  build-finished ping can all speak without a button press (see "Unprompted
+  lines" below).
+- Powering the device off is the **physical power button** (double-click),
+  not a firmware feature — see `docs/firmware-notes.md`.
+
+Currently in progress, not yet on the Stick: a BLE transport to replace the
+Wi-Fi hotspot (`docs/ble-migration.md`), and the features tracked in
+`TODO.md` (wake word activation, an IMU wrist-raise gesture wake, haptic
+feedback, voice isolation).
+
 ## Architecture
 
 Two entrypoints share one pipeline. They differ only in where audio comes from
@@ -137,10 +159,10 @@ chat_loop.py           local-mic terminal (+ optional "speech orb" GUI) entrypoi
 bridge_server.py       M5StickS3 WebSocket bridge entrypoint
 chatterbox_cli.py       headless Chatterbox Turbo worker, shelled out to from
                          backends/chatterbox.py (own conda env, see
-                         requirements-chatterbox.txt) — default TTS backend
+                         requirements/chatterbox.txt) — default TTS backend
 tts_cli.py              headless VITS worker, shelled out to from
                          backends/vits.py (own conda env, see
-                         requirements-uma-tts.txt) — --tts-backend vits
+                         requirements/uma-tts.txt) — --tts-backend vits
 speech_orb.py           the desktop face chat_loop.py shows — a port of the
                          Stick's own UI (same sprites, palette, particle
                          field and waveform bars), not a lookalike
@@ -181,7 +203,15 @@ firmware/
 tests/                  pytest suite for voicepipe/ and bridge_server.py's
                          wire protocol — see "Running the tests" below
 
-archive/                superseded experiments (OpenVoice, Kokoro) kept for reference
+docs/                   detailed investigation logs behind CLAUDE.md's
+                         current-state summaries (hardware budget, the local
+                         agent investigation, voice pipeline, firmware bugs,
+                         the BLE migration) — CLAUDE.md itself is a lean index
+TODO.md                 the active punch list
+
+models/                 Ollama Modelfiles (`rina`'s persona on top of qwen3:8b)
+requirements/           the three conda envs' pinned dependencies
+
 VITS-Umamusume-voice-synthesizer/   cloned HF Space (model code + weights)
 ```
 
@@ -355,4 +385,4 @@ the laptop.
 
 `./setup_envs.sh` creates the three conda envs (`chat`, `chatterbox-tts`,
 `uma-tts`) and clones the VITS-Umamusume Space. See its header comment and
-`requirements-*.txt` for details.
+`requirements/*.txt` for details.
