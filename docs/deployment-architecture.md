@@ -1,24 +1,31 @@
 # Home-server deployment architecture (k3s across two GPU nodes)
 
-Status: **Phase 2 (cluster bring-up) started, home-server node only.** k3s is
-live on the home server (`arch-ssd`, native Arch, not WSL2 — that limitation
-was specific to an earlier dev session and no longer applies now that k3s
-actually runs here), labeled `gpu-tier=gtx1650`, with `ollama-gtx1650` and
-`stt` both `Running` and confirmed doing real CUDA inference inside their
-containers (2026-09-16, `kubectl exec ... nvidia-smi` and each pod's own
-startup log both show the GTX 1650). **`agent` and `tts` are also applied
-and `Running`** (confirmed live via `kubectl -n aicompanion get pods/
-deployments` over SSH, 2026-09-16 — this had drifted out of sync with this
-doc, which still said "still open" for both; nothing about applying them was
-ever hard, they'd just been applied without a doc update). `agent`'s
-`OLLAMA_HOST` env is `http://ollama-gtx1650:11434`, confirming the home
-server is today's (only) target. `gateway` is **not** applied — nothing in
-the cluster speaks to the Stick yet, `bridge_server.py` remains what's
-actually flashed against. The RTX 4060 laptop hasn't joined as a second node
-yet, and `controller/gpu_scheduler/` is not deployed (still design +
-skeleton, per its own README). Treat this doc as the design + the code that
-implements it, plus now a partial live result — see each phase's status
-line.
+Status: **Phase 2 (cluster bring-up) underway on both nodes.** `arch-ssd`
+(GTX 1650, native Arch): k3s live, labeled `gpu-tier=gtx1650`, with
+`ollama-gtx1650`/`stt`/`agent`/`tts` all `Running` and confirmed doing real
+CUDA inference inside their containers. `agent`'s `OLLAMA_HOST` env is
+`http://ollama-gtx1650:11434`. `tts`'s `/synth` (both TTS backends assumed a
+dev machine's conda envs -- see below) is fixed and re-verified live
+(2026-09-16): a real request now returns a real, valid synthesized wav.
+
+The RTX 4060 laptop (WSL2/Ubuntu) has **joined as a second node**
+(`laptop-2vc40919`), and `controller/gpu_scheduler/` is deployed there --
+needed an RBAC fix (`kopf` needs `patch` on nodes for its own bookkeeping,
+not just `get`/`list`/`watch`) and `agent.yaml` needed a `nodeSelector`
+pinning it to the always-up node (confirmed live: without one, the scheduler
+placed `agent` on the 4060 node, so stopping that laptop killed `agent`'s
+own pod at the exact moment the controller needed to fail it over). **Known
+bug, unfixed**: that node is unhealthy -- it flaps `Ready`/`NotReady`, its
+kubelet API intermittently 502s, and `ollama-rtx4060` can't start
+(`UnexpectedAdmissionError: no healthy devices present` for
+`nvidia.com/gpu`). GPU passthrough into containerd under WSL2 specifically
+is confirmed broken now, not just unverified. `gateway` is still **not**
+applied to the cluster -- nothing there speaks to the Stick yet,
+`bridge_server.py` remains what's actually flashed against, though
+`services/gateway/app.py`'s own code now has full firmware-protocol parity
+(see the service-boundary section below). Treat this doc as the design +
+the code that implements it, plus now a partial live result -- see each
+phase's status line.
 
 **GPU runtime chain, verified end to end on `arch-ssd`:**
 `nvidia-container-toolkit` (installed via pacman) → k3s auto-detects
@@ -168,15 +175,17 @@ automated-switching design.
    1650/4060 cluster, it just catches typos before they reach real
    hardware.
 2. **Cluster bring-up + Helm + ArgoCD** — **partially done**: k3s installed
-   and labeled on the home server, GPU runtime chain verified end to end
-   (see status section above), `ollama-gtx1650`, `stt`, `tts`, and `agent`
-   all applied and `Running` with confirmed GPU access (though `tts`'s
-   `/synth` has a known bug, see `TODO.md`). Still open: join the RTX 4060
-   laptop as a second node, apply `ollama-rtx4060`/`gateway` (the gateway's
-   code now has real firmware parity, see Phase 5 below, but the manifest
-   itself isn't applied to the cluster yet), deploy `controller/gpu_scheduler/`
-   and validate the node-up/node-down switch against the real two-node
-   cluster, chart into `deploy/helm/`, wire `deploy/argocd/` for GitOps sync.
+   and labeled on both nodes now, GPU runtime chain verified end to end on
+   `arch-ssd` (see status section above), `ollama-gtx1650`/`stt`/`tts`/`agent`
+   all applied and `Running` with confirmed GPU access, `tts`'s `/synth` bug
+   fixed and re-verified live. `controller/gpu_scheduler/` is deployed to
+   the laptop node. Still open: the laptop node itself is unhealthy (GPU
+   passthrough into containerd doesn't work under WSL2 yet, confirmed
+   broken -- see status section above), apply `gateway` (the code has real
+   firmware parity, see Phase 5 below, but the manifest isn't applied),
+   validate the node-up/node-down switch against the real two-node cluster
+   once the laptop node is actually healthy, chart into `deploy/helm/`, wire
+   `deploy/argocd/` for GitOps sync.
 3. **Observability** — `observability/prometheus/` + `observability/grafana/`,
    turning the hand-measured numbers this repo already tracks into live
    dashboards.
@@ -188,10 +197,10 @@ automated-switching design.
    speaker-verification gate, `encouragement_loop`, and `announce` -- see
    the service-boundary section above and the module's own docstring.
    Verified against a mocked unit-test suite and a live smoke test against
-   the real running `stt`/`agent`/`tts` pods. **Still open**: cutting the
-   actual M5StickS3 over from `bridge_server.py` to the k3s-hosted gateway,
-   gated on the `tts` bug in Phase 2 and BLE's own Phase 6 soak test. Only
-   after that cutover does the k3s deployment become what's actually
-   running the device day to day.
+   the real running `stt`/`agent`/`tts` pods. **Still open**: applying
+   `gateway.yaml` to the cluster at all, then cutting the actual M5StickS3
+   over from `bridge_server.py` to the k3s-hosted gateway -- the latter is
+   also gated on BLE's own Phase 6 soak test. Only after that cutover does
+   the k3s deployment become what's actually running the device day to day.
 
 Phase 3 and 4 are unstarted; see `TODO.md` for tracking.
