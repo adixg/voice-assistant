@@ -9,22 +9,39 @@ dev machine's conda envs -- see below) is fixed and re-verified live
 (2026-09-16): a real request now returns a real, valid synthesized wav.
 
 The RTX 4060 laptop (WSL2/Ubuntu) has **joined as a second node**
-(`laptop-2vc40919`), and `controller/gpu_scheduler/` is deployed there --
-needed an RBAC fix (`kopf` needs `patch` on nodes for its own bookkeeping,
-not just `get`/`list`/`watch`) and `agent.yaml` needed a `nodeSelector`
-pinning it to the always-up node (confirmed live: without one, the scheduler
-placed `agent` on the 4060 node, so stopping that laptop killed `agent`'s
-own pod at the exact moment the controller needed to fail it over). **Known
-bug, unfixed**: that node is unhealthy -- it flaps `Ready`/`NotReady`, its
-kubelet API intermittently 502s, and `ollama-rtx4060` can't start
-(`UnexpectedAdmissionError: no healthy devices present` for
-`nvidia.com/gpu`). GPU passthrough into containerd under WSL2 specifically
-is confirmed broken now, not just unverified. `gateway` is now **applied
-and `Running`** too (2026-09-16), re-verified with a real wire-protocol
-test against the actual in-cluster pod -- but `bridge_server.py` remains
-what's actually flashed against; nothing has cut the real Stick over yet.
-Treat this doc as the design + the code that implements it, plus now a
-partial live result -- see each phase's status line.
+(`laptop-2vc40919`), and **the full chain is proven working end to end on
+it, live (2026-09-16)**: a real request round-tripped `gateway` -> `agent`
+-> `ollama-rtx4060` (this laptop) -> `qwen3:8b` -> a real generated reply,
+confirmed via `agent` opening a genuine cross-node TCP connection, not just
+its `OLLAMA_HOST` env var flipping correctly. Getting there took finding
+and fixing, in order (each one only surfacing once the previous was fixed):
+an RBAC gap (`kopf` needs `patch` on nodes for its own bookkeeping, not
+just `get`/`list`/`watch` -- without it every node event 403'd before ever
+reaching the controller's actual logic); `agent.yaml`/the controller
+needing a `nodeSelector` pinning them to the always-up node (confirmed
+live: without one, the scheduler placed both on the 4060 node, so stopping
+that laptop killed the controller at the exact moment it needed to fail
+`agent` over); and the deep one -- k3s's agent-server reverse tunnel *and*
+flannel's VXLAN backend both independently defaulting to each node's LAN
+IP instead of its Tailscale address (neither node is on the other's LAN),
+silently blackholing all cross-node pod traffic until `--node-ip` and
+`--flannel-iface=tailscale0` were set on **both** the agent (this laptop)
+and the k3s **server** (`arch-ssd`). `agent.yaml` also gained a paired
+`OLLAMA_MODEL` env var (`qwen3.5:4b` on the 1650, `qwen3:8b` on the 4060)
+the controller now patches alongside `OLLAMA_HOST` on every transition.
+`ollama-rtx4060.yaml` bind-mounts this node's existing native Ollama data
+dir directly rather than copying models into the pod -- a copy attempt
+(`sudo rsync` of the whole ~20GB store) crashed this laptop when it filled
+the real ~25GB free on `C:` (WSL2's `df -h` inside Linux had reported
+~880GB free, which was the virtual disk's logical cap, not real headroom --
+see the check-disk-space-before-bulk-writes lesson). Pod-to-internet
+egress on this node is a separate, still-unfixed WSL2 networking gap
+(harmless now that models are shared rather than pulled in-pod). `gateway`
+is **applied and `Running`** too, confirmed with the same live
+wire-protocol test -- but `bridge_server.py` remains what's actually
+flashed against; nothing has cut the real Stick over yet. Treat this doc
+as the design + the code that implements it, plus now a partial live
+result -- see each phase's status line.
 
 **GPU runtime chain, verified end to end on `arch-ssd`:**
 `nvidia-container-toolkit` (installed via pacman) → k3s auto-detects
@@ -173,18 +190,17 @@ automated-switching design.
    GPU-less `kind` cluster can't stand in for the real two-node
    1650/4060 cluster, it just catches typos before they reach real
    hardware.
-2. **Cluster bring-up + Helm + ArgoCD** — **partially done**: k3s installed
-   and labeled on both nodes now, GPU runtime chain verified end to end on
-   `arch-ssd` (see status section above), `ollama-gtx1650`/`stt`/`tts`/`agent`
-   all applied and `Running` with confirmed GPU access, `tts`'s `/synth` bug
-   fixed and re-verified live, `gateway` applied and `Running` too (see
-   Phase 5 below for the parity work this confirms). `controller/gpu_scheduler/`
-   is deployed to the laptop node. Still open: the laptop node itself is
-   unhealthy (GPU passthrough into containerd doesn't work under WSL2 yet,
-   confirmed broken -- see status section above); validate the
-   node-up/node-down switch against the real two-node cluster once it's
-   actually healthy; chart into `deploy/helm/`, wire
-   `deploy/argocd/` for GitOps sync.
+2. **Cluster bring-up + Helm + ArgoCD** — **the core objective is done**:
+   both nodes joined, GPU runtime chain verified end to end on both (real
+   `nvidia-smi` output from a scheduled pod, and real `qwen3:8b` inference
+   through `ollama-rtx4060`), every service applied and `Running` with
+   confirmed GPU access, and the full `gateway` -> `agent` -> Ollama chain
+   round-trips a real reply through either node, including the automatic
+   node-up/node-down switch (see status section above for the full bug
+   chain this took). Still open: chart into `deploy/helm/`, wire
+   `deploy/argocd/` for GitOps sync, and the laptop node's separate
+   pod-to-internet-egress gap (harmless today since `ollama-rtx4060` shares
+   the node's existing model store instead of pulling its own).
 3. **Observability** — `observability/prometheus/` + `observability/grafana/`,
    turning the hand-measured numbers this repo already tracks into live
    dashboards.
