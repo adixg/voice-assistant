@@ -1,15 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
 
-    <TextView
-        android:id="@+id/logView"
+    <EditText
+        android:id="@+id/hostInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="16dp"
-        android:fontFamily="monospace"
-        android:textSize="14sp"
-        android:textIsSelectable="true"
-        android:text="starting..." />
-</ScrollView>
+        android:hint="bridge_server.py host (Tailscale name or IP)"
+        android:inputType="textUri"
+        android:importantForAutofill="no" />
+
+    <EditText
+        android:id="@+id/secretInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="shared secret (must match secrets.h)"
+        android:inputType="textPassword"
+        android:importantForAutofill="no" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/startStopButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Start" />
+
+        <Button
+            android:id="@+id/forgetButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Forget device" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/batteryButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Exempt from battery optimization" />
+
+    <ScrollView
+        android:id="@+id/logScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <TextView
+            android:id="@+id/logView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="16dp"
+            android:fontFamily="monospace"
+            android:textSize="14sp"
+            android:textIsSelectable="true"
+            android:text="starting..." />
+    </ScrollView>
+</LinearLayout>

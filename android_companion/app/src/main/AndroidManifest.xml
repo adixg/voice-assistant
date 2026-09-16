@@ -3,19 +3,51 @@
     <!-- Android 12+ (API 31+) runtime permission model for BLE central
          operations: scan and connect are separate permissions here,
          replacing the old ACCESS_FINE_LOCATION-for-BLE-scan requirement on
-         earlier versions. neverForLocation because this spike (and the real
-         app) never derives physical location from scan results, which lets
-         it skip the location permission entirely on 12+. -->
+         earlier versions. neverForLocation because this app never derives
+         physical location from scan results, which lets it skip the
+         location permission entirely on 12+. -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!-- RelayService's WebSocket bridge to bridge_server.py. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- RelayService runs in the foreground so the BLE/WebSocket bridge
+         survives the user leaving the app, see that file's own header
+         comment. CONNECTED_DEVICE is the closest official foreground-service
+         type to "maintaining a BLE peripheral connection"; required (not
+         just recommended) starting Android 14 for a service declaring that
+         type. POST_NOTIFICATIONS is the runtime permission (API 33+) for
+         the ongoing foreground notification itself. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Requested via Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+         (MainActivity), not auto-granted, so Doze/App Standby doesn't
+         kill the relay while the Stick still needs it, per the plan's own
+         call for this. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
+    <!-- bridge_server.py only ever speaks plain ws://, never wss:// (see
+         tools/termux_relay.py and secrets.h.example), and Android blocks
+         cleartext traffic by default since API 28, confirmed on the real
+         phone: RelayService's WebSocket to a plain ws:// host failed with
+         "CLEARTEXT communication ... not permitted by network security
+         policy" before this was added. Deliberately allowed rather than
+         scoped to one host, since the bridge host is a user-entered setting
+         (Prefs.bridgeHost), not a fixed domain, and this traffic never
+         leaves a private Tailscale/LAN network to begin with, the same
+         threat model the BLE side's own AUTH-secret-over-Just-Works
+         security design already assumes (see main.cpp's header comment). -->
     <application
         android:allowBackup="false"
-        android:label="BLE Spike"
-        android:theme="@style/Theme.AppCompat.Light">
+        android:label="aicompanion relay"
+        android:theme="@style/Theme.AppCompat.Light"
+        android:usesCleartextTraffic="true">
         <!-- Not @android:style/Theme.Material.Light: MainActivity extends
              AppCompatActivity, which throws IllegalStateException at
              setContentView() unless the theme is from the AppCompat family.
@@ -29,5 +61,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".RelayService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

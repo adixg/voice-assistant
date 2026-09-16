@@ -366,14 +366,74 @@ against actual hardware rather than assumed away:
 and is the source of truth going forward; this log is the story of getting
 there.
 
+## Phase 5 — the real Android companion app, DONE (2026-09-16)
+
+Built out of order relative to Phase 4 (deliberately — nothing about the
+Android app's WebSocket-bridge half depends on the Stick running real
+firmware yet), `android_companion/` is no longer just the Phase 2/3
+throughput/protocol spike. Three new files:
+
+- **`RelayService.kt`** — a foreground `Service`, not tied to
+  `MainActivity`'s lifecycle, owning both the BLE central connection (moved
+  here verbatim from the proven Phase 3 code) and a new OkHttp `WebSocket`
+  client to `bridge_server.py`. This is the actual protocol translation
+  layer `tools/termux_relay.py` never had to do (that script just pumps
+  bytes between two WebSocket endpoints, since both sides already spoke
+  WebSocket) — here the Stick side is BLE, so every frame crosses formats:
+  `START`/`STOP`/`RESET`/`AUDIO_CHUNK` TX frames become `bridge_server.py`'s
+  `start`/`stop`/`reset` text and binary mic chunks; its
+  `heard:`/`status:`/`reply:`/binary-audio/`end` messages become
+  `HEARD`/`STATUS`/`REPLY`/`AUDIO_CHUNK`/`END` RX frames back down to the
+  Stick. TIME_SYNC re-sends every 5 minutes while connected. Auto-reconnect
+  on both the BLE side (already existed) and the WebSocket side (new,
+  backoff retry) — losing either one tears down and reopens both, so
+  `bridge_server.py` never accumulates state for a Stick that's no longer
+  actually reachable over BLE.
+- **`Prefs.kt`** — the "laptop host selection, shared-secret entry" the plan
+  called for, as a small `SharedPreferences` wrapper.
+- **`MainActivity.kt`** — rewritten from owning the BLE connection directly
+  to a thin settings/control UI: host + secret fields, Start/Stop (which
+  starts/stops `RelayService`), a "Forget device" shortcut (opens system
+  Bluetooth settings — no non-hidden-API way to unpair a specific device
+  exists, and `docs/ble-migration.md`'s own Phase 3 log already needed a
+  manual unpair once), and a battery-optimization exemption request.
+
+**Confirmed on real hardware**, not just build-checked: full sequence —
+scan, connect, (already-)bonded, subscribe, AUTH accepted, then **WS
+connected to bridge_server.py** — logged by the app, and independently
+confirmed via `ss -tn state established` on the laptop showing the real TCP
+connection to `tools/echo_server.py` (standing in for `bridge_server.py`
+per its own docstring, exactly what Phase 6 already called for validating
+against first). STATUS frames from the Stick logged as "unexpected TX frame
+type=0x05" during this test — correctly so: the Stick is still running
+`m5stick_ble_flash_spike`'s synthetic demo payload, not real firmware, so
+this is the *expected* signature of Phase 4 not being done yet, not a bug.
+
+Two real bugs found and fixed getting here:
+
+1. **Android blocks cleartext traffic by default since API 28.**
+   `bridge_server.py` only ever speaks plain `ws://` (see
+   `tools/termux_relay.py`, `secrets.h.example`), so the WebSocket failed
+   immediately with `CLEARTEXT communication ... not permitted by network
+   security policy`. Fixed with `android:usesCleartextTraffic="true"`,
+   deliberately not scoped to one host (the bridge host is a user-entered
+   setting, not a fixed domain) — this traffic never leaves a private
+   Tailscale/LAN network to begin with, the same threat model the BLE side's
+   own AUTH-secret-over-Just-Works design already assumes.
+2. **`targetSdk` 36 (Android 15+) enforces edge-to-edge layout
+   unconditionally.** The host field's hint rendered half behind the status
+   bar; `WindowCompat.setDecorFitsSystemWindows(window, true)` — the
+   pre-Android-15 way to opt out — had zero effect, matching Android 15+
+   making that call a no-op for apps targeting SDK 35+. Fixed properly with
+   a `ViewCompat.setOnApplyWindowInsetsListener` applying the real system-bar
+   insets as padding on the root view.
+
 ## Where it stands
 
-Phase 1, 2, and 3 all passed — bonding, AUTH, TIME_SYNC, and the codec
-(including multi-packet reassembly) are all confirmed working together on
-real hardware. Phase 4 (merging BLE into the real `firmware/m5stick_bridge/`)
-is next. The BLE work has lived entirely in the separate
-`firmware/m5stick_ble_flash_spike/` and `android_companion/` throwaway spike
-projects so far — `m5stick_bridge` itself needs no changes until Phase 4
-actually merges BLE in, so normal Wi-Fi-based firmware development can
-continue in the meantime with zero
-interaction with this track. See `TODO.md` for the remaining phases.
+Phases 1, 2, 3, and 5 are done. Phase 4 (merging BLE into the real
+`firmware/m5stick_bridge/`) is the remaining blocker before a genuine
+end-to-end test is possible — `android_companion/` is ready and waiting on
+the other end. `m5stick_bridge` itself still needs no changes until Phase 4
+actually starts, so normal Wi-Fi-based firmware development can continue in
+the meantime with zero interaction with this track. See `TODO.md` for the
+remaining phases.

@@ -12,12 +12,12 @@ android {
         applicationId = "com.aigf.blespike"
         // 31 (Android 12) is where the BLUETOOTH_SCAN/BLUETOOTH_CONNECT
         // runtime permission model starts -- see AndroidManifest.xml. No
-        // need to support anything older for a throwaway spike targeting
-        // one specific phone (Galaxy A36, Android 16 / SDK 36).
+        // need to support anything older, targeting one specific phone
+        // (Galaxy A36, Android 16 / SDK 36).
         minSdk = 31
         targetSdk = 36
         versionCode = 1
-        versionName = "phase2-spike"
+        versionName = "phase5"
     }
 
     buildTypes {
@@ -36,10 +36,12 @@ android {
 }
 
 dependencies {
-    // Deliberately minimal -- BLE central APIs (android.bluetooth.le.*) are
-    // part of the Android framework itself, no library needed. Plain
-    // View/findViewById, no Compose, to keep this spike's build fast and
-    // its dependency surface small.
+    // BLE central APIs (android.bluetooth.le.*) are part of the Android
+    // framework itself, no library needed for that half. OkHttp is the one
+    // real addition here, for the WebSocket bridge to bridge_server.py
+    // (RelayService.kt) -- Phase 5's actual new responsibility over the
+    // BLE-only Phase 2/3 spikes.
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
