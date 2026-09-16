@@ -16,7 +16,7 @@
 // this is meant not to have; the small text reuses M5GFX's built-in Font0,
 // which is already a 5x7 bitmap font and reads as pixel art when scaled.
 // pomodoro_face.h (included right after this) reuses the digit font, the
-// battery/wifi icons and the ambient decorations declared here, so the two
+// battery/link icons and the ambient decorations declared here, so the two
 // alt screens can't visually drift apart the way two independent copies
 // eventually would.
 #pragma once
@@ -119,9 +119,13 @@ static void drawBatteryIcon(int x, int y, int pct, bool charging) {
   if (fill > 0) canvas.fillRect(x + 2, y + 2, fill, h - 4, body);
 }
 
-// Three rising bars plus a base dot. Teal when associated, crust-grey when not,
-// so a dropped hotspot is visible without shouting about it.
-static void drawWifiIcon(int x, int y, bool up) {
+// Three rising bars plus a base dot. Teal when the phone's BLE link is up
+// and authed, crust-grey when not, so a dropped connection is visible
+// without shouting about it. Still named after its original Wi-Fi meaning's
+// shape (three rising bars reads as "signal" regardless of the underlying
+// radio) -- renamed from drawWifiIcon() when Phase 4 replaced the Wi-Fi
+// link it used to represent with BLE.
+static void drawLinkIcon(int x, int y, bool up) {
   uint16_t on = up ? COL_TEAL : COL_SUBTEXT;
   uint16_t off = COL_MANTLE;
   canvas.fillRect(x,     y + 6, 2, 3, on);
@@ -159,11 +163,6 @@ static void drawAmbientDecorations() {
   canvas.fillRect(canvas.width() / 2 - 86, 40, 2, 2, COL_MAUVE);
 }
 
-// Kick off SNTP with the timezone applied. Safe to call again on reconnect —
-// the ESP-IDF SNTP client just re-arms.
-static void clockBeginNtp() {
-  configTzTime(CLOCK_TZ, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
-}
 
 // True once the RTC holds a plausible wall-clock date. After this the ESP32's
 // own clock keeps running with no network at all, which is the whole point of
@@ -180,7 +179,7 @@ static const char *kMonths[12]  = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
 static void drawClockFace() {
   struct tm now;
   bool have = clockHasTime(&now);
-  bool link = (WiFi.status() == WL_CONNECTED);
+  bool link = bleLinkUp();
 
   canvas.fillSprite(COL_BASE);
   // A one-pixel crust border plus a slightly darker plate behind the time:
@@ -206,8 +205,8 @@ static void drawClockFace() {
     x += CLK_DIGIT_W + CLK_KERN;
     drawBigDigit(mm % 10, x, CLK_TIME_Y, COL_TEXT);
   } else {
-    // Waiting on NTP: dashes in the same grid, so the layout doesn't jump when
-    // the first sync lands.
+    // Waiting on the phone's first TIME_SYNC frame: dashes in the same grid,
+    // so the layout doesn't jump when it lands.
     for (int i = 0; i < 4; ++i) {
       int dx = x + i * (CLK_DIGIT_W + CLK_KERN) + (i >= 2 ? CLK_COLON_W + 2 * CLK_COLON_GAP - CLK_KERN : 0);
       canvas.fillRect(dx + CLK_PX, CLK_TIME_Y + CLK_PX * 3, CLK_PX * 2, CLK_PX, COL_SUBTEXT);
@@ -246,7 +245,7 @@ static void drawClockFace() {
     canvas.print(pct);
   }
   drawBatteryIcon(canvas.width() - 8 - 22, 5, clockBattPct, clockCharging);
-  drawWifiIcon(canvas.width() - 16, canvas.height() - 16, link);
+  drawLinkIcon(canvas.width() - 16, canvas.height() - 16, link);
 
   drawAmbientDecorations();
 
@@ -261,7 +260,7 @@ static void drawClockFace() {
   canvas.pushSprite(0, 0);
 }
 
-// Battery reading, link-status twinkle, and NTP-sync detection: shared by
+// Battery reading, link-status twinkle, and TIME_SYNC detection: shared by
 // every alt screen, and updated regardless of which one is currently shown
 // (call every loop()) so a screen doesn't display a stale battery reading
 // just because it wasn't the visible one when the real value changed.
@@ -276,7 +275,7 @@ static void screenAmbientTick() {
     clockLastTwinkleMs = t;
     clockTwinkle ^= 1;
   }
-  if (!clockTimeSynced && WiFi.status() == WL_CONNECTED) {
+  if (!clockTimeSynced && bleLinkUp()) {
     struct tm probe;
     if (clockHasTime(&probe)) clockTimeSynced = true;
   }
@@ -286,7 +285,7 @@ static void screenAmbientTick() {
 static void clockFaceTick() {
   struct tm now;
   int minNow = clockHasTime(&now) ? (now.tm_hour * 60 + now.tm_min) : -1;
-  bool link = (WiFi.status() == WL_CONNECTED);
+  bool link = bleLinkUp();
 
   static uint8_t lastTwinkle = 0xFF;
   bool changed = (minNow != clockLastMin) || (clockBattPct != clockLastPct) ||

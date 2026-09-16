@@ -57,7 +57,7 @@ static void pomodoroToggleRun() {
 }
 
 static void drawPomodoroFace() {
-  bool link = (WiFi.status() == WL_CONNECTED);
+  bool link = bleLinkUp();
   uint16_t phaseColour = (pomoPhase == POMO_FOCUS) ? COL_RED : COL_GREEN;
 
   canvas.fillSprite(COL_BASE);
@@ -115,7 +115,7 @@ static void drawPomodoroFace() {
     canvas.print(pct);
   }
   drawBatteryIcon(canvas.width() - 8 - 22, 5, clockBattPct, clockCharging);
-  drawWifiIcon(canvas.width() - 16, canvas.height() - 16, link);
+  drawLinkIcon(canvas.width() - 16, canvas.height() - 16, link);
 
   drawAmbientDecorations();
 
@@ -143,7 +143,7 @@ static void drawPomodoroFace() {
 // itself part of the diff below; imperceptible against a once-a-second redraw
 // and not worth a second diff variable.)
 static void pomodoroFaceTick() {
-  bool link = (WiFi.status() == WL_CONNECTED);
+  bool link = bleLinkUp();
   int sec = pomoRemainingMs / 1000;
 
   bool changed = (sec != pomoLastSec) || (pomoRunning != pomoLastRunning) ||

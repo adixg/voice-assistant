@@ -1,14 +1,21 @@
-// M5StickS3 push-to-talk mic/speaker bridge for bridge_server.py.
+// M5StickS3 push-to-talk mic/speaker bridge for bridge_server.py, reached
+// over BLE (ble_transport.h) and the phone's Android app
+// (android_companion/.../RelayService.kt), not Wi-Fi/WebSocket directly any
+// more as of Phase 4 of the BLE transport migration (2026-09-16) -- see
+// docs/ble-migration.md for the full log and CLAUDE.md for current status.
 //
-// Protocol over one WebSocket connection (raw PCM s16le mono @ SAMPLE_RATE
-// both ways, framed with tiny text control messages):
-//   BtnA held   -> client sends text "start", then binary mic chunks
-//   BtnA release-> client sends text "stop"
-//   server sends text "heard:<transcript>" as soon as STT finishes (not
+// Protocol, framed as typed BLE packets (see ble_envelope.h) but carrying
+// exactly the same logical messages bridge_server.py's WebSocket protocol
+// always has — RelayService.kt translates between the two, bridge_server.py
+// itself is unchanged:
+//   BtnA held   -> Stick sends a START frame, then AUDIO_CHUNK frames (raw
+//     mic PCM)
+//   BtnA release-> Stick sends a STOP frame
+//   phone relays a HEARD frame (transcript) as soon as STT finishes (not
 //     truly live/word-by-word — faster-whisper transcribes a completed
 //     utterance, not a stream — but prompt: it arrives right as listening
-//     ends and thinking begins), then "reply:<text>", then binary audio
-//     chunks, then "end" -> client plays the buffered reply. A reply text
+//     ends and thinking begins), then REPLY, then AUDIO_CHUNK frames (reply
+//     audio), then END -> Stick plays the buffered reply. A reply text
 //     starting with "(" is bridge_server.py's error-sentinel convention
 //     ("(ollama error: ...)", "(didn't catch that)") — used here to pick
 //     ERROR vs DONE once playback finishes.
@@ -44,10 +51,7 @@
 // arrives over the protocol above; nothing needs a new round-trip to render.
 #include <M5Unified.h>
 #include <M5GFX.h>
-#include <WiFi.h>
-#include <WebSocketsClient.h>
 #include <math.h>
-#include "secrets.h"
 #include "sprites.h"
 
 static const uint32_t SAMPLE_RATE = 16000;
@@ -62,9 +66,14 @@ static const uint32_t TALK_HOLD_MS = 400;
 static uint32_t btnAPressedMs = 0;
 static bool btnAArmed = false;
 
-WebSocketsClient webSocket;
-static IPAddress relayHost;  // the phone's gateway IP, resolved fresh in connectNetwork()
 static M5Canvas canvas(&M5.Display);
+// Forward-declared so clock_face.h/pomodoro_face.h (included below, before
+// ble_transport.h needs its own state globals declared first) can call it
+// in place of the old WiFi.status()==WL_CONNECTED checks -- defined for
+// real further down, right after ble_transport.h brings BleTransport::ready()
+// into scope. Same pattern as `canvas` above: declared where the alt-screen
+// headers need it visible, defined where its real dependency is available.
+static bool bleLinkUp();
 
 // ---------------------------------------------------------------- palette
 // Catppuccin Macchiato, official values (matches the reference sheet's own legend).
@@ -87,7 +96,7 @@ static const uint16_t COL_CRUST     = rgb565(0x18, 0x19, 0x26);  // clock vignet
 static const uint16_t COL_MANTLE    = rgb565(0x1E, 0x20, 0x30);  // clock panel behind the time
 static const uint16_t COL_SUBTEXT1  = rgb565(0xB8, 0xC0, 0xE0);  // clock date line
 static const uint16_t COL_PINK      = rgb565(0xF5, 0xBD, 0xE6);  // clock sparkles
-static const uint16_t COL_BLUE      = rgb565(0x8A, 0xAD, 0xF4);  // clock wifi bars
+static const uint16_t COL_BLUE      = rgb565(0x8A, 0xAD, 0xF4);  // clock link bars
 
 static inline uint16_t lerp565(uint16_t c0, uint16_t c1, float t) {
   if (t <= 0.0f) return c0;
@@ -715,86 +724,88 @@ static void maybeCheckBattery() {
 }
 
 // ---------------------------------------------------------------- network
-static void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
+// ble_envelope.h here (not just via ble_transport.h below) so the
+// BleEnvelope::FRAME_* constants handleBleFrame() switches on are visible
+// before its definition -- ble_transport.h's own extern declaration of
+// handleBleFrame(), included right after, is a legal re-declaration of the
+// function this defines.
+#include "ble_envelope.h"
+
+// Replaces the old webSocketEvent()'s WStype_TEXT/WStype_BIN handling.
+// AUTH/TIME_SYNC (the transport-level concerns) are handled directly in
+// ble_transport.h now, never reaching here; this is what's left, called
+// only once BleTransport's bleAuthed is true (see that file's RxFrameSink).
+// HEARD/STATUS/REPLY/END/AUDIO_CHUNK arrive as exactly the same messages
+// bridge_server.py always sent, just relayed down through the phone's
+// WebSocket-to-BLE translation (android_companion/.../RelayService.kt)
+// instead of a WebSocket frame directly -- so this logic is otherwise
+// unchanged from before.
+void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
+  using namespace BleEnvelope;
   switch (type) {
-    case WStype_CONNECTED:
-      setStatus("connected", relayHost.toString());
-      if (uiState == UI_DISCONNECTED || uiState == UI_CONNECTING) uiState = UI_IDLE;
+    case FRAME_HEARD:
+      captionText = String((const char *)payload, len);
+      setStatus("heard", captionText);
       break;
-    case WStype_DISCONNECTED:
-      setStatus("disconnected...");
-      uiState = UI_DISCONNECTED;
+    case FRAME_STATUS:
+      // An agent backend reporting a tool it is running ("searching the
+      // web"). Only the caption changes: the state stays THINKING, so the
+      // mauve particle field keeps running underneath and the screen shows
+      // work happening instead of a frozen transcript. Plain chat backends
+      // never send this.
+      captionText = String((const char *)payload, len);
+      setStatus("status", captionText);
       break;
-    case WStype_TEXT: {
-      String msg((char *)payload, length);
-      if (msg.startsWith("heard:")) {
-        captionText = msg.substring(6);
-        setStatus("heard", captionText);
-      } else if (msg.startsWith("status:")) {
-        // An agent backend reporting a tool it is running ("searching the
-        // web"). Only the caption changes: the state stays THINKING, so the
-        // mauve particle field keeps running underneath and the screen shows
-        // work happening instead of a frozen transcript. Plain chat backends
-        // never send this.
-        captionText = msg.substring(7);
-        setStatus("status", captionText);
-      } else if (msg.startsWith("reply:")) {
-        captionText = msg.substring(6);
-        lastReplyWasError = captionText.startsWith("(");
-        setStatus("Generating", captionText);
-        receivingReply = true;
-        replyLen = 0;
-      } else if (msg == "end") {
-        receivingReply = false;
-        if (replyLen > 0) {
-          M5.Mic.end();
-          M5.Speaker.begin();
-          M5.Speaker.playRaw((int16_t *)replyBuf, replyLen / 2, SAMPLE_RATE, false);
-          speakStartMs = millis();
-          uiState = UI_SPEAKING;
-        } else if (lastReplyWasError) {
-          showTransient(UI_ERROR, 900);
-        } else {
-          uiState = UI_IDLE;
-        }
+    case FRAME_REPLY:
+      captionText = String((const char *)payload, len);
+      lastReplyWasError = captionText.startsWith("(");
+      setStatus("Generating", captionText);
+      receivingReply = true;
+      replyLen = 0;
+      break;
+    case FRAME_AUDIO_CHUNK:
+      if (receivingReply) {
+        ensureReplyCap(replyLen + len);
+        memcpy(replyBuf + replyLen, payload, len);
+        replyLen += len;
       }
       break;
-    }
-    case WStype_BIN:
-      if (receivingReply) {
-        ensureReplyCap(replyLen + length);
-        memcpy(replyBuf + replyLen, payload, length);
-        replyLen += length;
+    case FRAME_END:
+      receivingReply = false;
+      if (replyLen > 0) {
+        M5.Mic.end();
+        M5.Speaker.begin();
+        M5.Speaker.playRaw((int16_t *)replyBuf, replyLen / 2, SAMPLE_RATE, false);
+        speakStartMs = millis();
+        uiState = UI_SPEAKING;
+      } else if (lastReplyWasError) {
+        showTransient(UI_ERROR, 900);
+      } else {
+        uiState = UI_IDLE;
       }
       break;
     default:
+      Serial.printf("[ble] unexpected RX frame type=0x%02X len=%u\n", type, (unsigned)len);
       break;
   }
 }
 
+#include "ble_transport.h"
+
+// BLE-era replacement for every old WiFi.status()==WL_CONNECTED check --
+// forward-declared near `canvas` above so clock_face.h/pomodoro_face.h can
+// call it; defined for real here, now that BleTransport::ready() exists.
+static bool bleLinkUp() { return BleTransport::ready(); }
+
 static void connectNetwork() {
   uiState = UI_CONNECTING;
-  setStatus("wifi...", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) {
+  setStatus("ble...", "advertising");
+  BleTransport::begin();
+  while (!BleTransport::ready()) {
     delay(150);
     M5.update();
     maybeDrawFace();
   }
-  setStatus("wifi ok", WiFi.localIP().toString());
-  // The phone (running tools/termux_relay.py) IS this Wi-Fi's AP, so it's
-  // always our DHCP-assigned gateway — no hardcoded IP to go stale every
-  // time Android rotates the hotspot's subnet on restart, and nothing to
-  // reflash for. (Only valid because the Stick always joins the phone's own
-  // hotspot now, never a laptop's Wi-Fi directly — see the header comment.)
-  // SNTP with America/New_York rules. Started here rather than in setup()
-  // because it needs an association first; once it lands, the ESP32's own RTC
-  // carries the clock and the hotspot can come and go.
-  clockBeginNtp();
-  relayHost = WiFi.gatewayIP();
-  Serial.printf("[status] relay %s\n", relayHost.toString().c_str());
-  webSocket.begin(relayHost, WS_PORT, WS_PATH);
   M5.Mic.begin();
   uiState = UI_IDLE;
 }
@@ -875,9 +886,6 @@ void setup() {
   replyCap = 200 * 1024;
   replyBuf = (uint8_t *)ps_malloc(replyCap);
 
-  webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(3000);
-
   connectNetwork();
 }
 
@@ -904,12 +912,11 @@ void loop() {
       pomodoroToggleRun();
     }
   } else if (M5.BtnB.wasClicked()) {
-    webSocket.sendTXT("reset");
+    BleTransport::sendReset();
     setStatus("history cleared");
     captionText = "";
   }
 
-  webSocket.loop();
   maybeCheckBattery();
 
   // interrupt: stop playback cleanly rather than switching mic/speaker mid-stream
@@ -938,7 +945,7 @@ void loop() {
       captionText = "";
       M5.Speaker.end();
       M5.Mic.begin();  // _cfg survives the speaker cycle; no re-config needed
-      webSocket.sendTXT("start");
+      BleTransport::sendStart();
       setStatus("listening...");
     }
     if (M5.BtnA.wasReleased()) {
@@ -960,13 +967,13 @@ void loop() {
       micLevel = rms16(micBuf, MIC_CHUNK_SAMPLES);
       levelHist[histPos] = micLevel;
       histPos = (histPos + 1) % HIST_N;
-      webSocket.sendBIN((uint8_t *)micBuf, MIC_CHUNK_SAMPLES * sizeof(int16_t));
+      BleTransport::sendAudioChunk((const uint8_t *)micBuf, MIC_CHUNK_SAMPLES * sizeof(int16_t));
     }
     if (M5.BtnA.wasReleased()) {
       recState = REC_IDLE;
       uiState = UI_THINKING;
       micLevel = 0.0f;
-      webSocket.sendTXT("stop");
+      BleTransport::sendStop();
       setStatus("Processing");
     }
   }

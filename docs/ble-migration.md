@@ -428,12 +428,50 @@ Two real bugs found and fixed getting here:
    a `ViewCompat.setOnApplyWindowInsetsListener` applying the real system-bar
    insets as padding on the root view.
 
+## Phase 4 — merged into the real firmware, DONE (2026-09-16)
+
+`firmware/m5stick_bridge/` no longer touches Wi-Fi or WebSockets at all.
+`WiFi.h`/`WebSocketsClient` are gone; `ble_transport.h` (new, adapted
+verbatim from the Phase 3 spike's proven bonding/AUTH/TIME_SYNC/codec logic)
+and `ble_envelope.h` (copied unchanged from the spike) replace them.
+`main.cpp`'s old `webSocketEvent()` became `handleBleFrame()` — same
+HEARD/STATUS/REPLY/AUDIO_CHUNK/END switch, unchanged logic, just called by
+`ble_transport.h`'s RX frame sink instead of a `WStype_TEXT`/`WStype_BIN`
+callback. `connectNetwork()` now starts BLE advertising and blocks on
+`BleTransport::ready()` (bonded + AUTH'd) the same way it used to block on
+`WiFi.status()`. Every `webSocket.sendTXT()`/`sendBIN()` call site became
+the matching `BleTransport::send*()` call. `clock_face.h`/`pomodoro_face.h`'s
+link icon (renamed `drawWifiIcon()` → `drawLinkIcon()` for accuracy) and
+their NTP-sync probe now read a new `bleLinkUp()` instead of
+`WiFi.status()==WL_CONNECTED`. NTP is gone entirely — TIME_SYNC frames from
+the phone call `settimeofday()` directly, with `CLOCK_TZ` applied once via
+`setenv`/`tzset()` in `BleTransport::begin()` (what `configTzTime()` used to
+do alongside starting SNTP). `secrets.h` drops `WIFI_SSID`/`WIFI_PASS`/
+`WS_PORT`/`WS_PATH` for one `BLE_SHARED_SECRET`, matching the Android app's
+`Prefs.kt` default so a fresh flash and a fresh install interoperate
+out of the box.
+
+**Builds clean at 71.3% flash (2,243,685 B)** — actually *better* than
+Phase 1's 78.0% projection (that projection was built from an isolated
+flash-budget spike before the real integration existed to measure
+directly). RAM 12.1%.
+
+**Confirmed on real hardware**, the actual `m5stick_bridge` firmware now
+flashed and running, not a spike: full connect → bond → AUTH accepted →
+TIME_SYNC applied (`settimeofday` called with a real epoch) → the normal
+`loop()` running correctly afterward (`maybeCheckBattery()` firing,
+`[status] Charging...` appearing), captured on the Stick's own serial log.
+On the phone side, **`WS connected to bridge_server.py`** appeared and was
+independently confirmed via `ss -tn state established` showing the live TCP
+connection — the same test methodology as every other milestone in this
+log, not just trusting the app's own status line.
+
+Not yet tested: a real STT/LLM/TTS conversation turn (needs `bridge_server.py`
+itself running, not just `tools/echo_server.py` as the stand-in) and the
+soak test (Phase 6).
+
 ## Where it stands
 
-Phases 1, 2, 3, and 5 are done. Phase 4 (merging BLE into the real
-`firmware/m5stick_bridge/`) is the remaining blocker before a genuine
-end-to-end test is possible — `android_companion/` is ready and waiting on
-the other end. `m5stick_bridge` itself still needs no changes until Phase 4
-actually starts, so normal Wi-Fi-based firmware development can continue in
-the meantime with zero interaction with this track. See `TODO.md` for the
-remaining phases.
+All of Phases 1-5 are done. Phase 6 (cutover: a full conversation test
+against the real `bridge_server.py`, then a soak test, then updating
+`README.md`'s architecture diagram) is what's left. See `TODO.md`.
