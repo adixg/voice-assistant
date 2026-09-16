@@ -244,16 +244,33 @@ Covers the pure and mockable logic: the backend registry and its CLI plumbing,
 `voicepipe.text` (chunking), `voicepipe.personas`, `voicepipe.backends.ollama`
 (`strip_think`, `ask`/`check` against a mocked client), `voicepipe.audio`
 (`_rms16`), `voicepipe.subproc` (the worker lifecycle, against a fake worker
-script), and `bridge_server.py`'s wire protocol with STT/LLM/TTS and the
-WebSocket mocked out — no GPU, model, or network needed, runs in about a
-second. Run it after any change to `voicepipe/` or `bridge_server.py`.
+script), `bridge_server.py`'s wire protocol with STT/LLM/TTS and the
+WebSocket mocked out, the `services/*/app.py` HTTP wrappers (FastAPI's test
+client against a fake backend, same seam as above), and
+`controller/gpu_scheduler/controller.py`'s routing logic (a recording fake
+in place of the Kubernetes client) — no GPU, model, cluster, or network
+needed, runs in a few seconds. Run it after any change to `voicepipe/`,
+`bridge_server.py`, `services/`, or `controller/`.
 
 What's deliberately **not** covered: loading a real faster-whisper, VITS or
 Chatterbox model (each needs its own conda env and a GPU), and anything in
-`firmware/` (no practical way to unit test ESP32/M5Unified C++ without a
-hardware simulator or a large native-mock scaffold — not worth building for a
-project this size). The three-tier hardware test path below is the practical
-equivalent for the firmware side.
+`firmware/` beyond compiling (no practical way to unit test ESP32/M5Unified
+C++ behavior without a hardware simulator or a large native-mock scaffold —
+not worth building for a project this size; CI does still catch a build
+break via `pio run`). The three-tier hardware test path below is the
+practical equivalent for the firmware side.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push/PR: the pytest suite above,
+building all five Docker images in `services/`/`controller/gpu_scheduler/`
+(catches a broken Dockerfile — this dev environment has no working Docker
+daemon to test them locally), applying every `deploy/kubernetes/` and
+`controller/gpu_scheduler/deploy.yaml` manifest against a throwaway `kind`
+cluster (real server-side schema validation, not just YAML syntax — the
+pods won't actually schedule since a GPU-less kind node can't satisfy
+`nvidia.com/gpu` requests, which is fine, `apply` doesn't wait for that),
+and a `pio run` compile check of `firmware/m5stick_bridge/`.
 
 ## Swapping backends
 

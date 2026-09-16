@@ -16,9 +16,16 @@ GPU_TIER_LABEL = "gpu-tier"
 RTX4060_TIER = "rtx4060"
 
 
-def _node_is_ready(node) -> bool:
-    conditions = (node.status.conditions or []) if node.status else []
-    return any(c.type == "Ready" and c.status == "True" for c in conditions)
+def _is_rtx4060(meta: dict) -> bool:
+    return (meta.get("labels") or {}).get(GPU_TIER_LABEL) == RTX4060_TIER
+
+
+def _conditions_are_ready(conditions: list) -> bool:
+    """`conditions` is a Node's status.conditions list as kopf hands it to a
+    field handler -- plain dicts, not the typed V1NodeCondition the
+    kubernetes client uses elsewhere in this file."""
+    return any(c.get("type") == "Ready" and c.get("status") == "True"
+               for c in (conditions or []))
 
 
 def _set_agent_ollama_host(host: str, logger):
@@ -52,19 +59,16 @@ def startup(logger, **_):
 
 @kopf.on.field("", "v1", "nodes", field="status.conditions")
 def on_node_condition_change(meta, status, logger, **_):
-    labels = meta.get("labels") or {}
-    if labels.get(GPU_TIER_LABEL) != RTX4060_TIER:
+    if not _is_rtx4060(meta):
         return  # only the 4060 node's readiness changes agent routing today
 
-    ready = any(c.get("type") == "Ready" and c.get("status") == "True"
-                for c in (status.get("conditions") or []))
+    ready = _conditions_are_ready(status.get("conditions"))
     _set_agent_ollama_host(RTX4060_HOST if ready else GTX1650_HOST, logger)
 
 
 @kopf.on.delete("", "v1", "nodes")
 def on_node_delete(meta, logger, **_):
-    labels = meta.get("labels") or {}
-    if labels.get(GPU_TIER_LABEL) != RTX4060_TIER:
+    if not _is_rtx4060(meta):
         return
     # The node object itself is gone (e.g. after a clean `kubectl delete
     # node` on laptop shutdown), not just NotReady -- same fallback either way.

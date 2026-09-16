@@ -91,7 +91,15 @@ automated-switching design.
 
 1. **Service split + manifests** (this session) — `services/*`,
    `deploy/kubernetes/*.yaml`, `controller/gpu_scheduler/` design + skeleton
-   code. Not yet applied to a live cluster.
+   code, unit tests for all of it (`tests/test_services_*.py`,
+   `tests/test_gpu_scheduler_controller.py`), and `.github/workflows/ci.yml`
+   (runs the pytest suite, builds all five Docker images, applies every
+   manifest to a throwaway `kind` cluster for real server-side schema
+   validation, compile-checks the firmware). CI validates the manifests are
+   *well-formed*, which is not the same as Phase 2 below — a generic
+   GPU-less `kind` cluster can't stand in for the real two-node
+   1650/4060 cluster, it just catches typos before they reach real
+   hardware.
 2. **Cluster bring-up + Helm + ArgoCD** — actually install k3s on both
    nodes, label them, apply the manifests, validate the gateway's Phase-1
    WS endpoint against a test client, chart the manifests into

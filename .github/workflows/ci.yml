@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (voicepipe + services + controller)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install Python deps
+        # requirements/chat.txt covers voicepipe/, tests/, and the
+        # services/+controller/ test deps (fastapi test client, kopf,
+        # kubernetes client) -- see that file's comments.
+        run: pip install -r requirements/chat.txt
+      - name: Run tests
+        run: pytest tests/ -v
+
+  docker-build:
+    name: build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: aigf-stt
+            dockerfile: services/stt/Dockerfile
+            build-args: ""
+          - image: aigf-tts
+            dockerfile: services/tts/Dockerfile
+            build-args: "REQUIREMENTS_FILE=chatterbox.txt"
+          - image: aigf-tts-vits
+            dockerfile: services/tts/Dockerfile
+            build-args: "REQUIREMENTS_FILE=uma-tts.txt"
+          - image: aigf-agent
+            dockerfile: services/agent/Dockerfile
+            build-args: ""
+          - image: aigf-gateway
+            dockerfile: services/gateway/Dockerfile
+            build-args: ""
+          - image: aigf-gpu-scheduler
+            dockerfile: controller/gpu_scheduler/Dockerfile
+            build-args: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          build-args: ${{ matrix.build-args }}
+          # cache so unrelated-service pushes don't rebuild every image cold
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  k8s-manifests:
+    name: validate k8s manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # kubectl's client-side dry-run still needs *some* kubeconfig context
+      # to construct a REST client against, even though it makes no network
+      # call -- a throwaway kind cluster sidesteps that and also gets real
+      # server-side schema validation (not just YAML shape) for free, using
+      # the Docker daemon these runners already have. Pods requesting
+      # nvidia.com/gpu will sit Pending forever on a GPU-less kind node,
+      # which is fine: `apply` validates and creates the objects, it doesn't
+      # wait for them to schedule.
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+      - name: Apply every manifest
+        # namespace.yaml first -- everything else targets `namespace: aigf`
+        # and apply order otherwise follows the shell glob (alphabetical),
+        # which would hit agent.yaml before the namespace exists.
+        run: |
+          kubectl apply -f deploy/kubernetes/namespace.yaml
+          for f in deploy/kubernetes/*.yaml controller/gpu_scheduler/deploy.yaml; do
+            [ "$f" = "deploy/kubernetes/namespace.yaml" ] && continue
+            echo "== $f =="
+            kubectl apply -f "$f"
+          done
+
+  firmware:
+    name: build m5stick_bridge firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install platformio
+      - name: pio run (compile only, no device attached)
+        working-directory: firmware/m5stick_bridge
+        run: pio run -e m5stick-s3
