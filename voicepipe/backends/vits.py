@@ -1,6 +1,6 @@
 """VITS-Umamusume — the original voice, kept as the CPU-friendly alternative.
 
-Runs in the `uma-tts` conda env (requirements-uma-tts.txt) via tts_cli.py,
+Runs in the `uma-tts` conda env (requirements/uma-tts.txt) via tts_cli.py,
 and needs the cloned Space at VITS-Umamusume-voice-synthesizer/. Fast enough
 on CPU to leave the GPU entirely to whisper, which is why it stays useful
 even though Chatterbox is the default.

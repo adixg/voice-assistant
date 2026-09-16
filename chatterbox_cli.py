@@ -2,7 +2,7 @@
 file out. 350M params, ~75ms latency, 6x real-time on GPU — see
 https://www.resemble.ai/learn/models/chatterbox-turbo.
 
-Needs the `chatterbox-tts` conda env (requirements-chatterbox.txt). Downloads
+Needs the `chatterbox-tts` conda env (requirements/chatterbox.txt). Downloads
 its weights from Hugging Face (ResembleAI/chatterbox-turbo) on first run.
 
 No reference clip is passed by default, so it speaks in the model's own

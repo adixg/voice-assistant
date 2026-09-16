@@ -4,7 +4,7 @@
 clip with no training step: pass --chatterbox-prompt a clip of 10-20s of
 clean single-speaker audio, or omit it to use the model's own default voice.
 
-Runs in the `chatterbox-tts` conda env (requirements-chatterbox.txt) via
+Runs in the `chatterbox-tts` conda env (requirements/chatterbox.txt) via
 chatterbox_cli.py, because its torch/CUDA pins conflict with the `chat` env's.
 
 Standalone debug use (writes wavs, doesn't play them):

@@ -1,5 +1,8 @@
 __pycache__/
 
+# Emacs projectile marker — personal editor state, not project content
+/.projectile
+
 # cloned HF Space, keeps its own .git + ~1.5G of LFS model weights
 /VITS-Umamusume-voice-synthesizer/
 

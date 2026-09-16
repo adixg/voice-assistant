@@ -42,9 +42,9 @@ make_env() {
   conda run -n "$name" python -m pip install -r "$reqs"
 }
 
-make_env "$CHAT_ENV" requirements-chat.txt
-make_env "$TTS_ENV"  requirements-uma-tts.txt
-make_env "$CHATTERBOX_ENV" requirements-chatterbox.txt "$CHATTERBOX_PY_VER"
+make_env "$CHAT_ENV" requirements/chat.txt
+make_env "$TTS_ENV"  requirements/uma-tts.txt
+make_env "$CHATTERBOX_ENV" requirements/chatterbox.txt "$CHATTERBOX_PY_VER"
 
 # ---- VITS-Umamusume Space (model code + pretrained weights) ----------------
 if [ ! -f VITS-Umamusume-voice-synthesizer/pretrained_models/G_trilingual.pth ]; then
