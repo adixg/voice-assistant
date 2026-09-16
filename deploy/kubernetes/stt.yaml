@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stt
+  namespace: aigf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stt
+  template:
+    metadata:
+      labels:
+        app: stt
+    spec:
+      nodeSelector:
+        gpu-tier: gtx1650  # always-on node: STT must be reachable regardless of the 4060
+      containers:
+        - name: stt
+          image: aigf-stt:latest
+          args: ["--stt-backend", "faster-whisper", "--model", "small", "--device", "cuda"]
+          ports:
+            - containerPort: 8001
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet: {path: /health, port: 8001}
+            initialDelaySeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stt
+  namespace: aigf
+spec:
+  selector:
+    app: stt
+  ports:
+    - port: 8001
+      targetPort: 8001

@@ -1,0 +1,52 @@
+# Always-on Ollama, pinned to the home server's GTX 1650. Model choice for
+# this node should stay in the conversational-only, no-tools class (see
+# docs/hermes-agent.md and CLAUDE.md's Local agent runtime section for why
+# tool-calling reliability is the thing that breaks first as model size
+# drops) -- qwen3.5:4b (3.4GB Q4_K_M) fits with room for KV cache.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-gtx1650
+  namespace: aigf
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # only one GPU on this node; never run two Ollama pods at once
+  selector:
+    matchLabels:
+      app: ollama-gtx1650
+  template:
+    metadata:
+      labels:
+        app: ollama-gtx1650
+    spec:
+      nodeSelector:
+        gpu-tier: gtx1650
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      volumes:
+        - name: models
+          hostPath:
+            path: /var/lib/aigf/ollama-gtx1650
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-gtx1650
+  namespace: aigf
+spec:
+  selector:
+    app: ollama-gtx1650
+  ports:
+    - port: 11434
+      targetPort: 11434

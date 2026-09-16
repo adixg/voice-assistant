@@ -206,13 +206,31 @@ tests/                  pytest suite for voicepipe/ and bridge_server.py's
 docs/                   detailed investigation logs behind CLAUDE.md's
                          current-state summaries (hardware budget, the local
                          agent investigation, voice pipeline, firmware bugs,
-                         the BLE migration) — CLAUDE.md itself is a lean index
+                         the BLE migration, the k3s deployment architecture)
+                         — CLAUDE.md itself is a lean index
 TODO.md                 the active punch list
 
 models/                 Ollama Modelfiles (`rina`'s persona on top of qwen3:8b)
 requirements/           the three conda envs' pinned dependencies
 
 VITS-Umamusume-voice-synthesizer/   cloned HF Space (model code + weights)
+
+services/               bridge_server.py split into HTTP services along
+                         voicepipe/registry.py's existing STT/LLM/TTS
+                         boundaries, for the k3s deployment below — Phase 1
+                         skeleton, not yet what's actually flashed against
+                         (see docs/deployment-architecture.md)
+  gateway/                 the Stick's WebSocket peer (Phase 1 only, not
+                           firmware-protocol-compatible yet)
+  stt/, agent/, tts/       thin FastAPI wrappers, one per registry entry
+
+deploy/kubernetes/      k3s manifests for the home-server (GTX 1650) +
+                         laptop (RTX 4060) cluster
+controller/gpu_scheduler/  custom controller that retargets the agent
+                         service to whichever GPU node is up
+observability/, benchmarks/, deploy/helm/, deploy/argocd/
+                         later phases of the same track, not built yet —
+                         see docs/deployment-architecture.md
 ```
 
 ## Running the tests

@@ -1,0 +1,6 @@
+# Base deps for the HTTP wrapper. The actual TTS backend's own requirements
+# (requirements/chatterbox.txt or requirements/uma-tts.txt, both at the repo
+# root) are installed separately by the Dockerfile via a build arg, so this
+# one image can be built for either backend without duplicating those files.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
