@@ -9,12 +9,21 @@ Standalone debug use (writes wavs, doesn't play them):
     python -m voicepipe speak "hello there" --tts-backend vits --vits-speaker 10
 """
 import os
+import sys
 
 from ..registry import TTS
 from ..subproc import WorkerVoice
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PYTHON = os.path.expanduser("~/anaconda3/envs/uma-tts/bin/python")
+# The dev-machine path, where `chat` and `uma-tts` are separate conda envs
+# with conflicting torch/CUDA pins that can't share one interpreter. A
+# container image has no such conflict -- it installs exactly one backend's
+# deps (see services/tts/Dockerfile's REQUIREMENTS_FILE build-arg) directly
+# into its own single interpreter, so falling back to sys.executable there
+# is correct, not just a workaround: it's the same interpreter that already
+# has this backend's deps pip-installed into it.
+_CONDA_PYTHON = os.path.expanduser("~/anaconda3/envs/uma-tts/bin/python")
+PYTHON = _CONDA_PYTHON if os.path.exists(_CONDA_PYTHON) else sys.executable
 CLI = os.path.join(REPO, "tts_cli.py")
 
 MODELS = ["trilingual", "japanese"]

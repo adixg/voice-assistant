@@ -11,12 +11,17 @@ Standalone debug use (writes wavs, doesn't play them):
     python -m voicepipe speak "hello there"
 """
 import os
+import sys
 
 from ..registry import TTS
 from ..subproc import WorkerVoice
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PYTHON = os.path.expanduser("~/anaconda3/envs/chatterbox-tts/bin/python")
+# See voicepipe/backends/vits.py's PYTHON comment: the conda-env split is a
+# dev-machine-only concern, so a container (one interpreter, one backend's
+# deps already pip-installed into it) falls back to sys.executable instead.
+_CONDA_PYTHON = os.path.expanduser("~/anaconda3/envs/chatterbox-tts/bin/python")
+PYTHON = _CONDA_PYTHON if os.path.exists(_CONDA_PYTHON) else sys.executable
 CLI = os.path.join(REPO, "chatterbox_cli.py")
 
 

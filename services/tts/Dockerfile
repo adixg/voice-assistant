@@ -9,7 +9,7 @@ FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 ARG REQUIREMENTS_FILE=chatterbox.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip ffmpeg git && rm -rf /var/lib/apt/lists/*
+    python3 python3-pip ffmpeg git git-lfs && rm -rf /var/lib/apt/lists/*
 # The base image's apt-installed pip is old enough to mis-handle the git+
 # install below: it discards the built wheel with "produced metadata for
 # project name unknown" even though chatterbox's pyproject.toml declares
@@ -30,6 +30,22 @@ RUN pip3 install --no-cache-dir -r requirements/backend.txt
 COPY voicepipe/ voicepipe/
 COPY services/tts/app.py services/tts/app.py
 COPY services/__init__.py services/__init__.py
+
+# Both CLIs are the actual worker command voicepipe/backends/vits.py and
+# chatterbox.py spawn as a subprocess (see WorkerVoice in voicepipe/subproc.py)
+# -- neither backend does anything without its CLI script physically present.
+COPY tts_cli.py tts_cli.py
+COPY chatterbox_cli.py chatterbox_cli.py
+
+# vits (requirements/uma-tts.txt) needs the cloned HF Space -- model code
+# plus ~1.5G of git-lfs pretrained weights -- sitting next to tts_cli.py; see
+# that script's docstring and setup_envs.sh's identical dev-machine clone.
+# chatterbox downloads its weights from Hugging Face at first run instead,
+# so it needs no build-time clone and this is a no-op for that image.
+RUN if [ "$REQUIREMENTS_FILE" = "uma-tts.txt" ]; then \
+      git lfs install && \
+      git clone https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer; \
+    fi
 
 EXPOSE 8003
 ENTRYPOINT ["python3", "-m", "services.tts.app"]

@@ -237,15 +237,22 @@ class TestRealBackendCommands:
         assert cmd[cmd.index("-s") + 1] == "10"
 
 
-def test_workers_are_launched_from_their_own_conda_env():
-    """Each engine's torch/CUDA pins conflict, so a backend must not be run
-    with the current interpreter."""
-    from voicepipe.backends.chatterbox import ChatterboxVoice
-    from voicepipe.backends.vits import VitsVoice
+def test_workers_use_their_own_conda_env_python_when_it_exists():
+    """On a dev machine, each engine's torch/CUDA pins conflict with the
+    current interpreter's, so the worker must run under its own conda env's
+    python instead -- but only when that env actually exists. A container
+    image has no such conflict (it installs exactly one backend's deps
+    directly into its own single interpreter), so there PYTHON must fall
+    back to sys.executable rather than a hardcoded path that isn't there --
+    see voicepipe/backends/vits.py's PYTHON comment for the reasoning."""
+    from voicepipe.backends import chatterbox, vits
 
-    for cmd in (ChatterboxVoice().command(), VitsVoice().command()):
-        assert cmd[0] != sys.executable
-        assert "envs" in cmd[0]
+    for module in (chatterbox, vits):
+        if os.path.exists(module._CONDA_PYTHON):
+            assert module.PYTHON == module._CONDA_PYTHON
+            assert "envs" in module.PYTHON
+        else:
+            assert module.PYTHON == sys.executable
 
 
 def test_fake_worker_script_is_valid_python():
