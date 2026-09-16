@@ -258,12 +258,58 @@ failed) almost exactly. **Comfortably clears the ~256 kbps target with ~56%
 headroom**, genuinely received and counted end-to-end, not inferred from the
 sender. Phase 2's go/no-go: **pass**.
 
+## Phase 3 — byte-envelope codec, in progress (2026-09-16)
+
+Codec + two-characteristic split written and build-checked on both sides
+(not yet flashed/run on real hardware as of this commit). Design: `firmware/
+m5stick_ble_flash_spike/src/ble_envelope.h` is the one source of truth for
+the wire format (1-byte type + 2-byte length on the first packet of a
+logical frame, `0xFF`-marked continuation packets after it, capped at the
+already-measured 500-byte safe margin under this link's negotiated
+MTU-3=514), mirrored exactly in `android_companion/.../BleEnvelopeCodec.kt`.
+
+**A correction to this plan document while implementing it**: Phase 3's own
+RX bullet above lists `start`/`stop`/`reset` control frames under "RX
+(phone→Stick)" — that can't be right, since those originate at the Stick's
+own physical buttons, and GATT gives a peripheral no way to receive its own
+button state from the central. Implemented instead with the only direction
+split that's physically possible: **TX (Stick notifies)** carries
+START/STOP/RESET (button-triggered) and AUDIO_CHUNK (mic audio, matching
+today's real `webSocket.sendTXT("start")`/`sendBIN(...)` calls at
+`main.cpp:941/963/907`); **RX (phone writes)** carries HEARD/STATUS/REPLY/
+AUDIO_CHUNK(reply audio)/END relayed down from `bridge_server.py`, plus AUTH
+and TIME_SYNC (neither exists in the Wi-Fi protocol; both are new,
+BLE-only). `AUDIO_CHUNK` is reused for both mic and reply audio — which
+characteristic it arrived on already disambiguates purpose.
+
+The spike firmware (`m5stick_ble_flash_spike`) now runs a real bidirectional
+demo: periodic STATUS frames over TX (one short, one deliberately padded
+past 497 bytes every 25th tick to force the continuation path, not just the
+trivial single-packet case), and an `RxLogSink` that decodes and logs
+whatever the phone writes to RX. Builds clean: **23.3% flash, 11.4% RAM**
+(comfortably inside Phase 1's projected 78.0%-flash end state — this is
+still the flash-spike project, not the real firmware). The Android side
+compiles clean too (`./gradlew compileDebugKotlin`, conda env
+`android-dev`) and now writes a test HEARD frame 3 seconds after
+subscribing, using the same single-operation-queue discipline (chain off
+each op's real completion callback) that Phase 2's debugging arc already
+established is required on `BluetoothGatt`.
+
+**Not yet done in Phase 3**: bonding, the app-layer shared-secret AUTH
+handshake, and TIME_SYNC. Deliberately deferred to the next increment —
+there's no point securing/time-syncing a channel that hasn't been confirmed
+to round-trip correctly yet. Next concrete step: flash both sides, confirm
+the STATUS/HEARD round trip (including the padded multi-packet STATUS
+frame) actually appears correctly on both the Stick's serial log and the
+phone's on-screen log, *then* add bonding/AUTH/TIME_SYNC on top of a
+verified-working codec.
+
 ## Where it stands
 
-Phase 3 (BLE GATT protocol design — the byte-envelope codec, chunk
-reassembly, bonding/auth) is next, whenever BLE work resumes. The BLE work
-has lived entirely in the separate `firmware/m5stick_ble_flash_spike/` and
-`android_companion/` throwaway spike projects so far — `m5stick_bridge`
+Phase 1 and 2 passed; Phase 3 (byte-envelope codec + two-characteristic
+split) is in progress, per above — bonding/AUTH/TIME_SYNC remain. The BLE
+work has lived entirely in the separate `firmware/m5stick_ble_flash_spike/`
+and `android_companion/` throwaway spike projects so far — `m5stick_bridge`
 itself needs no changes until Phase 4 actually merges BLE in, so normal
 Wi-Fi-based firmware development can continue in the meantime with zero
 interaction with this track. See `TODO.md` for the remaining phases.

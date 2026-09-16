@@ -1,12 +1,16 @@
 package com.aigf.blespike
 
-// Phase 2 throughput spike -- the BLE-central counterpart to
-// firmware/m5stick_ble_flash_spike/src/main.cpp. Scans for that firmware's
-// service UUID, connects, negotiates 2M PHY + max MTU, subscribes to its
-// notify characteristic, and shows sustained kbps on screen every second.
-// No Tailscale/WebSocket bridging here -- that's Phase 5's job, once this
-// and Phase 3's protocol design are both validated. See
-// /home/aditya/.claude/plans/tranquil-drifting-stream.md, Phase 2.
+// Phase 2 throughput spike, extended for Phase 3 -- the BLE-central
+// counterpart to firmware/m5stick_ble_flash_spike/src/main.cpp. Scans for
+// that firmware's service UUID, connects, negotiates 2M PHY + max MTU,
+// subscribes to its notify (TX) characteristic, and now also discovers the
+// write (RX) characteristic added in Phase 3: incoming notifications are
+// decoded with BleEnvelopeCodec.kt and logged, and a test HEARD frame gets
+// written back a few seconds after subscribing, to prove both directions of
+// the real envelope codec round-trip on actual hardware, not just kbps in
+// one direction. No Tailscale/WebSocket bridging here -- that's Phase 5's
+// job, once bonding/AUTH/TIME_SYNC (the rest of Phase 3) are also done. See
+// /home/aditya/.claude/plans/tranquil-drifting-stream.md, Phases 2-3.
 
 import android.Manifest
 import android.app.Activity
@@ -42,7 +46,8 @@ class MainActivity : AppCompatActivity() {
         // started with -- see the comment in main.cpp for why that mattered.
         // Must match firmware/m5stick_ble_flash_spike/src/main.cpp exactly.
         val SERVICE_UUID: UUID = UUID.fromString("667d22e3-b922-4852-b7a6-6a4764a26665")
-        val CHAR_UUID: UUID = UUID.fromString("c0819f6b-f0b7-4db8-9dcb-9f58b2745f9c")
+        val TX_CHAR_UUID: UUID = UUID.fromString("c0819f6b-f0b7-4db8-9dcb-9f58b2745f9c")
+        val RX_CHAR_UUID: UUID = UUID.fromString("9e5d1e40-6b0a-4b7a-9c2e-5b7c9a6a0e11")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         const val REQUEST_PERMS = 1
         // Real logcat output (Log.d), unlike log() below which only appends to
@@ -54,9 +59,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logView: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var gatt: BluetoothGatt? = null
+    private var rxCharacteristic: BluetoothGattCharacteristic? = null
 
     private val bytesThisSecond = AtomicLong(0)
     private val notifiesThisSecond = AtomicLong(0)
+
+    // Decodes TX notifications back into logical frames -- see
+    // BleEnvelopeCodec.kt's own header comment for why this must stay in
+    // exact lockstep with ble_envelope.h.
+    private val rxDecoder = BleEnvelopeDecoder { type, payload ->
+        val text = String(payload, Charsets.UTF_8)
+        Log.d(TAG, "decoded frame type=0x%02X len=%d: %s".format(type, payload.size, text))
+        log("RX frame 0x%02X (%d B): %s".format(type, payload.size, text))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -161,10 +176,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-            val characteristic = g.getService(SERVICE_UUID)?.getCharacteristic(CHAR_UUID)
+            val service = g.getService(SERVICE_UUID)
+            val characteristic = service?.getCharacteristic(TX_CHAR_UUID)
             if (characteristic == null) {
-                log("Service/characteristic not found (status=$status)")
+                log("Service/TX characteristic not found (status=$status)")
                 return
+            }
+            rxCharacteristic = service.getCharacteristic(RX_CHAR_UUID)
+            if (rxCharacteristic == null) {
+                log("RX characteristic not found -- write path won't work")
             }
             g.setCharacteristicNotification(characteristic, true)
             val cccd = characteristic.getDescriptor(CCCD_UUID)
@@ -206,9 +226,30 @@ class MainActivity : AppCompatActivity() {
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                 log("Subscribed (status=$status). Measuring throughput...")
+                // Delayed, and only after this callback (not fired alongside
+                // it) -- same single-operation-queue rule as the PHY/MTU/
+                // subscribe chain above: a write fired before this callback
+                // landed would silently vanish into the same dead-queue bug
+                // that took real debugging to find the first time.
+                handler.postDelayed({ sendTestHeardFrame() }, 3000)
             } else {
                 log("CCCD write FAILED (status=$status) -- not subscribed, no notifications will arrive")
             }
+        }
+
+        override fun onCharacteristicWrite(
+            g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int
+        ) {
+            if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                log("RX write FAILED (status=$status), aborting rest of frame")
+                pendingPacketQueues.remove(characteristic.uuid)
+                return
+            }
+            // Pops and fires the next queued packet for this characteristic,
+            // if sendTestHeardFrame()/writeNextPacket() left one -- this is
+            // what actually advances a multi-packet frame across the BLE
+            // stack's single operation queue, one confirmed write at a time.
+            pendingPacketQueues.remove(characteristic.uuid)?.invoke()
         }
 
         // Pre-API-33 callback. Kept as the primary path since it works
@@ -230,6 +271,51 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Encodes one HEARD frame and writes its packets to the RX characteristic
+    // in order, one write per packet, each waiting for onCharacteristicWrite
+    // before the next fires -- writeCharacteristic() joins the same queue as
+    // everything else on this BluetoothGatt (see the connect-time comment),
+    // so firing several packets back-to-back here would hit the identical
+    // silent-drop bug this file already spent real effort finding once.
+    private fun sendTestHeardFrame() {
+        val rx = rxCharacteristic
+        val g = gatt
+        if (rx == null || g == null) {
+            log("Can't send test frame -- RX characteristic or connection missing")
+            return
+        }
+        log("Sending test HEARD frame...")
+        val payload = "test transcript from phone".toByteArray(Charsets.UTF_8)
+        val packets = ArrayDeque<ByteArray>()
+        encodeFrame(FrameType.HEARD, payload) { packets.addLast(it); true }
+        writeNextPacket(g, rx, packets)
+    }
+
+    private fun writeNextPacket(g: BluetoothGatt, rx: BluetoothGattCharacteristic, packets: ArrayDeque<ByteArray>) {
+        val packet = packets.removeFirstOrNull() ?: return
+        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(rx, packet, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+        } else {
+            @Suppress("DEPRECATION")
+            rx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            @Suppress("DEPRECATION")
+            rx.value = packet
+            @Suppress("DEPRECATION")
+            if (g.writeCharacteristic(rx)) BluetoothStatusCodes.SUCCESS else -1
+        }
+        if (result != BluetoothStatusCodes.SUCCESS) {
+            log("writeCharacteristic() queue failed ($result), aborting frame")
+            return
+        }
+        // Chained from onCharacteristicWrite, not here -- see that callback.
+        pendingPacketQueues[rx.uuid] = { writeNextPacket(g, rx, packets) }
+    }
+
+    // One characteristic writing at a time in practice (this spike only ever
+    // has RX), but keyed by UUID rather than a bare callback so this doesn't
+    // silently break if a second write characteristic gets added later.
+    private val pendingPacketQueues = mutableMapOf<UUID, () -> Unit>()
+
     // Real Log.d, not just the on-screen log() -- this is the only way to tell
     // whether the framework ever calls back into this app at all versus the
     // app being called but failing silently somewhere after. A previous
@@ -243,6 +329,7 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "onNotification: $n bytes")
         bytesThisSecond.addAndGet(n.toLong())
         notifiesThisSecond.incrementAndGet()
+        if (value != null) rxDecoder.feed(value)
     }
 
     private fun phyName(phy: Int): String = when (phy) {
