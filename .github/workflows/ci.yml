@@ -15,13 +15,19 @@ jobs:
         with:
           python-version: "3.10"
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        # libegl1/libgl1/libxkbcommon0: PySide6 (speech_orb.py, imported by
+        # test_speech_orb.py) dlopen()s these at import time even though the
+        # tests never open a real window -- QT_QPA_PLATFORM=offscreen below
+        # covers the rest of the no-display gap.
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libegl1 libgl1 libxkbcommon0
       - name: Install Python deps
         # requirements/chat.txt covers voicepipe/, tests/, and the
         # services/+controller/ test deps (fastapi test client, kopf,
         # kubernetes client) -- see that file's comments.
         run: pip install -r requirements/chat.txt
       - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: pytest tests/ -v
 
   docker-build:
@@ -48,6 +54,7 @@ jobs:
             build-args: ""
           - image: aigf-gpu-scheduler
             dockerfile: controller/gpu_scheduler/Dockerfile
+            context: controller/gpu_scheduler
             build-args: ""
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +62,12 @@ jobs:
       - name: Build ${{ matrix.image }}
         uses: docker/build-push-action@v6
         with:
-          context: .
+          # the services/ Dockerfiles COPY voicepipe/ and services/ paths
+          # relative to the repo root, but gpu_scheduler's Dockerfile (and
+          # its own header comment) COPY its two files with no path prefix
+          # -- it expects its own directory as the build context. Default
+          # to root, matrix overrides it for that one image.
+          context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
           push: false
           build-args: ${{ matrix.build-args }}
@@ -99,6 +111,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install platformio
+      - name: Stub secrets.h (gitignored; example placeholder values are fine for a compile-only check)
+        run: cp firmware/m5stick_bridge/include/secrets.h.example firmware/m5stick_bridge/include/secrets.h
       - name: pio run (compile only, no device attached)
         working-directory: firmware/m5stick_bridge
         run: pio run -e m5stick-s3

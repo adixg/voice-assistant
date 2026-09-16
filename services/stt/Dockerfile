@@ -9,6 +9,7 @@ FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir --upgrade pip
 
 WORKDIR /app
 COPY services/stt/requirements.txt services/stt/requirements.txt
