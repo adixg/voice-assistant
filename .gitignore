@@ -19,3 +19,9 @@ __pycache__/
 
 # stray nohup log from launching the bridge by hand
 /nohup.out
+
+# Android companion app: Gradle/Kotlin build output + machine-specific SDK path
+/android_companion/.gradle/
+/android_companion/.kotlin/
+/android_companion/app/build/
+/android_companion/local.properties

@@ -1,0 +1,33 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 12+ (API 31+) runtime permission model for BLE central
+         operations: scan and connect are separate permissions here,
+         replacing the old ACCESS_FINE_LOCATION-for-BLE-scan requirement on
+         earlier versions. neverForLocation because this spike (and the real
+         app) never derives physical location from scan results, which lets
+         it skip the location permission entirely on 12+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <application
+        android:allowBackup="false"
+        android:label="BLE Spike"
+        android:theme="@style/Theme.AppCompat.Light">
+        <!-- Not @android:style/Theme.Material.Light: MainActivity extends
+             AppCompatActivity, which throws IllegalStateException at
+             setContentView() unless the theme is from the AppCompat family.
+             Confirmed via logcat crash: "You need to use a Theme.AppCompat
+             theme (or descendant) with this activity." -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
