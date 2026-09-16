@@ -7,7 +7,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ollama-gtx1650
-  namespace: aigf
+  namespace: aicompanion
 spec:
   replicas: 1
   strategy:
@@ -36,14 +36,14 @@ spec:
       volumes:
         - name: models
           hostPath:
-            path: /var/lib/aigf/ollama-gtx1650
+            path: /var/lib/aicompanion/ollama-gtx1650
             type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: ollama-gtx1650
-  namespace: aigf
+  namespace: aicompanion
 spec:
   selector:
     app: ollama-gtx1650

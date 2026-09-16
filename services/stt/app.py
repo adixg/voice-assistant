@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from voicepipe import backends  # noqa: F401 - registers backends as a side effect
 from voicepipe.registry import STT
 
-app = FastAPI(title="aigf-stt")
+app = FastAPI(title="aicompanion-stt")
 _backend = None
 
 

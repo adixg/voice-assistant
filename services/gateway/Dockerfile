@@ -1,5 +1,5 @@
 # Build from the repo root:
-#   docker build -f services/gateway/Dockerfile -t aigf-gateway .
+#   docker build -f services/gateway/Dockerfile -t aicompanion-gateway .
 FROM python:3.12-slim
 
 WORKDIR /app

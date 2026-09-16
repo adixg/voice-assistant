@@ -37,22 +37,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: aigf-stt
+          - image: aicompanion-stt
             dockerfile: services/stt/Dockerfile
             build-args: ""
-          - image: aigf-tts
+          - image: aicompanion-tts
             dockerfile: services/tts/Dockerfile
             build-args: "REQUIREMENTS_FILE=chatterbox.txt"
-          - image: aigf-tts-vits
+          - image: aicompanion-tts-vits
             dockerfile: services/tts/Dockerfile
             build-args: "REQUIREMENTS_FILE=uma-tts.txt"
-          - image: aigf-agent
+          - image: aicompanion-agent
             dockerfile: services/agent/Dockerfile
             build-args: ""
-          - image: aigf-gateway
+          - image: aicompanion-gateway
             dockerfile: services/gateway/Dockerfile
             build-args: ""
-          - image: aigf-gpu-scheduler
+          - image: aicompanion-gpu-scheduler
             dockerfile: controller/gpu_scheduler/Dockerfile
             context: controller/gpu_scheduler
             build-args: ""
@@ -91,7 +91,7 @@ jobs:
       - name: Create kind cluster
         uses: helm/kind-action@v1
       - name: Apply every manifest
-        # namespace.yaml first -- everything else targets `namespace: aigf`
+        # namespace.yaml first -- everything else targets `namespace: aicompanion`
         # and apply order otherwise follows the shell glob (alphabetical),
         # which would hit agent.yaml before the namespace exists.
         run: |

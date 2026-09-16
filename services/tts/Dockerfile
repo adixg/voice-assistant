@@ -1,6 +1,6 @@
 # Build from the repo root:
-#   docker build -f services/tts/Dockerfile --build-arg REQUIREMENTS_FILE=chatterbox.txt -t aigf-tts .
-#   docker build -f services/tts/Dockerfile --build-arg REQUIREMENTS_FILE=uma-tts.txt -t aigf-tts-vits .
+#   docker build -f services/tts/Dockerfile --build-arg REQUIREMENTS_FILE=chatterbox.txt -t aicompanion-tts .
+#   docker build -f services/tts/Dockerfile --build-arg REQUIREMENTS_FILE=uma-tts.txt -t aicompanion-tts-vits .
 #
 # CUDA runtime base: chatterbox needs a real GPU (see docs/hardware-budget.md
 # for measured VRAM -- Nano-on-CUDA is 1857 MiB, the bridge's default). vits

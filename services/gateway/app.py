@@ -24,7 +24,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-app = FastAPI(title="aigf-gateway")
+app = FastAPI(title="aicompanion-gateway")
 _urls = {}
 
 

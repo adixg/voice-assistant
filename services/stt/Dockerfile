@@ -1,5 +1,5 @@
 # Build from the repo root so this can COPY voicepipe/:
-#   docker build -f services/stt/Dockerfile -t aigf-stt .
+#   docker build -f services/stt/Dockerfile -t aicompanion-stt .
 #
 # CUDA runtime base because faster-whisper (ctranslate2) dlopen()s cuBLAS/
 # cuDNN when run with --device cuda; harmless if the pod ends up on a

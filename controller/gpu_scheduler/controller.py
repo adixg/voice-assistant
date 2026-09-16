@@ -3,12 +3,12 @@ is actually up. See README.md in this directory for the design and current
 status -- this is real kopf/kubernetes-client code, but not yet validated
 against a live cluster.
 
-Run: kopf run controller.py --namespace=aigf
+Run: kopf run controller.py --namespace=aicompanion
 """
 import kopf
 from kubernetes import client, config
 
-NAMESPACE = "aigf"
+NAMESPACE = "aicompanion"
 AGENT_DEPLOYMENT = "agent"
 GTX1650_HOST = "http://ollama-gtx1650:11434"
 RTX4060_HOST = "http://ollama-rtx4060:11434"

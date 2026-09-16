@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: gpu-scheduler
-  namespace: aigf
+  namespace: aicompanion
 ---
 # Cluster-scoped: Node readiness is a cluster-wide resource, not namespaced.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -21,7 +21,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: gpu-scheduler
-    namespace: aigf
+    namespace: aicompanion
 roleRef:
   kind: ClusterRole
   name: gpu-scheduler-nodes
@@ -32,7 +32,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: gpu-scheduler-agent-deployment
-  namespace: aigf
+  namespace: aicompanion
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -43,11 +43,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: gpu-scheduler-agent-deployment
-  namespace: aigf
+  namespace: aicompanion
 subjects:
   - kind: ServiceAccount
     name: gpu-scheduler
-    namespace: aigf
+    namespace: aicompanion
 roleRef:
   kind: Role
   name: gpu-scheduler-agent-deployment
@@ -57,7 +57,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gpu-scheduler
-  namespace: aigf
+  namespace: aicompanion
 spec:
   replicas: 1
   selector:
@@ -71,4 +71,4 @@ spec:
       serviceAccountName: gpu-scheduler
       containers:
         - name: gpu-scheduler
-          image: aigf-gpu-scheduler:latest
+          image: aicompanion-gpu-scheduler:latest

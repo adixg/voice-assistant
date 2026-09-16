@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from voicepipe import backends  # noqa: F401 - registers backends as a side effect
 from voicepipe.registry import LLM, stream_reply
 
-app = FastAPI(title="aigf-agent")
+app = FastAPI(title="aicompanion-agent")
 _backend = None
 
 

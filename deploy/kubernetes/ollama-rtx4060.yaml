@@ -6,7 +6,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ollama-rtx4060
-  namespace: aigf
+  namespace: aicompanion
 spec:
   replicas: 1
   strategy:
@@ -35,14 +35,14 @@ spec:
       volumes:
         - name: models
           hostPath:
-            path: /var/lib/aigf/ollama-rtx4060
+            path: /var/lib/aicompanion/ollama-rtx4060
             type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: ollama-rtx4060
-  namespace: aigf
+  namespace: aicompanion
 spec:
   selector:
     app: ollama-rtx4060

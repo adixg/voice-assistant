@@ -1,5 +1,5 @@
 # Build from the repo root:
-#   docker build -f services/agent/Dockerfile -t aigf-agent .
+#   docker build -f services/agent/Dockerfile -t aicompanion-agent .
 #
 # CPU-only on purpose: with --llm-backend ollama this container is a thin
 # HTTP client (see voicepipe/backends/ollama.py) -- the model itself runs in

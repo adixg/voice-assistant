@@ -22,7 +22,7 @@ real, comparatively uncommon skill to demonstrate.
 - Watches `Node` objects cluster-wide for the `gpu-tier: rtx4060` label
   transitioning `Ready` <-> not-`Ready`.
 - On the 4060 node becoming `Ready`: patches the `agent` Deployment's pod
-  template env (`OLLAMA_HOST=http://ollama-rtx4060:11434`) in the `aigf`
+  template env (`OLLAMA_HOST=http://ollama-rtx4060:11434`) in the `aicompanion`
   namespace. Patching the pod template is enough to trigger a rollout on its
   own -- no separate restart call needed.
 - On the 4060 node leaving `Ready` (or being deleted, e.g. `kubectl delete
@@ -52,11 +52,11 @@ a transition, not how to keep a watch loop alive.
 
 In-cluster (the intended way): `deploy.yaml` in this directory creates the
 ServiceAccount/ClusterRole/ClusterRoleBinding it needs (`get`/`list`/`watch`
-on nodes cluster-wide, `get`/`patch` on deployments in the `aigf` namespace)
+on nodes cluster-wide, `get`/`patch` on deployments in the `aicompanion` namespace)
 and runs it as a Deployment.
 
 Locally, against whatever kubeconfig context is active:
 ```
 pip install -r requirements.txt
-kopf run controller.py --namespace=aigf
+kopf run controller.py --namespace=aicompanion
 ```

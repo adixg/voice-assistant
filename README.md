@@ -1,4 +1,4 @@
-# aigf
+# aicompanion
 
 A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → Chatterbox Turbo (TTS) → speaker.
 Runs either through this machine's local mic/speaker (`chat_loop.py`) or through
