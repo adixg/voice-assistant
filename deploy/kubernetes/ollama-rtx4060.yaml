@@ -22,6 +22,17 @@ spec:
       nodeSelector:
         gpu-tier: rtx4060
       runtimeClassName: nvidia
+      # This node's own resolv.conf carries extra search domains from its
+      # host OS/VPN config, which k8s merges into every pod here. With the
+      # default ndots:5, a 2-dot external name like registry.ollama.ai tries
+      # every search-suffixed variant (several hitting slow/nonexistent
+      # resolvers) before the bare name -- confirmed live (2026-09-16) this
+      # was enough to time out `ollama pull`, on the one pod here that
+      # actually needs to reach the public internet. ndots:1 skips that.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "1"
       containers:
         - name: ollama
           image: ollama/ollama:latest
