@@ -19,13 +19,12 @@ bug, unfixed**: that node is unhealthy -- it flaps `Ready`/`NotReady`, its
 kubelet API intermittently 502s, and `ollama-rtx4060` can't start
 (`UnexpectedAdmissionError: no healthy devices present` for
 `nvidia.com/gpu`). GPU passthrough into containerd under WSL2 specifically
-is confirmed broken now, not just unverified. `gateway` is still **not**
-applied to the cluster -- nothing there speaks to the Stick yet,
-`bridge_server.py` remains what's actually flashed against, though
-`services/gateway/app.py`'s own code now has full firmware-protocol parity
-(see the service-boundary section below). Treat this doc as the design +
-the code that implements it, plus now a partial live result -- see each
-phase's status line.
+is confirmed broken now, not just unverified. `gateway` is now **applied
+and `Running`** too (2026-09-16), re-verified with a real wire-protocol
+test against the actual in-cluster pod -- but `bridge_server.py` remains
+what's actually flashed against; nothing has cut the real Stick over yet.
+Treat this doc as the design + the code that implements it, plus now a
+partial live result -- see each phase's status line.
 
 **GPU runtime chain, verified end to end on `arch-ssd`:**
 `nvidia-container-toolkit` (installed via pacman) → k3s auto-detects
@@ -178,13 +177,13 @@ automated-switching design.
    and labeled on both nodes now, GPU runtime chain verified end to end on
    `arch-ssd` (see status section above), `ollama-gtx1650`/`stt`/`tts`/`agent`
    all applied and `Running` with confirmed GPU access, `tts`'s `/synth` bug
-   fixed and re-verified live. `controller/gpu_scheduler/` is deployed to
-   the laptop node. Still open: the laptop node itself is unhealthy (GPU
-   passthrough into containerd doesn't work under WSL2 yet, confirmed
-   broken -- see status section above), apply `gateway` (the code has real
-   firmware parity, see Phase 5 below, but the manifest isn't applied),
-   validate the node-up/node-down switch against the real two-node cluster
-   once the laptop node is actually healthy, chart into `deploy/helm/`, wire
+   fixed and re-verified live, `gateway` applied and `Running` too (see
+   Phase 5 below for the parity work this confirms). `controller/gpu_scheduler/`
+   is deployed to the laptop node. Still open: the laptop node itself is
+   unhealthy (GPU passthrough into containerd doesn't work under WSL2 yet,
+   confirmed broken -- see status section above); validate the
+   node-up/node-down switch against the real two-node cluster once it's
+   actually healthy; chart into `deploy/helm/`, wire
    `deploy/argocd/` for GitOps sync.
 3. **Observability** — `observability/prometheus/` + `observability/grafana/`,
    turning the hand-measured numbers this repo already tracks into live
@@ -197,10 +196,11 @@ automated-switching design.
    speaker-verification gate, `encouragement_loop`, and `announce` -- see
    the service-boundary section above and the module's own docstring.
    Verified against a mocked unit-test suite and a live smoke test against
-   the real running `stt`/`agent`/`tts` pods. **Still open**: applying
-   `gateway.yaml` to the cluster at all, then cutting the actual M5StickS3
-   over from `bridge_server.py` to the k3s-hosted gateway -- the latter is
-   also gated on BLE's own Phase 6 soak test. Only after that cutover does
-   the k3s deployment become what's actually running the device day to day.
+   the real running `stt`/`agent`/`tts` pods. `gateway.yaml` is now applied
+   and `Running` too, re-verified with the same wire-protocol test against
+   the actual in-cluster pod. **Still open**: cutting the actual M5StickS3
+   over from `bridge_server.py` to the k3s-hosted gateway, gated on BLE's
+   own Phase 6 soak test. Only after that cutover does the k3s deployment
+   become what's actually running the device day to day.
 
 Phase 3 and 4 are unstarted; see `TODO.md` for tracking.

@@ -1,7 +1,8 @@
-# Phase 1 skeleton (see services/gateway/app.py's docstring) -- not yet the
-# firmware's actual wire protocol. NodePort so the M5StickS3 can reach it
-# directly once Phase 2 ports bridge_server.py's real protocol over; for now
-# this is for integration testing the stt->agent->tts chain, not the Stick.
+# services/gateway/app.py now has full wire-protocol parity with
+# bridge_server.py (2026-09-16) -- see its own docstring. NodePort so the
+# M5StickS3 can reach it directly, though bridge_server.py is still what's
+# actually flashed against; this just gets the manifest itself applied and
+# reachable ahead of the real cutover.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
