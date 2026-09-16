@@ -25,8 +25,6 @@ import subprocess
 import tempfile
 import wave
 
-import numpy as np
-
 from ..registry import SV
 
 SAMPLE_RATE = 16000
@@ -68,6 +66,8 @@ def read_wav_16k(path):
     The bridge already records at 16 kHz, so the common path does no work; an
     enrollment clip from anywhere else gets converted.
     """
+    import numpy as np
+
     with wave.open(path, "rb") as w:
         if w.getframerate() == SAMPLE_RATE and w.getnchannels() == 1 and w.getsampwidth() == 2:
             raw = w.readframes(w.getnframes())
@@ -91,6 +91,7 @@ def fbank(samples):
     """80-bin Kaldi fbank with cepstral mean normalisation, as WeSpeaker's own
     front-end computes it."""
     import kaldi_native_fbank as knf
+    import numpy as np
 
     opts = knf.FbankOptions()
     opts.frame_opts.samp_freq = float(SAMPLE_RATE)
@@ -148,6 +149,8 @@ class WeSpeakerSV:
 
     def embed(self, wav_path):
         """A unit-length embedding, so a dot product is the cosine score."""
+        import numpy as np
+
         feats = fbank(read_wav_16k(wav_path))[None, :, :].astype(np.float32)
         vector = self.session.run(["embs"], {"feats": feats})[0][0]
         norm = float(np.linalg.norm(vector))

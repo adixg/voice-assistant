@@ -1,12 +1,51 @@
 # Home-server deployment architecture (k3s across two GPU nodes)
 
-Status: **directory scaffold, service code, and k8s manifests written; not
-yet applied to a live cluster.** This dev session has neither a k3s cluster
-nor a Docker daemon reachable from WSL2 (Docker Desktop's WSL integration
-isn't enabled for this distro — `docker` resolves to the Windows binary, not
-a usable daemon here), so nothing below has been build-tested or run
-end-to-end yet. Treat this doc as the design + the code that implements it,
-not as a "done" report — see each phase's status line.
+Status: **Phase 2 (cluster bring-up) started, home-server node only.** k3s is
+live on the home server (`arch-ssd`, native Arch, not WSL2 — that limitation
+was specific to an earlier dev session and no longer applies now that k3s
+actually runs here), labeled `gpu-tier=gtx1650`, with `ollama-gtx1650` and
+`stt` both `Running` and confirmed doing real CUDA inference inside their
+containers (2026-09-16, `kubectl exec ... nvidia-smi` and each pod's own
+startup log both show the GTX 1650). The RTX 4060 laptop hasn't joined as a
+second node yet. Treat this doc as the design + the code that implements it,
+plus now a partial live result — see each phase's status line.
+
+**GPU runtime chain, verified end to end on `arch-ssd`:**
+`nvidia-container-toolkit` (installed via pacman) → k3s auto-detects
+`nvidia-container-runtime` and registers it as an *additional* containerd
+runtime named `nvidia` (not the default — see `deploy/kubernetes/runtimeclass.yaml`'s
+comment for why a `RuntimeClass` + `runtimeClassName: nvidia` on each GPU pod
+was chosen over hand-editing k3s's generated containerd config) →
+`deploy/kubernetes/nvidia-device-plugin.yaml` (upstream `k8s-device-plugin`
+v0.20.0 + a time-slicing `ConfigMap`, `replicas: 2`) makes `nvidia.com/gpu`
+allocatable. The **time-slicing is required, not optional**: this node has
+exactly one physical GPU, and both `ollama-gtx1650` and `stt` request
+`nvidia.com/gpu: 1` — without slicing, the second pod sits `Pending`
+("Insufficient nvidia.com/gpu") forever, which is what actually happened
+before the `ConfigMap` was added. Slicing only serializes CUDA scheduling,
+it doesn't partition VRAM — the same sharing `bridge_server.py`'s single
+process already does between STT/LLM/TTS on this card today, so it's not a
+new risk.
+
+Two other real bugs found only by actually applying this to a live cluster
+(CI's `kind`-cluster manifest validation can't catch either, since it has no
+GPU and doesn't exercise a rollout): `stt.yaml`'s args
+(`--model`/`--device`) didn't match `services/stt/app.py`'s real flags
+(`--whisper-model`/`--whisper-device`) — a plain crash-loop, fixed by
+correcting the args; and `stt.yaml` was missing `strategy: type: Recreate`,
+which the `ollama-*.yaml` Deployments already had for the same reason
+(a GPU-constrained node can't satisfy a `RollingUpdate`'s momentary
+old+new-both-alive requirement) — without it, any future rollout of `stt`
+deadlocks the same way `ollama-*` would have.
+
+Addressing: the home server is a laptop chassis (`hostnamectl` reports
+`chassis: laptop`) despite being "the always-on node," on Wi-Fi with a
+DHCP (non-reserved) LAN IP — so its Tailscale MagicDNS name
+(`arch-ssd.<tailnet>.ts.net`, stable regardless of DHCP) is what the RTX
+4060's `K3S_URL` and any other cross-node reference should use, not the LAN
+IP. Owner's call: lid-close is not being guarded against (`HandleLidSwitch`
+left at its systemd default of `suspend`) since this machine is meant to
+stay open and on AC permanently — a deliberate choice, not an oversight.
 
 ## Why this exists
 
@@ -100,10 +139,13 @@ automated-switching design.
    GPU-less `kind` cluster can't stand in for the real two-node
    1650/4060 cluster, it just catches typos before they reach real
    hardware.
-2. **Cluster bring-up + Helm + ArgoCD** — actually install k3s on both
-   nodes, label them, apply the manifests, validate the gateway's Phase-1
-   WS endpoint against a test client, chart the manifests into
-   `deploy/helm/`, wire `deploy/argocd/` for GitOps sync.
+2. **Cluster bring-up + Helm + ArgoCD** — **partially done**: k3s installed
+   and labeled on the home server, GPU runtime chain verified end to end
+   (see status section above), `ollama-gtx1650` and `stt` applied and
+   `Running` with confirmed GPU access. Still open: join the RTX 4060 laptop
+   as a second node, apply `tts`/`agent`/`gateway`, validate the gateway's
+   Phase-1 WS endpoint against a test client, chart into `deploy/helm/`,
+   wire `deploy/argocd/` for GitOps sync.
 3. **Observability** — `observability/prometheus/` + `observability/grafana/`,
    turning the hand-measured numbers this repo already tracks into live
    dashboards.

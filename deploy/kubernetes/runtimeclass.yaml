@@ -1,0 +1,14 @@
+# k3s auto-detects /usr/bin/nvidia-container-runtime (from the
+# nvidia-container-toolkit package) at startup and adds it to the generated
+# containerd config as an *additional* runtime named "nvidia" -- it does not
+# become the default runtime. Pods that need GPU access must opt in with
+# runtimeClassName: nvidia (see ollama-gtx1650.yaml, ollama-rtx4060.yaml,
+# stt.yaml, and nvidia-device-plugin.yaml, which all set it) rather than
+# k3s's containerd config being hand-edited to change the cluster-wide
+# default -- that risks breaking scheduling for every pod on the node if the
+# hand-written template misses something k3s's real base template has.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia

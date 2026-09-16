@@ -21,6 +21,7 @@ spec:
     spec:
       nodeSelector:
         gpu-tier: rtx4060
+      runtimeClassName: nvidia
       containers:
         - name: ollama
           image: ollama/ollama:latest

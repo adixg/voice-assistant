@@ -5,6 +5,12 @@ metadata:
   namespace: aicompanion
 spec:
   replicas: 1
+  strategy:
+    type: Recreate  # GPU-constrained node (time-sliced, not partitioned): a
+                     # RollingUpdate briefly wants old+new pods live at once,
+                     # which deadlocks here since ollama-gtx1650 already holds
+                     # one of the two time-sliced nvidia.com/gpu slots, same
+                     # reasoning as the ollama-*.yaml Deployments
   selector:
     matchLabels:
       app: stt
@@ -15,10 +21,11 @@ spec:
     spec:
       nodeSelector:
         gpu-tier: gtx1650  # always-on node: STT must be reachable regardless of the 4060
+      runtimeClassName: nvidia
       containers:
         - name: stt
           image: ghcr.io/adixg/aicompanion-stt:latest
-          args: ["--stt-backend", "faster-whisper", "--model", "small", "--device", "cuda"]
+          args: ["--stt-backend", "faster-whisper", "--whisper-model", "small", "--whisper-device", "cuda"]
           ports:
             - containerPort: 8001
           resources:
