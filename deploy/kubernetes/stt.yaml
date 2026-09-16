@@ -17,7 +17,7 @@ spec:
         gpu-tier: gtx1650  # always-on node: STT must be reachable regardless of the 4060
       containers:
         - name: stt
-          image: aicompanion-stt:latest
+          image: ghcr.io/adixg/aicompanion-stt:latest
           args: ["--stt-backend", "faster-whisper", "--model", "small", "--device", "cuda"]
           ports:
             - containerPort: 8001

@@ -71,4 +71,4 @@ spec:
       serviceAccountName: gpu-scheduler
       containers:
         - name: gpu-scheduler
-          image: aicompanion-gpu-scheduler:latest
+          image: ghcr.io/adixg/aicompanion-gpu-scheduler:latest

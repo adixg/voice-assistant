@@ -22,6 +22,34 @@ file is just the how-to-apply.
    kubectl label node <laptop-hostname> gpu-tier=rtx4060
    ```
 
+## Getting the images
+
+`.github/workflows/ci.yml`'s `docker-build` job pushes all five images to
+`ghcr.io/adixg/<image>:latest` on every push to `main` (build-only, no push,
+on PRs). That's the only place these images get built and hosted -- nothing
+builds them on the home server itself.
+
+GHCR images pushed via the workflow's default `GITHUB_TOKEN` are **private**
+by default, even though this repo is public. Two ways to let the cluster
+pull them, pick one before `kubectl apply`:
+
+- **Make the packages public** (simplest): after
+  the first push, on GitHub go to each package under
+  github.com/adixg?tab=packages → Package settings → Change visibility →
+  Public. One-time, per image.
+- **Or create an image pull secret** and reference it from each Deployment:
+  ```
+  kubectl create secret docker-registry ghcr-pull \
+    --docker-server=ghcr.io \
+    --docker-username=<your-github-username> \
+    --docker-password=<a PAT with read:packages> \
+    -n aicompanion
+  ```
+  then add `imagePullSecrets: [{name: ghcr-pull}]` under each Deployment's
+  `spec.template.spec` in `agent.yaml`/`gateway.yaml`/`stt.yaml`/`tts.yaml`
+  (not committed by default, since referencing a pull secret that doesn't
+  exist yet blocks the pull entirely, even for an otherwise-public image).
+
 ## Apply
 
 ```
@@ -38,10 +66,10 @@ kubectl apply -f gateway.yaml
 
 `agent.yaml` points `--host` at the GTX 1650's Ollama Service by default,
 since that node is the one guaranteed to be up. Switching it to prefer the
-RTX 4060 when present is `controller/gpu_scheduler/`'s job — not built yet,
-see that directory's README for the design. Until it exists, switching is a
-manual `kubectl set env deployment/agent OLLAMA_HOST=http://ollama-rtx4060:11434`
-plus a rollout restart.
+RTX 4060 when present is `controller/gpu_scheduler/`'s job (design +
+skeleton code written, not yet run against a live cluster — see that
+directory's README for status). Until it's deployed and verified, switching
+is a manual `kubectl set env deployment/agent OLLAMA_HOST=http://ollama-rtx4060:11434`.
 
 `stt` and `tts` are pinned to the GTX 1650 node (`nodeSelector: gpu-tier:
 gtx1650`) so they're always reachable regardless of whether the laptop is

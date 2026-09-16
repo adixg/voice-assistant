@@ -21,7 +21,7 @@ spec:
         gpu-tier: gtx1650  # always-on node: the Stick needs a stable address to connect to
       containers:
         - name: gateway
-          image: aicompanion-gateway:latest
+          image: ghcr.io/adixg/aicompanion-gateway:latest
           args:
             - "--stt-url=http://stt:8001"
             - "--agent-url=http://agent:8002"

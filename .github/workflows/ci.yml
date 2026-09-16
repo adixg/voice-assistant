@@ -33,6 +33,9 @@ jobs:
   docker-build:
     name: build ${{ matrix.image }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write  # only used to push on `push` to main, see the login step below
     strategy:
       fail-fast: false
       matrix:
@@ -59,6 +62,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      # Only pushes on a real merge to main -- PRs still build (catches a
+      # broken Dockerfile) but never publish. This is how the home server
+      # gets images at all: nothing else builds or hosts them (see
+      # deploy/kubernetes/README.md for the pull side, including that GHCR
+      # images pushed via GITHUB_TOKEN are private by default).
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build ${{ matrix.image }}
         uses: docker/build-push-action@v6
         with:
@@ -69,7 +84,8 @@ jobs:
           # to root, matrix overrides it for that one image.
           context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
-          push: false
+          push: ${{ github.event_name == 'push' }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
           build-args: ${{ matrix.build-args }}
           # cache so unrelated-service pushes don't rebuild every image cold
           cache-from: type=gha,scope=${{ matrix.image }}

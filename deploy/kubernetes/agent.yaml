@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: aicompanion-agent:latest
+          image: ghcr.io/adixg/aicompanion-agent:latest
           args: ["--llm-backend", "ollama", "--model", "rina"]
           env:
             - name: OLLAMA_HOST

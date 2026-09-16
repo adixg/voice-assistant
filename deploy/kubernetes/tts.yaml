@@ -22,7 +22,7 @@ spec:
         gpu-tier: gtx1650
       containers:
         - name: tts
-          image: aicompanion-tts-vits:latest
+          image: ghcr.io/adixg/aicompanion-tts-vits:latest
           args: ["--tts-backend", "vits"]
           ports:
             - containerPort: 8003
