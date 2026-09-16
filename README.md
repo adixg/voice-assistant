@@ -2,7 +2,9 @@
 
 A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → VITS-Umamusume (TTS) → speaker.
 Runs either through this machine's local mic/speaker (`chat_loop.py`) or through
-an M5StickS3 over Wi-Fi (`bridge_server.py` + `firmware/m5stick_bridge/`). TTS is
+an M5StickS3 over BLE (`bridge_server.py` + `firmware/m5stick_bridge/` +
+`android_companion/`, an Android app that bridges the phone's BLE connection
+to `bridge_server.py`'s WebSocket — see `docs/ble-migration.md`). TTS is
 swappable (`--tts-backend vits` (default) or `chatterbox`, which can clone a
 voice from a reference clip) — see "Swapping backends" below.
 
@@ -15,18 +17,23 @@ voice from a reference clip) — see "Swapping backends" below.
   room doesn't get an answer. See `docs/voice-pipeline.md`.
 - **Three screens, cycled by tapping BtnA** (a hold still talks from any of
   them): Rina's animated pixel-art face, a Catppuccin-themed **clock**
-  (NTP-synced over Wi-Fi), and a **pomodoro timer** (50 min focus / 10 min
+  (no on-board RTC, so it's set from a `TIME_SYNC` BLE frame the phone sends
+  on connect rather than NTP), and a **pomodoro timer** (50 min focus / 10 min
   break by default — BtnB click starts/pauses, BtnB double-click resets).
 - **Proactive/unprompted speech** — reminders, encouragement, or a
   build-finished ping can all speak without a button press (see "Unprompted
   lines" below).
+- **BLE transport** — the Stick talks to `bridge_server.py` entirely over
+  Bluetooth Low Energy now (no Wi-Fi at all in `firmware/m5stick_bridge/`):
+  bonding plus an app-layer shared-secret handshake, relayed to
+  `bridge_server.py`'s WebSocket by the `android_companion/` phone app. Full
+  design and the real-hardware verification log: `docs/ble-migration.md`.
 - Powering the device off is the **physical power button** (double-click),
   not a firmware feature — see `docs/firmware-notes.md`.
 
-Currently in progress, not yet on the Stick: a BLE transport to replace the
-Wi-Fi hotspot (`docs/ble-migration.md`), and the features tracked in
-`TODO.md` (wake word activation, an IMU wrist-raise gesture wake, haptic
-feedback, voice isolation).
+Still tracked in `TODO.md`: wake word activation, an IMU wrist-raise gesture
+wake, haptic feedback, voice isolation, and a BLE soak test (hours-long
+connection, reconnect after Bluetooth toggle/reboot/deep-sleep).
 
 ## Architecture
 
@@ -35,10 +42,10 @@ and goes back to — everything below the dashed line is identical for both.
 
 ```mermaid
 flowchart TB
-    stick["<b>M5StickS3</b><br>push-to-talk, mic + speaker<br>240×135 pixel-art UI"]
+    stick["<b>M5StickS3</b><br>push-to-talk, mic + speaker<br>240×135 pixel-art UI<br>BLE peripheral, no Wi-Fi"]
     local["<b>Local mic + speaker</b><br>ffmpeg / ffplay"]
 
-    relay["<b>tools/termux_relay.py</b><br>on the phone, in Termux<br>picks which laptop"]
+    relay["<b>android_companion/</b><br>RelayService.kt, foreground service<br>BLE central + WebSocket client<br>host/port/secret set in-app"]
 
     bridge["<b>bridge_server.py</b><br>WebSocket server<br>PCM16 mono @ 16 kHz"]
     loop["<b>chat_loop.py</b><br>terminal + speech orb"]
@@ -55,8 +62,8 @@ flowchart TB
     cbw["<b>chatterbox_cli.py --serve</b><br>chatterbox-tts env, GPU<br>voice cloned from a<br>reference clip"]
     vitsw["<b>tts_cli.py --serve</b><br>uma-tts env, CPU"]
 
-    stick <-->|"Wi-Fi hotspot"| relay
-    relay <-->|"Tailscale"| bridge
+    stick <-->|"BLE GATT<br>bonded + AUTH secret"| relay
+    relay <-->|"WebSocket<br>Tailscale/LAN"| bridge
     local <--> loop
 
     bridge --> cli
@@ -83,14 +90,24 @@ flowchart TB
     class ollama,cbw,vitsw worker
 ```
 
+`tools/termux_relay.py` (Termux, Wi-Fi hotspot + Tailscale) did this same
+relay job before the BLE migration and still works standalone, but
+`android_companion/` is what's actually used today — see "Using the Stick
+with either laptop" below.
+
 The heavy TTS models each run in their **own conda env** as a long-lived
 subprocess, because their torch/CUDA pins conflict with each other and with
 the `chat` env. `voicepipe/subproc.py` owns that plumbing, so a backend only
 declares the command to run. faster-whisper and Ollama need no such isolation
 — whisper runs in-process, Ollama is just HTTP.
 
-One turn over the Stick's WebSocket, including where the on-device UI changes
-state:
+One turn over `bridge_server.py`'s WebSocket, including where the on-device
+UI changes state. This is the wire protocol as `bridge_server.py` itself
+sees it; on the Stick's side, `android_companion/RelayService.kt` translates
+it 1:1 to/from the BLE byte-envelope frames described in
+`docs/ble-migration.md` (`START`/`STOP`/`HEARD`/`STATUS`/`REPLY`/
+`AUDIO_CHUNK`/`END`), so the diagram below is accurate for both the pre-BLE
+and current BLE setups — only the transport between "S" and "B" changed:
 
 ```mermaid
 sequenceDiagram
@@ -175,6 +192,15 @@ memory/about-me.md      hand-written facts about you, appended to the system
                          prompt every conversation so she doesn't have to be
                          told them again (--profile / --no-profile)
 
+android_companion/      the Android app that bridges the Stick's BLE
+                         connection to bridge_server.py's WebSocket —
+                         RelayService.kt (foreground service, BLE central +
+                         OkHttp WebSocket client), BleEnvelopeCodec.kt (the
+                         Kotlin side of ble_envelope.h's byte-envelope
+                         codec), Prefs.kt (host/port/shared-secret settings,
+                         persisted), MainActivity.kt (settings UI). See
+                         docs/ble-migration.md.
+
 tools/
   echo_server.py        same WebSocket protocol as bridge_server.py, but skips
                          STT/Ollama/VITS entirely — mic audio goes straight
@@ -185,12 +211,15 @@ tools/
                          (PNGs) — one run, one set of crops, so the Stick and
                          speech_orb.py can't drift apart
   make_test_clip.sh     regenerates m5stick_speak_test's embedded voice clip
-  termux_relay.py        + termux_relay_setup.md — lets the Stick reach the
-                         laptop over Tailscale when they're not on the same
-                         Wi-Fi (runs on the phone, in Termux)
+  termux_relay.py        + termux_relay_setup.md — the pre-BLE way to reach
+                         the laptop over Tailscale (phone Wi-Fi hotspot +
+                         Termux); superseded by android_companion/ but kept,
+                         still works standalone
 
 firmware/
-  m5stick_bridge/        the real push-to-talk firmware (talks to bridge_server.py)
+  m5stick_bridge/        the real push-to-talk firmware — talks to
+                         bridge_server.py over BLE via android_companion/
+                         (ble_envelope.h / ble_transport.h; no Wi-Fi)
   m5stick_echo_test/     mic -> speaker loopback, on-device only, no Wi-Fi at
                          all — the fastest way to sanity-check the hardware
                          (mic, codec, speaker, volume) in isolation
@@ -392,29 +421,34 @@ can't drift apart — changing a crop changes both.
 From most to least isolated:
 
 1. **`firmware/m5stick_echo_test/`** — flash this alone. Hold BtnA, talk,
-   release, hear it played back. No Wi-Fi, no server, nothing but the mic,
-   codec, and speaker. If this doesn't sound right, it's a hardware/firmware
-   issue, not network or models.
-2. **`tools/echo_server.py`** + `firmware/m5stick_bridge/` — the real
-   firmware, but talking to the echo server instead of `bridge_server.py`.
-   Isolates the Wi-Fi/WebSocket path from STT/Ollama/VITS.
-3. **`bridge_server.py`** + `firmware/m5stick_bridge/` — the real thing.
+   release, hear it played back. No BLE, no phone, no server, nothing but
+   the mic, codec, and speaker. If this doesn't sound right, it's a
+   hardware/firmware issue, not network or models.
+2. **`tools/echo_server.py`** + `firmware/m5stick_bridge/` + the
+   `android_companion/` app — the real firmware and the real BLE/WebSocket
+   path, but the phone app talks to the echo server instead of
+   `bridge_server.py`. Isolates the BLE + WebSocket relay path from
+   STT/Ollama/VITS.
+3. **`bridge_server.py`** + `firmware/m5stick_bridge/` + `android_companion/`
+   — the real thing.
 
-See `firmware/m5stick_bridge/include/secrets.h.example` for the Wi-Fi/server
-config the Stick needs (copy to `secrets.h`, gitignored).
+See `firmware/m5stick_bridge/include/secrets.h.example` for the
+`BLE_SHARED_SECRET` the Stick needs (copy to `secrets.h`, gitignored) — it
+must match the secret entered in the Android app's settings (`Prefs.kt`
+defaults both sides to the same placeholder, so a fresh flash and a fresh
+install interoperate out of the box).
 
 ## Using the Stick with either laptop
 
-The Stick always joins the phone's own hotspot and talks to a small relay
-running there (in Termux, `tools/termux_relay.py`) — never a laptop's Wi-Fi
-directly. The relay forwards over Tailscale to whichever laptop is running
-`bridge_server.py`, chosen with `--laptop-host main`/`arch` (see
-`tools/termux_relay_setup.md`). This is also what makes switching backends
-(this laptop vs. the other one) a one-flag change on the phone instead of a
-firmware reflash: the Stick finds the relay automatically (it's always its
-own Wi-Fi's gateway, i.e. `WiFi.gatewayIP()` — see `connectNetwork()` in
-`firmware/m5stick_bridge/src/main.cpp`), and the relay is what actually picks
-the laptop.
+The Stick only ever talks BLE to the phone; the phone's `android_companion/`
+app is what actually reaches a laptop, over a WebSocket to whichever one is
+running `bridge_server.py` (host + port set in the app's settings, `Prefs.kt`
+— `10.x.x.x` on the LAN or a Tailscale hostname/IP both work, since it's
+plain `ws://`). Switching which laptop answers is a settings-field edit in
+the app, not a firmware reflash. `tools/termux_relay.py` did the equivalent
+job over Wi-Fi before the BLE migration (see `docs/ble-migration.md`) and
+still works as a standalone alternative, but isn't what's used day to day
+anymore.
 
 ## Setup
 
