@@ -47,6 +47,7 @@ from voicepipe import encouragement
 from voicepipe.cuda import ensure_cuda_libs
 from voicepipe.registry import FINAL, STATUS, stream_reply
 from voicepipe.speaker import REJECTED, TOO_SHORT, rejection_line, too_short_line
+from voicepipe.wire_audio import NORMALIZE_FILTER, SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16  # noqa: F401
 
 ensure_cuda_libs()
 
@@ -59,33 +60,8 @@ ensure_cuda_libs()
 # flush=True at each call site.
 sys.stdout.reconfigure(line_buffering=True)
 
-SAMPLE_RATE = 16000
 MIN_UTTERANCE_BYTES = SAMPLE_RATE * 2 // 4  # ignore stray <0.25s blips
-SEND_CHUNK = 4000
 ENROLL_SAMPLES = 5  # how many the --enroll prompt asks for; more is better
-
-
-# ffmpeg's one-pass speech normalizer. The Stick's speaker is already at
-# M5.Speaker.setVolume(255) — full scale — but the TTS doesn't use the range
-# it is given: a measured VITS reply peaked at -3.5 dB with a -18.1 dB mean,
-# so the amplifier was at 100% driving a signal at roughly two thirds. This
-# filter lifts it to about -0.4 dB peak / -14.7 dB mean without clipping, and
-# evens out quiet syllables rather than applying flat gain (which would clip
-# the loud chunks instead). Measured at 153x realtime, so it costs nothing
-# against a turn that already spends a second in TTS.
-NORMALIZE_FILTER = "speechnorm=e=6.25:r=0.00001:l=1"
-
-
-async def resample_to_pcm16(wav_path, normalize=True):
-    """ffmpeg any wav to raw 16kHz mono s16le bytes, for the Stick's I2S speaker."""
-    filters = ["-af", NORMALIZE_FILTER] if normalize else []
-    proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-i", wav_path, *filters, "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "-",
-        stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.DEVNULL,
-    )
-    data, _ = await proc.communicate()
-    return data
 
 
 async def iter_in_thread(make_iter):

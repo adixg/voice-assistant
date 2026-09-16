@@ -36,5 +36,14 @@ class FakeWebSocket:
     async def send(self, msg):
         self.sent.append(msg)
 
+    async def send_text(self, text):
+        """FastAPI/Starlette's WebSocket has send_text/send_bytes instead of
+        websockets' single send() -- services/gateway/app.py uses these, so
+        this fake collects both into the same `sent` list either way."""
+        self.sent.append(text)
+
+    async def send_bytes(self, data):
+        self.sent.append(data)
+
     async def close(self):
         self.closed = True

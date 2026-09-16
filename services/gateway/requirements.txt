@@ -2,3 +2,11 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 websockets==15.0.1
+
+# Speaker verification (voicepipe/backends/wespeaker.py) runs in-process here
+# rather than as its own service -- it's CPU-only and sits in the hot path of
+# every utterance, so a network round trip for something this cheap isn't
+# worth it. See docs/voice-pipeline.md for why these two specifically.
+onnxruntime==1.20.1
+kaldi-native-fbank==1.20.2
+numpy==2.2.1

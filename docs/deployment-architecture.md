@@ -95,12 +95,22 @@ uses.
   controller retargets.
 - `services/tts/` — chatterbox/vits over HTTP (`POST /synth`, returns
   base64 wav chunks).
-- `services/gateway/` — the M5StickS3's WebSocket peer. **Phase 1 skeleton
-  only** — see its own docstring. It proves the stt->agent->tts chain works
-  over HTTP, but does not yet speak the firmware's real wire protocol or
-  carry over speaker verification, the encouragement loop, or proactive
-  `announce`. `bridge_server.py` remains what's actually flashed against
-  until that port is done (Phase 2, tracked in `TODO.md`).
+- `services/gateway/` — the M5StickS3's WebSocket peer. **Full wire-protocol
+  parity with `bridge_server.py` as of 2026-09-16** — see its own updated
+  docstring. It speaks the real `start`/`stop`/`reset` +
+  `heard:`/`status:`/`reply:`/binary-audio/`end` protocol (via a small
+  `_AsgiWebSocketAdapter` so FastAPI's WebSocket can reuse the exact same
+  dispatch logic bridge_server.py's `handle_client`/`_client_loop` use), the
+  speaker-verification gate (in-process, not its own service -- see below),
+  `announce` + its Unix socket, and `encourage_loop`. `--enroll` mode was
+  deliberately not ported; see the module docstring for why that's fine.
+  `bridge_server.py` remains what's actually flashed against for now --
+  cutting the Stick over is what's left, tracked in `TODO.md`.
+
+  The speaker gate is the one pipeline stage that stayed in-process rather
+  than becoming its own HTTP service: it's CPU-only (ONNX, ~24MB model) and
+  sits in the hot path of every single utterance, so paying a network round
+  trip for something this cheap isn't worth the service-boundary purity.
 
 **Known cost of this split**: every hop above is now a network call instead
 of an in-process function call, on a pipeline where response latency is
@@ -152,22 +162,28 @@ automated-switching design.
 2. **Cluster bring-up + Helm + ArgoCD** — **partially done**: k3s installed
    and labeled on the home server, GPU runtime chain verified end to end
    (see status section above), `ollama-gtx1650`, `stt`, `tts`, and `agent`
-   all applied and `Running` with confirmed GPU access. Still open: join the
-   RTX 4060 laptop as a second node, apply `ollama-rtx4060`/`gateway`, deploy
-   `controller/gpu_scheduler/` and validate the node-up/node-down switch
-   against the real two-node cluster, validate the gateway's Phase-1 WS
-   endpoint against a test client, chart into `deploy/helm/`, wire
-   `deploy/argocd/` for GitOps sync.
+   all applied and `Running` with confirmed GPU access (though `tts`'s
+   `/synth` has a known bug, see `TODO.md`). Still open: join the RTX 4060
+   laptop as a second node, apply `ollama-rtx4060`/`gateway` (the gateway's
+   code now has real firmware parity, see Phase 5 below, but the manifest
+   itself isn't applied to the cluster yet), deploy `controller/gpu_scheduler/`
+   and validate the node-up/node-down switch against the real two-node
+   cluster, chart into `deploy/helm/`, wire `deploy/argocd/` for GitOps sync.
 3. **Observability** — `observability/prometheus/` + `observability/grafana/`,
    turning the hand-measured numbers this repo already tracks into live
    dashboards.
 4. **Benchmarks** — `benchmarks/latency/` (split-architecture vs.
    `bridge_server.py` monolith) and `benchmarks/gpu_allocation/` (how fast
    the controller actually retargets `agent` on a node transition).
-5. **Gateway parity port** — port `bridge_server.py`'s real firmware wire
-   protocol, speaker-verification gate, encouragement loop, and `announce`
-   into `services/gateway/`, then cut the actual M5StickS3 over from
-   `bridge_server.py` to the k3s-hosted gateway. Only after this phase does
-   the k3s deployment become what's actually running the device day to day.
+5. **Gateway parity port — mostly done (2026-09-16).** `services/gateway/`
+   now speaks `bridge_server.py`'s real firmware wire protocol, the
+   speaker-verification gate, `encouragement_loop`, and `announce` -- see
+   the service-boundary section above and the module's own docstring.
+   Verified against a mocked unit-test suite and a live smoke test against
+   the real running `stt`/`agent`/`tts` pods. **Still open**: cutting the
+   actual M5StickS3 over from `bridge_server.py` to the k3s-hosted gateway,
+   gated on the `tts` bug in Phase 2 and BLE's own Phase 6 soak test. Only
+   after that cutover does the k3s deployment become what's actually
+   running the device day to day.
 
-Phases 2-5 are unstarted; see `TODO.md` for tracking.
+Phase 3 and 4 are unstarted; see `TODO.md` for tracking.

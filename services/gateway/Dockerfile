@@ -6,6 +6,7 @@ WORKDIR /app
 COPY services/gateway/requirements.txt services/gateway/requirements.txt
 RUN pip install --no-cache-dir -r services/gateway/requirements.txt
 
+COPY voicepipe/ voicepipe/
 COPY services/gateway/app.py services/gateway/app.py
 COPY services/__init__.py services/__init__.py
 
