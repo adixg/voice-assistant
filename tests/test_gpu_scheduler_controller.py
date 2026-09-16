@@ -72,7 +72,10 @@ class TestOnNodeConditionChange:
         assert name == gs.AGENT_DEPLOYMENT
         assert namespace == gs.NAMESPACE
         env = body["spec"]["template"]["spec"]["containers"][0]["env"]
-        assert env == [{"name": "OLLAMA_HOST", "value": gs.RTX4060_HOST}]
+        assert env == [
+            {"name": "OLLAMA_HOST", "value": gs.RTX4060_HOST},
+            {"name": "OLLAMA_MODEL", "value": gs.RTX4060_MODEL},
+        ]
 
     def test_falls_back_to_the_1650_when_the_4060_goes_not_ready(self, monkeypatch):
         fake_apps = FakeAppsV1Api()
@@ -85,7 +88,10 @@ class TestOnNodeConditionChange:
         )
 
         env = fake_apps.patches[0][2]["spec"]["template"]["spec"]["containers"][0]["env"]
-        assert env == [{"name": "OLLAMA_HOST", "value": gs.GTX1650_HOST}]
+        assert env == [
+            {"name": "OLLAMA_HOST", "value": gs.GTX1650_HOST},
+            {"name": "OLLAMA_MODEL", "value": gs.GTX1650_MODEL},
+        ]
 
 
 class TestOnNodeDelete:
@@ -104,4 +110,7 @@ class TestOnNodeDelete:
         gs.on_node_delete(meta={"labels": {"gpu-tier": "rtx4060"}}, logger=FakeLogger())
 
         env = fake_apps.patches[0][2]["spec"]["template"]["spec"]["containers"][0]["env"]
-        assert env == [{"name": "OLLAMA_HOST", "value": gs.GTX1650_HOST}]
+        assert env == [
+            {"name": "OLLAMA_HOST", "value": gs.GTX1650_HOST},
+            {"name": "OLLAMA_MODEL", "value": gs.GTX1650_MODEL},
+        ]

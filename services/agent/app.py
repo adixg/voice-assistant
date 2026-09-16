@@ -45,7 +45,11 @@ def build_parser():
     # Deployment (or the GPU scheduler controller) can retarget which Ollama
     # instance this talks to with `kubectl set env`, no image rebuild.
     ap.add_argument("--host", default=os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
-    ap.add_argument("--model", default="rina")
+    # Same env-default convention as --host: the GPU scheduler controller
+    # patches OLLAMA_MODEL alongside OLLAMA_HOST on a node switch, since each
+    # Ollama instance only has the model sized for its own card pulled
+    # (qwen3.5:4b on the 4GB GTX 1650, qwen3:8b on the 8GB RTX 4060).
+    ap.add_argument("--model", default=os.environ.get("OLLAMA_MODEL", "rina"))
     ap.add_argument("--host-port", type=int, default=8002, dest="host_port")
     LLM.add_arguments(ap)
     return ap

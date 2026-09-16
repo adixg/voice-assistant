@@ -1,7 +1,7 @@
-"""Retargets the `agent` Deployment's Ollama endpoint to whichever GPU node
-is actually up. See README.md in this directory for the design and current
-status -- this is real kopf/kubernetes-client code, but not yet validated
-against a live cluster.
+"""Retargets the `agent` Deployment's Ollama endpoint (and matching model)
+to whichever GPU node is actually up. See README.md in this directory for
+the design and current status -- validated live against the real two-node
+cluster (2026-09-16), including the actual failover in both directions.
 
 Run: kopf run controller.py --namespace=aicompanion
 """
@@ -12,6 +12,12 @@ NAMESPACE = "aicompanion"
 AGENT_DEPLOYMENT = "agent"
 GTX1650_HOST = "http://ollama-gtx1650:11434"
 RTX4060_HOST = "http://ollama-rtx4060:11434"
+# Each Ollama instance only has the model sized for its own card pulled --
+# qwen3.5:4b fits the GTX 1650's 4GB comfortably, qwen3:8b needs the RTX
+# 4060's 8188 MiB headroom. Keep in sync with agent.yaml's OLLAMA_MODEL
+# default and services/agent/app.py's --model env fallback.
+GTX1650_MODEL = "qwen3.5:4b"
+RTX4060_MODEL = "qwen3:8b"
 GPU_TIER_LABEL = "gpu-tier"
 RTX4060_TIER = "rtx4060"
 
@@ -28,24 +34,29 @@ def _conditions_are_ready(conditions: list) -> bool:
                for c in (conditions or []))
 
 
-def _set_agent_ollama_host(host: str, logger):
-    """Patch the agent Deployment's env so it talks to `host`. Patching the
-    pod template spec is itself what triggers a rollout -- Kubernetes does
-    the restart, this just states the desired env value."""
+def _set_agent_target(host: str, model: str, logger):
+    """Patch the agent Deployment's env so it talks to `host` and requests
+    `model`. Patching the pod template spec is itself what triggers a
+    rollout -- Kubernetes does the restart, this just states the desired
+    values, and the same restart that swaps OLLAMA_HOST picks up the
+    matching OLLAMA_MODEL for free."""
     apps = client.AppsV1Api()
     patch = {
         "spec": {
             "template": {
                 "spec": {
                     "containers": [
-                        {"name": "agent", "env": [{"name": "OLLAMA_HOST", "value": host}]}
+                        {"name": "agent", "env": [
+                            {"name": "OLLAMA_HOST", "value": host},
+                            {"name": "OLLAMA_MODEL", "value": model},
+                        ]}
                     ]
                 }
             }
         }
     }
     apps.patch_namespaced_deployment(AGENT_DEPLOYMENT, NAMESPACE, patch)
-    logger.info(f"agent OLLAMA_HOST -> {host}")
+    logger.info(f"agent OLLAMA_HOST -> {host}, OLLAMA_MODEL -> {model}")
 
 
 @kopf.on.startup()
@@ -63,7 +74,10 @@ def on_node_condition_change(meta, status, logger, **_):
         return  # only the 4060 node's readiness changes agent routing today
 
     ready = _conditions_are_ready(status.get("conditions"))
-    _set_agent_ollama_host(RTX4060_HOST if ready else GTX1650_HOST, logger)
+    if ready:
+        _set_agent_target(RTX4060_HOST, RTX4060_MODEL, logger)
+    else:
+        _set_agent_target(GTX1650_HOST, GTX1650_MODEL, logger)
 
 
 @kopf.on.delete("", "v1", "nodes")
@@ -72,4 +86,4 @@ def on_node_delete(meta, logger, **_):
         return
     # The node object itself is gone (e.g. after a clean `kubectl delete
     # node` on laptop shutdown), not just NotReady -- same fallback either way.
-    _set_agent_ollama_host(GTX1650_HOST, logger)
+    _set_agent_target(GTX1650_HOST, GTX1650_MODEL, logger)

@@ -28,10 +28,15 @@ spec:
       containers:
         - name: agent
           image: ghcr.io/adixg/aicompanion-agent:latest
-          args: ["--llm-backend", "ollama", "--model", "qwen3.5:4b"]
+          args: ["--llm-backend", "ollama"]
           env:
             - name: OLLAMA_HOST
               value: "http://ollama-gtx1650:11434"
+            # Each Ollama instance only has the model sized for its own
+            # card pulled -- controller/gpu_scheduler/ patches this
+            # alongside OLLAMA_HOST on a node switch (see its README).
+            - name: OLLAMA_MODEL
+              value: "qwen3.5:4b"
           ports:
             - containerPort: 8002
           readinessProbe:

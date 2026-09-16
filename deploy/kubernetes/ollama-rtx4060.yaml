@@ -45,10 +45,19 @@ spec:
             - name: models
               mountPath: /root/.ollama
       volumes:
+        # Bind-mounts this node's own native Ollama's model store directly,
+        # read-write -- NOT a copy. This node's own OS already runs a plain
+        # `ollama serve` on :11434 (see docs/hardware-budget.md) with models
+        # already pulled there; the pod reuses that same data in place.
+        # A prior version of this file copied the whole store into a
+        # separate hostPath instead, which duplicated ~20GB and crashed the
+        # laptop when a `sudo rsync` filled the disk mid-copy (2026-09-16,
+        # see docs/deployment-architecture.md) -- sharing avoids that whole
+        # class of problem rather than needing a bigger disk.
         - name: models
           hostPath:
-            path: /var/lib/aicompanion/ollama-rtx4060
-            type: DirectoryOrCreate
+            path: /usr/share/ollama/.ollama
+            type: Directory
 ---
 apiVersion: v1
 kind: Service
