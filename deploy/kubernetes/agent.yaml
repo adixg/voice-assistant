@@ -2,6 +2,12 @@
 # Deployment controller/gpu_scheduler/ patches OLLAMA_HOST on and rolls
 # restart when the rtx4060 node becomes Ready, per that directory's README.
 # CPU-only container -- see services/agent/Dockerfile's comment for why.
+#
+# nodeSelector pins the pod itself to the always-up node too, same as
+# stt/tts -- confirmed live (2026-09-16) that this was a real gap, not just
+# belt-and-suspenders: with no selector, the scheduler placed agent's pod on
+# the rtx4060 node, so stopping that laptop's k3s-agent killed agent's own
+# pod at the exact moment the controller needed to fail it back over.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,6 +23,8 @@ spec:
       labels:
         app: agent
     spec:
+      nodeSelector:
+        gpu-tier: gtx1650
       containers:
         - name: agent
           image: ghcr.io/adixg/aicompanion-agent:latest

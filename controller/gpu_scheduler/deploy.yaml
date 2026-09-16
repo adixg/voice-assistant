@@ -75,6 +75,13 @@ spec:
       labels:
         app: gpu-scheduler
     spec:
+      # Same reasoning as agent.yaml's nodeSelector: confirmed live
+      # (2026-09-16) that leaving this unset lets the scheduler place the
+      # controller itself on the rtx4060 node -- when that node then goes
+      # down, the controller that's supposed to react to it dies at the
+      # same moment, and agent never gets failed back to ollama-gtx1650.
+      nodeSelector:
+        gpu-tier: gtx1650
       serviceAccountName: gpu-scheduler
       containers:
         - name: gpu-scheduler

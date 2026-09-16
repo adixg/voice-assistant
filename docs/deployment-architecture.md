@@ -137,8 +137,16 @@ it's a real, deliberate tradeoff, not a free one.
 
 | Node | Label | Runs |
 |---|---|---|
-| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `ollama-gtx1650`, `stt`, `tts` (vits), `gateway` |
+| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `ollama-gtx1650`, `stt`, `tts` (vits), `gateway`, `agent`, `gpu-scheduler` |
 | Laptop (RTX 4060) | `gpu-tier=rtx4060` | k3s agent, `ollama-rtx4060` (only while the laptop is up) |
+
+`agent` and `gpu-scheduler` are pinned here too (`nodeSelector`, added
+2026-09-16 after a live test caught the gap): neither does GPU work itself,
+so there's no reason for the scheduler to ever place them on the
+intermittent node, and a real test proved it matters -- with no selector,
+both landed on the RTX 4060 node, and stopping that laptop's k3s-agent
+killed the controller at the exact moment it needed to fail `agent` back
+over to `ollama-gtx1650`.
 
 `stt`/`tts`/`gateway` are pinned to the always-on node so the Stick always
 has something to talk to. Only the LLM backend the `agent` service calls
