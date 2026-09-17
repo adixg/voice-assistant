@@ -340,6 +340,7 @@ async def handle_client(ws, session):
         print("  Stick disconnected", flush=True)
 
 
+@app.websocket("/")
 @app.websocket("/stick")
 async def stick_ws(ws: WebSocket):
     await ws.accept()
