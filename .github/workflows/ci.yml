@@ -85,11 +85,19 @@ jobs:
           context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name == 'push' }}
+          # Load the gateway image into Docker as well as publishing it so
+          # the next step can verify binaries used only at runtime. This
+          # caught the gateway image omitting ffmpeg even though its Python
+          # tests passed with the audio conversion function mocked.
+          load: ${{ matrix.image == 'aicompanion-gateway' }}
           tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
           build-args: ${{ matrix.build-args }}
           # cache so unrelated-service pushes don't rebuild every image cold
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - name: Smoke-test gateway runtime dependencies
+        if: matrix.image == 'aicompanion-gateway'
+        run: docker run --rm --entrypoint ffmpeg ghcr.io/${{ github.repository_owner }}/aicompanion-gateway:latest -version
 
   k8s-manifests:
     name: validate k8s manifests

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
+from starlette.routing import WebSocketRoute
 
 import services.gateway.app as gateway_app
 from conftest import FakeWebSocket
@@ -329,6 +330,13 @@ class TestHandleClient:
         await gateway_app.handle_client(ws, session)
 
         assert session.ws is None  # cleared once the connection ends
+
+
+class TestWebSocketRoutes:
+    def test_exposes_relay_root_and_legacy_stick_paths(self):
+        paths = {route.path for route in gateway_app.app.routes
+                 if isinstance(route, WebSocketRoute)}
+        assert {"/", "/stick"} <= paths
 
 
 class TestAnnounce:
