@@ -17,7 +17,7 @@ android {
         minSdk = 31
         targetSdk = 36
         versionCode = 1
-        versionName = "phase5"
+        versionName = "1.0"
     }
 
     buildTypes {
@@ -38,9 +38,8 @@ android {
 dependencies {
     // BLE central APIs (android.bluetooth.le.*) are part of the Android
     // framework itself, no library needed for that half. OkHttp is the one
-    // real addition here, for the WebSocket bridge to bridge_server.py
-    // (RelayService.kt) -- Phase 5's actual new responsibility over the
-    // BLE-only Phase 2/3 spikes.
+    // non-framework dependency here, for RelayService's WebSocket connection
+    // to the k3s gateway (or standalone bridge_server.py fallback).
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

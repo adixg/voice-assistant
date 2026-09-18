@@ -69,8 +69,22 @@ pull them, pick one before `kubectl apply`:
 
 ## Apply
 
+First create/update the personal-data Secret. The gateway image deliberately
+does not bake a biometric voiceprint or the private user profile into GHCR:
+
+```
+kubectl -n aicompanion create secret generic aicompanion-personal-data \
+  --from-file=about-me.md=../../memory/about-me.md \
+  --from-file=voiceprint.json=../../memory/voiceprint.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Run that command from `deploy/kubernetes/` after `namespace.yaml` has been
+applied and whenever either file changes.
+
 ```
 kubectl apply -f namespace.yaml
+# create/update aicompanion-personal-data here (command above)
 kubectl apply -f runtimeclass.yaml
 kubectl apply -f nvidia-device-plugin.yaml
 kubectl apply -f ollama-gtx1650.yaml
@@ -81,14 +95,35 @@ kubectl apply -f agent.yaml
 kubectl apply -f gateway.yaml
 ```
 
-## Current wiring (Phase 1, manual)
+## Primary device path
+
+The day-to-day route is:
+
+`M5StickS3 -> BLE -> Android relay -> ws://arch-ssd.<tailnet>.ts.net:30800 -> gateway -> stt/agent/tts`
+
+Port `30800` is the fixed NodePort in `gateway.yaml`. Version 1.0 of the
+Android app migrates its saved endpoint to that host and port once, while
+leaving both fields editable. To validate a rollout:
+
+```
+kubectl -n aicompanion rollout status deployment/gateway
+kubectl -n aicompanion get endpoints gateway
+curl http://arch-ssd.<tailnet>.ts.net:30800/health
+```
+
+Then tap **Start** in the Android app. The foreground relay automatically
+releases stale GATT clients and retries BLE/WebSocket failures. For a local
+fallback, run `bridge_server.py`, enter that machine's Tailscale host and
+port `8765` in the app, and tap Start; no firmware change is needed.
+
+## Current service wiring
 
 `agent.yaml` points `--host` at the GTX 1650's Ollama Service by default,
-since that node is the one guaranteed to be up. Switching it to prefer the
-RTX 4060 when present is `controller/gpu_scheduler/`'s job (design +
-skeleton code written, not yet run against a live cluster — see that
-directory's README for status). Until it's deployed and verified, switching
-is a manual `kubectl set env deployment/agent OLLAMA_HOST=http://ollama-rtx4060:11434`.
+since that node is guaranteed to be up. The deployed
+`controller/gpu_scheduler/` controller switches both `OLLAMA_HOST` and
+`OLLAMA_MODEL` to the RTX 4060 while that node is Ready, and back to the GTX
+1650 when it is not. Both transitions and real cross-node inference were
+verified on the live cluster; see that directory's README.
 
 `stt` and `tts` are pinned to the GTX 1650 node (`nodeSelector: gpu-tier:
 gtx1650`) so they're always reachable regardless of whether the laptop is

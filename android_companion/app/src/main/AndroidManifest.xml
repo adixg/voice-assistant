@@ -10,7 +10,8 @@
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- RelayService's WebSocket bridge to bridge_server.py. -->
+    <!-- RelayService's WebSocket connection to the k3s gateway (or the
+         standalone bridge_server.py fallback). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -32,7 +33,7 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
-    <!-- bridge_server.py only ever speaks plain ws://, never wss:// (see
+    <!-- The private-network gateway speaks plain ws://, not wss:// (see
          tools/termux_relay.py and secrets.h.example), and Android blocks
          cleartext traffic by default since API 28, confirmed on the real
          phone: RelayService's WebSocket to a plain ws:// host failed with
@@ -45,7 +46,7 @@
          security design already assumes (see main.cpp's header comment). -->
     <application
         android:allowBackup="false"
-        android:label="aicompanion relay"
+        android:label="@string/app_name"
         android:theme="@style/Theme.AppCompat.Light"
         android:usesCleartextTraffic="true">
         <!-- Not @android:style/Theme.Material.Light: MainActivity extends

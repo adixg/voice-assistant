@@ -1,6 +1,7 @@
 # Home-server deployment architecture (k3s across two GPU nodes)
 
-Status: **Phase 2 (cluster bring-up) underway on both nodes.** `arch-ssd`
+Status: **The cluster core is live; repository/device defaults now target its
+gateway, with live device cutover verification pending.** `arch-ssd`
 (GTX 1650, native Arch): k3s live, labeled `gpu-tier=gtx1650`, with
 `ollama-gtx1650`/`stt`/`agent`/`tts` all `Running` and confirmed doing real
 CUDA inference inside their containers. `agent`'s `OLLAMA_HOST` env is
@@ -37,11 +38,11 @@ the real ~25GB free on `C:` (WSL2's `df -h` inside Linux had reported
 see the check-disk-space-before-bulk-writes lesson). Pod-to-internet
 egress on this node is a separate, still-unfixed WSL2 networking gap
 (harmless now that models are shared rather than pulled in-pod). `gateway`
-is **applied and `Running`** too, confirmed with the same live
-wire-protocol test -- but `bridge_server.py` remains what's actually
-flashed against; nothing has cut the real Stick over yet. Treat this doc
-as the design + the code that implements it, plus now a partial live
-result -- see each phase's status line.
+is **applied and `Running`** too, confirmed with the same live wire-protocol
+test. The repository's Android endpoint now points at its stable NodePort
+route; applying the updated gateway manifest/Secret and a real Stick
+conversation are still required before calling the runtime cutover
+hardware-verified.
 
 **GPU runtime chain, verified end to end on `arch-ssd`:**
 `nvidia-container-toolkit` (installed via pacman) → k3s auto-detects
@@ -101,8 +102,8 @@ the 4060 disappears. That's what `controller/gpu_scheduler/` is for.
 
 ## Service boundary
 
-`bridge_server.py` today does STT -> LLM -> TTS -> speaker-verification ->
-WebSocket-to-firmware all in one process (566 lines, see
+The standalone `bridge_server.py` does STT -> LLM -> TTS ->
+speaker-verification -> WebSocket-to-firmware all in one process (566 lines, see
 `docs/firmware-notes.md` for its event-loop-blocking history). Splitting
 along the registry's own boundaries (`voicepipe/registry.py`'s
 STT/LLM/TTS/SV protocols) means each service is a thin FastAPI wrapper
@@ -127,8 +128,9 @@ uses.
   speaker-verification gate (in-process, not its own service -- see below),
   `announce` + its Unix socket, and `encourage_loop`. `--enroll` mode was
   deliberately not ported; see the module docstring for why that's fine.
-  `bridge_server.py` remains what's actually flashed against for now --
-  cutting the Stick over is what's left, tracked in `TODO.md`.
+  It is now the primary repository/device route. `bridge_server.py` remains
+  the port-8765 fallback; the updated APK and manifest still need a live
+  Stick verification, tracked in `TODO.md`.
 
   The speaker gate is the one pipeline stage that stayed in-process rather
   than becoming its own HTTP service: it's CPU-only (ONNX, ~24MB model) and
@@ -207,16 +209,18 @@ automated-switching design.
 4. **Benchmarks** — `benchmarks/latency/` (split-architecture vs.
    `bridge_server.py` monolith) and `benchmarks/gpu_allocation/` (how fast
    the controller actually retargets `agent` on a node transition).
-5. **Gateway parity port — mostly done (2026-09-16).** `services/gateway/`
+5. **Gateway parity and repository cutover — done (2026-09-18).** `services/gateway/`
    now speaks `bridge_server.py`'s real firmware wire protocol, the
    speaker-verification gate, `encouragement_loop`, and `announce` -- see
    the service-boundary section above and the module's own docstring.
    Verified against a mocked unit-test suite and a live smoke test against
    the real running `stt`/`agent`/`tts` pods. `gateway.yaml` is now applied
    and `Running` too, re-verified with the same wire-protocol test against
-   the actual in-cluster pod. **Still open**: cutting the actual M5StickS3
-   over from `bridge_server.py` to the k3s-hosted gateway, gated on BLE's
-   own Phase 6 soak test. Only after that cutover does the k3s deployment
-   become what's actually running the device day to day.
+   the actual in-cluster pod. The Android endpoint now defaults and one-time
+   migrates to `arch-ssd.<tailnet>.ts.net:30800`, and the gateway manifest
+   consumes the private profile/voiceprint through a Secret. **Still open**:
+   apply those latest deployment changes from a machine with cluster
+   credentials, install the APK, and complete the real-device
+   conversation/reconnect soak.
 
 Phase 3 and 4 are unstarted; see `TODO.md` for tracking.

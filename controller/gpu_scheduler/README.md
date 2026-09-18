@@ -22,12 +22,14 @@ real, comparatively uncommon skill to demonstrate.
 - Watches `Node` objects cluster-wide for the `gpu-tier: rtx4060` label
   transitioning `Ready` <-> not-`Ready`.
 - On the 4060 node becoming `Ready`: patches the `agent` Deployment's pod
-  template env (`OLLAMA_HOST=http://ollama-rtx4060:11434`) in the `aicompanion`
-  namespace. Patching the pod template is enough to trigger a rollout on its
-  own -- no separate restart call needed.
+  template env (`OLLAMA_HOST=http://ollama-rtx4060:11434`,
+  `OLLAMA_MODEL=qwen3:8b`) in the `aicompanion` namespace. Patching the pod
+  template is enough to trigger a rollout on its own -- no separate restart
+  call needed.
 - On the 4060 node leaving `Ready` (or being deleted, e.g. `kubectl delete
   node` after a clean shutdown): patches `agent` back to
-  `OLLAMA_HOST=http://ollama-gtx1650:11434`.
+  `OLLAMA_HOST=http://ollama-gtx1650:11434` and
+  `OLLAMA_MODEL=qwen3.5:4b`.
 - Deliberately narrow scope for now: only `agent` is retargeted. `stt` and
   `tts` stay pinned to the always-on node (see `deploy/kubernetes/tts.yaml`'s
   comment on why chatterbox-on-4060 isn't wired in yet) -- extending the
@@ -36,13 +38,14 @@ real, comparatively uncommon skill to demonstrate.
 
 ## Status
 
-**Design + skeleton only, not yet run against a live cluster** -- this repo
-doesn't have a k3s cluster available from the dev machine this was written
-on (see `docs/deployment-architecture.md`'s phase notes). `controller.py` is
-real code (kopf handlers + the kubernetes client patch calls), not
-pseudocode, but it needs to be validated against the actual two-node cluster
-before being trusted, the same way every other piece of hardware-facing code
-in this repo gets verified against the real device before being called done.
+**Deployed and verified on the live two-node cluster (2026-09-16).** Both
+Ready and NotReady transitions retargeted the agent successfully, including a
+real gateway -> agent -> cross-node `ollama-rtx4060` -> `qwen3:8b` inference.
+Live testing also exposed and fixed the controller's missing node-patch RBAC,
+and the controller and agent are now pinned to the always-on GTX node so they
+remain available when the 4060 disappears. The WSL2/Tailscale networking
+fixes needed for that cross-node route are recorded in
+`docs/deployment-architecture.md`.
 
 ## Running it
 

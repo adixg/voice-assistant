@@ -1,6 +1,6 @@
 package com.aigf.blespike
 
-// Phase 5: the real BLE-central + WebSocket-bridge app, replacing
+// The BLE-central + WebSocket-gateway app, replacing
 // tools/termux_relay.py's job -- but unlike that script (a byte-blind pump
 // between two WebSocket endpoints, since both sides already speak
 // WebSocket), this service does real protocol translation: the Stick side
@@ -8,7 +8,7 @@ package com.aigf.blespike
 // other. See ble_envelope.h's header comment for the frame-type table this
 // translation is built from, and firmware/m5stick_bridge/src/main.cpp's
 // webSocketEvent()/the button handlers for the exact WS message shapes on
-// the bridge_server.py side ("start"/"stop"/"reset" text, raw binary mic
+// the gateway side ("start"/"stop"/"reset" text, raw binary mic
 // chunks, "heard:"/"status:"/"reply:" text, binary reply audio, "end" text).
 //
 // Runs as a foreground service (not tied to MainActivity's lifecycle) so
@@ -21,7 +21,7 @@ package com.aigf.blespike
 // services -> bond if needed -> subscribe to TX -> enqueue AUTH, then
 // TIME_SYNC (re-sent periodically after -- NTP goes away without Wi-Fi, so
 // this is the Stick's only wall-clock source over BLE). The WebSocket to
-// bridge_server.py opens right after AUTH is sent; there's no AUTH ack
+// gateway opens right after AUTH is sent; there's no AUTH ack
 // frame in this protocol, so "sent" is as close to "ready" as this side can
 // tell without adding one.
 
@@ -84,6 +84,10 @@ class RelayService : Service() {
         private const val TIME_SYNC_INTERVAL_MS = 5 * 60_000L
         private const val WS_RECONNECT_DELAY_MS = 3_000L
         private const val BLE_RESCAN_DELAY_MS = 1_000L
+        private const val BLE_MAX_RESCAN_DELAY_MS = 15_000L
+        private const val BLE_SCAN_TIMEOUT_MS = 20_000L
+        private const val BLE_HANDSHAKE_TIMEOUT_MS = 20_000L
+        private const val BLE_BOND_TIMEOUT_MS = 45_000L
     }
 
     inner class LocalBinder : Binder() {
@@ -99,22 +103,42 @@ class RelayService : Service() {
 
     // -------------------------------------------------------------- BLE
     private var gatt: BluetoothGatt? = null
+    private var scanning = false
+    private var bleReady = false
+    private var bleRetryAttempt = 0
     private var txCharacteristic: BluetoothGattCharacteristic? = null
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
     private var pendingBondAction: (() -> Unit)? = null
     private val outgoingFrames = ArrayDeque<Pair<Byte, ByteArray>>()
     private var sendingFrames = false
     private val pendingPacketQueues = mutableMapOf<UUID, () -> Unit>()
+    private var scanTimeout: Runnable? = null
+    private var handshakeTimeout: Runnable? = null
+
+    private val bleReconnect = Runnable { startScan() }
 
     private val bondReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
             val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE)
+            val previousState = intent.getIntExtra(
+                BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.BOND_NONE
+            )
+            val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            }
+            if (device?.address != gatt?.device?.address) return
             Log.d(TAG, "bond state -> $state")
             if (state == BluetoothDevice.BOND_BONDED) {
                 val action = pendingBondAction
                 pendingBondAction = null
                 action?.invoke()
+            } else if (state == BluetoothDevice.BOND_NONE && previousState == BluetoothDevice.BOND_BONDING) {
+                pendingBondAction = null
+                restartBle("Pairing failed")
             }
         }
     }
@@ -135,16 +159,22 @@ class RelayService : Service() {
 
     // -------------------------------------------------------------- WS
     private var ws: WebSocket? = null
+    private val wsReconnect = Runnable { connectWs() }
     private val httpClient = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
 
     private val wsListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            log("WS connected to bridge_server.py")
+            if (webSocket !== ws) {
+                webSocket.close(1000, "stale connection")
+                return
+            }
+            log("WS connected to gateway")
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (webSocket !== ws || !bleReady) return
             when {
                 text.startsWith("heard:") ->
                     enqueueFrame(FrameType.HEARD, text.substring(6).toByteArray(Charsets.UTF_8))
@@ -158,21 +188,26 @@ class RelayService : Service() {
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            if (webSocket !== ws || !bleReady) return
             enqueueFrame(FrameType.AUDIO_CHUNK, bytes.toByteArray())
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (webSocket !== ws) return
             log("WS closed ($code $reason)")
             scheduleWsReconnect()
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (webSocket !== ws) return
             log("WS failed: ${t.message}")
             scheduleWsReconnect()
         }
     }
 
     private fun connectWs() {
+        handler.removeCallbacks(wsReconnect)
+        if (!running || !bleReady || ws != null) return
         val host = prefs.bridgeHost
         if (host.isBlank()) {
             log("No bridge host configured -- open the app and set one")
@@ -185,8 +220,16 @@ class RelayService : Service() {
 
     private fun scheduleWsReconnect() {
         ws = null
-        if (!running) return
-        handler.postDelayed({ if (running) connectWs() }, WS_RECONNECT_DELAY_MS)
+        handler.removeCallbacks(wsReconnect)
+        if (!running || !bleReady) return
+        handler.postDelayed(wsReconnect, WS_RECONNECT_DELAY_MS)
+    }
+
+    private fun disconnectWs(reason: String) {
+        handler.removeCallbacks(wsReconnect)
+        val oldWs = ws
+        ws = null
+        oldWs?.close(1000, reason)
     }
 
     private fun sendWsText(text: String) {
@@ -199,6 +242,7 @@ class RelayService : Service() {
 
     // ------------------------------------------------------ BLE <-> frames
     private fun enqueueFrame(type: Byte, payload: ByteArray) {
+        if (!bleReady && type != FrameType.AUTH) return
         outgoingFrames.addLast(type to payload)
         if (!sendingFrames) {
             sendingFrames = true
@@ -228,6 +272,7 @@ class RelayService : Service() {
         g: BluetoothGatt, rx: BluetoothGattCharacteristic,
         packets: ArrayDeque<ByteArray>, retriesLeft: Int = 5, onFrameDone: () -> Unit
     ) {
+        if (g !== gatt || !running) return
         val packet = packets.firstOrNull()
         if (packet == null) {
             onFrameDone()
@@ -252,11 +297,14 @@ class RelayService : Service() {
                 result == BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY) && retriesLeft > 0 -> {
                 handler.postDelayed({ writeNextPacket(g, rx, packets, retriesLeft - 1, onFrameDone) }, 300)
             }
-            else -> log("writeCharacteristic() failed ($result), dropped a frame")
+            else -> restartBle("BLE write could not be queued (status=$result)")
         }
     }
 
     private fun sendAuthAndStartTimeSync() {
+        bleReady = true
+        bleRetryAttempt = 0
+        cancelHandshakeTimeout()
         enqueueFrame(FrameType.AUTH, prefs.sharedSecret.toByteArray(Charsets.UTF_8))
         sendTimeSync()
         connectWs()
@@ -271,7 +319,7 @@ class RelayService : Service() {
 
     private val timeSyncTick = object : Runnable {
         override fun run() {
-            if (!running || gatt == null) return
+            if (!running || !bleReady || gatt == null) return
             sendTimeSync()
             handler.postDelayed(this, TIME_SYNC_INTERVAL_MS)
         }
@@ -279,126 +327,277 @@ class RelayService : Service() {
 
     // -------------------------------------------------------------- BLE GATT
     private fun startScan() {
-        if (!running) return
+        handler.removeCallbacks(bleReconnect)
+        if (!running || scanning || gatt != null) return
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
         if (adapter == null || !adapter.isEnabled) {
             log("Bluetooth is off")
-            handler.postDelayed({ startScan() }, BLE_RESCAN_DELAY_MS * 5)
+            handler.postDelayed(bleReconnect, BLE_RESCAN_DELAY_MS * 5)
             return
         }
         val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE_UUID)).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
         log("Scanning for the Stick...")
-        adapter.bluetoothLeScanner.startScan(listOf(filter), settings, scanCallback)
+        try {
+            scanning = true
+            adapter.bluetoothLeScanner.startScan(listOf(filter), settings, scanCallback)
+            val timeout = Runnable {
+                if (!scanning) return@Runnable
+                stopScan()
+                scheduleBleReconnect("Stick not found yet")
+            }
+            scanTimeout = timeout
+            handler.postDelayed(timeout, BLE_SCAN_TIMEOUT_MS)
+        } catch (e: Exception) {
+            scanning = false
+            log("Could not start BLE scan: ${e.message}")
+            scheduleBleReconnect()
+        }
+    }
+
+    private fun stopScan() {
+        scanTimeout?.let(handler::removeCallbacks)
+        scanTimeout = null
+        if (!scanning) return
+        scanning = false
+        try {
+            val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+            if (adapter?.isEnabled == true) adapter.bluetoothLeScanner.stopScan(scanCallback)
+        } catch (_: Exception) {
+            // The radio may have gone away between isEnabled and stopScan.
+        }
+    }
+
+    private fun armHandshakeTimeout(g: BluetoothGatt, stage: String, timeoutMs: Long = BLE_HANDSHAKE_TIMEOUT_MS) {
+        cancelHandshakeTimeout()
+        val timeout = Runnable {
+            if (running && g === gatt && !bleReady) restartBle("$stage timed out", g)
+        }
+        handshakeTimeout = timeout
+        handler.postDelayed(timeout, timeoutMs)
+    }
+
+    private fun cancelHandshakeTimeout() {
+        handshakeTimeout?.let(handler::removeCallbacks)
+        handshakeTimeout = null
+    }
+
+    private fun scheduleBleReconnect(reason: String? = null) {
+        handler.removeCallbacks(bleReconnect)
+        if (!running) return
+        val shift = bleRetryAttempt.coerceAtMost(4)
+        val delay = (BLE_RESCAN_DELAY_MS * (1L shl shift)).coerceAtMost(BLE_MAX_RESCAN_DELAY_MS)
+        bleRetryAttempt++
+        if (reason != null) log("$reason; retrying in ${delay / 1000}s")
+        handler.postDelayed(bleReconnect, delay)
+    }
+
+    /**
+     * Fully releases the Android GATT client before retrying. A scan alone is
+     * not enough: an unclosed client can leave the peripheral connected and
+     * therefore no longer advertising, which used to make a Stick power cycle
+     * look necessary.
+     */
+    private fun restartBle(
+        reason: String,
+        source: BluetoothGatt? = gatt,
+        alreadyDisconnected: Boolean = false
+    ) {
+        if (source != null && source !== gatt) {
+            source.close()
+            return
+        }
+        log(reason)
+        stopScan()
+        cancelHandshakeTimeout()
+        handler.removeCallbacks(timeSyncTick)
+        pendingBondAction = null
+        bleReady = false
+        txCharacteristic = null
+        rxCharacteristic = null
+        outgoingFrames.clear()
+        pendingPacketQueues.clear()
+        sendingFrames = false
+        disconnectWs("BLE reconnecting")
+
+        val oldGatt = gatt
+        gatt = null
+        if (oldGatt != null) {
+            if (!alreadyDisconnected) {
+                try {
+                    oldGatt.disconnect()
+                } catch (_: Exception) {
+                    // close() below is the important resource release.
+                }
+            }
+            oldGatt.close()
+        }
+        scheduleBleReconnect()
     }
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            val device = result.device
-            log("Found ${device.address}, connecting...")
-            (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter.bluetoothLeScanner.stopScan(this)
-            gatt = device.connectGatt(this@RelayService, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            handler.post {
+                if (!running || !scanning || gatt != null) return@post
+                val device = result.device
+                stopScan()
+                log("Found ${device.address}, connecting...")
+                try {
+                    val newGatt = device.connectGatt(
+                        this@RelayService, false, gattCallback, BluetoothDevice.TRANSPORT_LE
+                    )
+                    gatt = newGatt
+                    armHandshakeTimeout(newGatt, "BLE connection")
+                } catch (e: Exception) {
+                    log("Could not connect: ${e.message}")
+                    scheduleBleReconnect()
+                }
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {
-            log("Scan failed: $errorCode")
-            handler.postDelayed({ startScan() }, BLE_RESCAN_DELAY_MS)
+            handler.post {
+                scanning = false
+                scanTimeout?.let(handler::removeCallbacks)
+                scanTimeout = null
+                scheduleBleReconnect("Scan failed ($errorCode)")
+            }
         }
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                log("Connected. Requesting PHY 2M...")
-                g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-                g.setPreferredPhy(
-                    BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK,
-                    BluetoothDevice.PHY_OPTION_NO_PREFERRED
-                )
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                log("Disconnected (status=$status)")
-                gatt = null
-                txCharacteristic = null
-                rxCharacteristic = null
-                outgoingFrames.clear()
-                sendingFrames = false
-                ws?.close(1000, "BLE disconnected")
-                ws = null
-                if (running) handler.postDelayed({ startScan() }, BLE_RESCAN_DELAY_MS)
+            handler.post {
+                if (g !== gatt) {
+                    g.close()
+                    return@post
+                }
+                if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                    log("Connected. Requesting PHY 2M...")
+                    armHandshakeTimeout(g, "PHY negotiation")
+                    // Do not queue requestConnectionPriority here. Android has
+                    // one GATT operation lane, so it can clobber the PHY/MTU
+                    // sequence that follows. The Stick requests its preferred
+                    // connection parameters from the peripheral side anyway.
+                    g.setPreferredPhy(
+                        BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK,
+                        BluetoothDevice.PHY_OPTION_NO_PREFERRED
+                    )
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    restartBle("Disconnected (status=$status); reconnecting", g, alreadyDisconnected = true)
+                } else if (status != BluetoothGatt.GATT_SUCCESS) {
+                    restartBle("BLE connection failed (status=$status)", g)
+                }
             }
         }
 
         override fun onPhyUpdate(g: BluetoothGatt, txPhy: Int, rxPhy: Int, status: Int) {
-            g.requestMtu(517)
+            handler.post {
+                if (g !== gatt) return@post
+                armHandshakeTimeout(g, "MTU negotiation")
+                if (!g.requestMtu(517)) restartBle("Could not request BLE MTU", g)
+            }
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-            log("MTU negotiated: $mtu. Discovering services...")
-            g.discoverServices()
+            handler.post {
+                if (g !== gatt) return@post
+                if (status != BluetoothGatt.GATT_SUCCESS || mtu < 503) {
+                    restartBle("MTU negotiation failed (status=$status, mtu=$mtu)", g)
+                    return@post
+                }
+                log("MTU negotiated: $mtu. Discovering services...")
+                armHandshakeTimeout(g, "Service discovery")
+                if (!g.discoverServices()) restartBle("Could not start service discovery", g)
+            }
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-            val service = g.getService(SERVICE_UUID)
-            val tx = service?.getCharacteristic(TX_CHAR_UUID)
-            val rx = service?.getCharacteristic(RX_CHAR_UUID)
-            if (tx == null || rx == null) {
-                log("Service/characteristics not found (status=$status)")
-                return
-            }
-            txCharacteristic = tx
-            rxCharacteristic = rx
+            handler.post {
+                if (g !== gatt) return@post
+                val service = if (status == BluetoothGatt.GATT_SUCCESS) g.getService(SERVICE_UUID) else null
+                val tx = service?.getCharacteristic(TX_CHAR_UUID)
+                val rx = service?.getCharacteristic(RX_CHAR_UUID)
+                if (tx == null || rx == null) {
+                    restartBle("Service/characteristics not found (status=$status)", g)
+                    return@post
+                }
+                txCharacteristic = tx
+                rxCharacteristic = rx
 
-            if (g.device.bondState == BluetoothDevice.BOND_BONDED) {
-                subscribeToNotifications(g, tx)
-            } else {
-                log("Not bonded -- requesting bond...")
-                pendingBondAction = { subscribeToNotifications(g, tx) }
-                g.device.createBond()
+                if (g.device.bondState == BluetoothDevice.BOND_BONDED) {
+                    subscribeToNotifications(g, tx)
+                } else {
+                    log("Not bonded -- requesting bond...")
+                    armHandshakeTimeout(g, "Pairing", BLE_BOND_TIMEOUT_MS)
+                    pendingBondAction = { subscribeToNotifications(g, tx) }
+                    if (!g.device.createBond() && g.device.bondState != BluetoothDevice.BOND_BONDED) {
+                        pendingBondAction = null
+                        restartBle("Could not start pairing", g)
+                    }
+                }
             }
         }
 
         private fun subscribeToNotifications(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            g.setCharacteristicNotification(characteristic, true)
+            if (g !== gatt) return
+            armHandshakeTimeout(g, "Notification subscription")
+            if (!g.setCharacteristicNotification(characteristic, true)) {
+                restartBle("Could not enable local notifications", g)
+                return
+            }
             val cccd = characteristic.getDescriptor(CCCD_UUID) ?: run {
-                log("CCCD descriptor missing -- cannot subscribe")
+                restartBle("CCCD descriptor missing", g)
                 return
             }
             val value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val queued = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 g.writeDescriptor(cccd, value)
             } else {
                 @Suppress("DEPRECATION")
                 cccd.value = value
                 @Suppress("DEPRECATION")
-                g.writeDescriptor(cccd)
+                if (g.writeDescriptor(cccd)) BluetoothStatusCodes.SUCCESS else -1
+            }
+            if (queued != BluetoothStatusCodes.SUCCESS) {
+                restartBle("Could not subscribe (status=$queued)", g)
             }
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                log("Subscribed. Sending AUTH...")
-                sendAuthAndStartTimeSync()
-            } else {
-                log("CCCD write failed (status=$status)")
+            handler.post {
+                if (g !== gatt || descriptor.uuid != CCCD_UUID) return@post
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    log("Subscribed. Sending AUTH...")
+                    sendAuthAndStartTimeSync()
+                } else {
+                    restartBle("CCCD write failed (status=$status)", g)
+                }
             }
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                pendingPacketQueues.remove(characteristic.uuid)
-                return
+            handler.post {
+                if (g !== gatt) return@post
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    pendingPacketQueues.remove(characteristic.uuid)
+                    restartBle("BLE write failed (status=$status)", g)
+                    return@post
+                }
+                pendingPacketQueues.remove(characteristic.uuid)?.invoke()
             }
-            pendingPacketQueues.remove(characteristic.uuid)?.invoke()
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            rxDecoder.feed(characteristic.value)
+            val value = characteristic.value.copyOf()
+            handler.post { if (g === gatt && bleReady) rxDecoder.feed(value) }
         }
 
         override fun onCharacteristicChanged(
             g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray
         ) {
-            rxDecoder.feed(value)
+            val copy = value.copyOf()
+            handler.post { if (g === gatt && bleReady) rxDecoder.feed(copy) }
         }
     }
 
@@ -424,15 +623,47 @@ class RelayService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
-        running = false
-        handler.removeCallbacksAndMessages(null)
+        shutdownRelay()
         unregisterReceiver(bondReceiver)
-        ws?.close(1000, "service stopping")
-        gatt?.close()
+        httpClient.dispatcher.executorService.shutdown()
+        httpClient.connectionPool.evictAll()
         super.onDestroy()
     }
 
+    /**
+     * Synchronously release both transports. stopSelf() is asynchronous, so
+     * doing this only in onDestroy left a small window where a quick Start
+     * could revive the old service with its stale GATT client still attached.
+     */
+    private fun shutdownRelay() {
+        running = false
+        stopScan()
+        handler.removeCallbacksAndMessages(null)
+        disconnectWs("service stopping")
+        pendingBondAction = null
+        bleReady = false
+        txCharacteristic = null
+        rxCharacteristic = null
+        outgoingFrames.clear()
+        pendingPacketQueues.clear()
+        sendingFrames = false
+        val oldGatt = gatt
+        gatt = null
+        if (oldGatt != null) {
+            // disconnect() makes the Stick advertise again immediately;
+            // close() alone can leave a controller-level zombie connection
+            // until Android eventually notices it has no GATT client.
+            try {
+                oldGatt.disconnect()
+            } catch (_: Exception) {
+                // Still release the client below.
+            }
+            oldGatt.close()
+        }
+    }
+
     fun stopRelay() {
+        shutdownRelay()
         stopSelf()
     }
 

@@ -1,6 +1,6 @@
 package com.aigf.blespike
 
-// Phase 5: thin settings/control UI over RelayService, which owns the
+// Thin settings/control UI over RelayService, which owns the
 // actual BLE-central + WebSocket-bridge connection so it survives this
 // Activity being backgrounded or destroyed. This file used to own that
 // connection directly (the Phase 2/3 spikes) -- see RelayService.kt for
@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
     private lateinit var hostInput: EditText
+    private lateinit var portInput: EditText
     private lateinit var secretInput: EditText
     private lateinit var startStopButton: Button
     private val handler = Handler(Looper.getMainLooper())
@@ -91,10 +92,12 @@ class MainActivity : AppCompatActivity() {
         logView = findViewById(R.id.logView)
         logScroll = findViewById(R.id.logScroll)
         hostInput = findViewById(R.id.hostInput)
+        portInput = findViewById(R.id.portInput)
         secretInput = findViewById(R.id.secretInput)
         startStopButton = findViewById(R.id.startStopButton)
 
         hostInput.setText(prefs.bridgeHost)
+        portInput.setText(prefs.bridgePort.toString())
         secretInput.setText(prefs.sharedSecret)
 
         startStopButton.setOnClickListener {
@@ -140,9 +143,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRelay() {
         prefs.bridgeHost = hostInput.text.toString().trim()
+        prefs.bridgePort = portInput.text.toString().trim().toIntOrNull() ?: prefs.bridgePort
         prefs.sharedSecret = secretInput.text.toString()
         if (prefs.bridgeHost.isBlank()) {
-            log("Set a bridge host first (the Tailscale host running bridge_server.py)")
+            log("Set a gateway host first (normally ${Prefs.DEFAULT_GATEWAY_HOST})")
             return
         }
 
@@ -167,7 +171,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopRelay() {
+        relay?.logListener = null
         relay?.stopRelay()
+        // stopSelf() cannot destroy a started service while this Activity is
+        // still bound to it. Drop the binding as part of Stop so onDestroy()
+        // can close BLE/WebSocket state and the next Start creates a fresh
+        // RelayService instead of reconnecting to the stopped instance.
+        if (isBound) {
+            unbindService(connection)
+            isBound = false
+        }
+        relay = null
         running = false
         updateButtons()
     }

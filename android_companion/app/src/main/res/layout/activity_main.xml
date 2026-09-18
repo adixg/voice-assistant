@@ -6,13 +6,29 @@
     android:orientation="vertical"
     android:padding="16dp">
 
-    <EditText
-        android:id="@+id/hostInput"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="bridge_server.py host (Tailscale name or IP)"
-        android:inputType="textUri"
-        android:importantForAutofill="no" />
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/hostInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="3"
+            android:hint="bridge host (Tailscale name or IP)"
+            android:inputType="textUri"
+            android:importantForAutofill="no" />
+
+        <EditText
+            android:id="@+id/portInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="port"
+            android:inputType="number"
+            android:importantForAutofill="no" />
+    </LinearLayout>
 
     <EditText
         android:id="@+id/secretInput"

@@ -1,8 +1,4 @@
-// android_companion/ — the phone-side half of the BLE transport migration
-// (see /home/aditya/.claude/plans/tranquil-drifting-stream.md, Phase 5).
-// Right now this holds only Phase 2's throughput-spike test app; the real
-// BLE-central + Tailscale-WebSocket-bridge app lands here later as its own
-// module once Phase 2/3 are validated.
+// Phone-side BLE central and WebSocket relay for the M5StickS3 companion.
 pluginManagement {
     repositories {
         google()

@@ -2,25 +2,45 @@ package com.aigf.blespike
 
 import android.content.Context
 
-/** Tiny SharedPreferences wrapper for the settings the plan calls for:
- * "laptop host selection, shared-secret entry" -- kept to exactly those two
- * plus the port, since everything else (service/characteristic UUIDs) is a
- * protocol constant, not a per-install setting. */
+/** Persistent relay settings. The k3s gateway is the normal endpoint; host
+ * and port remain editable so bridge_server.py can still be used as a local
+ * fallback without rebuilding either the app or the firmware. */
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("relay_prefs", Context.MODE_PRIVATE)
 
+    companion object {
+        const val DEFAULT_GATEWAY_HOST = "arch-ssd.<tailnet>.ts.net"
+        const val DEFAULT_GATEWAY_PORT = 30800
+        private const val ENDPOINT_DEFAULTS_VERSION = 1
+    }
+
+    init {
+        // One-time cutover for an already-installed companion app. Preserve
+        // the old endpoint so it is recoverable for troubleshooting, but make
+        // the always-on k3s gateway the active path after this app update.
+        if (sp.getInt("endpoint_defaults_version", 0) < ENDPOINT_DEFAULTS_VERSION) {
+            val oldHost = sp.getString("bridge_host", null)
+            val oldPort = sp.getInt("bridge_port", 8765)
+            sp.edit().apply {
+                if (!oldHost.isNullOrBlank()) putString("legacy_bridge_host", oldHost)
+                putInt("legacy_bridge_port", oldPort)
+                putString("bridge_host", DEFAULT_GATEWAY_HOST)
+                putInt("bridge_port", DEFAULT_GATEWAY_PORT)
+                putInt("endpoint_defaults_version", ENDPOINT_DEFAULTS_VERSION)
+            }.apply()
+        }
+    }
+
     var bridgeHost: String
-        get() = sp.getString("bridge_host", "") ?: ""
+        get() = sp.getString("bridge_host", DEFAULT_GATEWAY_HOST) ?: DEFAULT_GATEWAY_HOST
         set(value) = sp.edit().putString("bridge_host", value).apply()
 
     var bridgePort: Int
-        get() = sp.getInt("bridge_port", 8765)
+        get() = sp.getInt("bridge_port", DEFAULT_GATEWAY_PORT)
         set(value) = sp.edit().putInt("bridge_port", value).apply()
 
-    // Defaults to main.cpp's own placeholder so a fresh install matches the
-    // spike firmware out of the box; both sides still need changing before
-    // this is anything but a placeholder -- see main.cpp's SHARED_SECRET
-    // comment.
+    // Defaults to main.cpp's placeholder so a fresh install and fresh flash
+    // interoperate. Change both sides together before treating it as a secret.
     var sharedSecret: String
         get() = sp.getString("shared_secret", "spike-shared-secret-change-me") ?: ""
         set(value) = sp.edit().putString("shared_secret", value).apply()

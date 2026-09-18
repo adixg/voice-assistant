@@ -389,10 +389,10 @@ throughput/protocol spike. Three new files:
   backoff retry) — losing either one tears down and reopens both, so
   `bridge_server.py` never accumulates state for a Stick that's no longer
   actually reachable over BLE.
-- **`Prefs.kt`** — the "laptop host selection, shared-secret entry" the plan
-  called for, as a small `SharedPreferences` wrapper.
+- **`Prefs.kt`** — the endpoint and shared-secret settings, as a small
+  `SharedPreferences` wrapper.
 - **`MainActivity.kt`** — rewritten from owning the BLE connection directly
-  to a thin settings/control UI: host + secret fields, Start/Stop (which
+  to a thin settings/control UI: host + port + secret fields, Start/Stop (which
   starts/stops `RelayService`), a "Forget device" shortcut (opens system
   Bluetooth settings — no non-hidden-API way to unpair a specific device
   exists, and `docs/ble-migration.md`'s own Phase 3 log already needed a
@@ -489,7 +489,12 @@ BLE transport as designed.
 
 ## Where it stands
 
-Phases 1-5 are done, and Phase 6's conversation test now is too. **Still
-remaining**: the soak test (hours-long connection, reconnect after BT
-toggle/reboot/deep-sleep) and updating `README.md`'s architecture diagram.
-See `TODO.md`.
+Phases 1-5 are done, and Phase 6's standalone conversation test is done.
+As of 2026-09-18 the Android relay also closes stale GATT clients, applies
+timeouts and bounded reconnect backoff, and synchronously releases BLE and
+WebSocket state on Stop so a rapid Start → Stop → Start cannot revive a
+half-stopped service. Its saved endpoint is one-time migrated to the k3s
+gateway at `arch-ssd.<tailnet>.ts.net:30800`, now the repository's primary
+path. **Still remaining**: install the updated APK, apply the updated gateway
+manifest/Secret, verify a real k3s-backed conversation, and run the
+hours-long/Bluetooth-toggle/reboot/deep-sleep soak tests. See `TODO.md`.

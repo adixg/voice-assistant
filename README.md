@@ -1,10 +1,10 @@
 # aicompanion
 
 A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → VITS-Umamusume (TTS) → speaker.
-Runs either through this machine's local mic/speaker (`chat_loop.py`) or through
-an M5StickS3 over BLE (`bridge_server.py` + `firmware/m5stick_bridge/` +
-`android_companion/`, an Android app that bridges the phone's BLE connection
-to `bridge_server.py`'s WebSocket — see `docs/ble-migration.md`). TTS is
+The primary device path is M5StickS3 → BLE → Android relay → the k3s gateway
+and split STT/agent/TTS services. `bridge_server.py` remains the standalone
+development fallback, and `chat_loop.py` runs the same backends with this
+machine's local mic/speaker. TTS is
 swappable (`--tts-backend vits` (default) or `chatterbox`, which can clone a
 voice from a reference clip) — see "Swapping backends" below.
 
@@ -23,10 +23,10 @@ voice from a reference clip) — see "Swapping backends" below.
 - **Proactive/unprompted speech** — reminders, encouragement, or a
   build-finished ping can all speak without a button press (see "Unprompted
   lines" below).
-- **BLE transport** — the Stick talks to `bridge_server.py` entirely over
+- **BLE transport** — the Stick talks to the Android relay entirely over
   Bluetooth Low Energy now (no Wi-Fi at all in `firmware/m5stick_bridge/`):
   bonding plus an app-layer shared-secret handshake, relayed to
-  `bridge_server.py`'s WebSocket by the `android_companion/` phone app. Full
+  the k3s gateway's WebSocket by the `android_companion/` phone app. Full
   design and the real-hardware verification log: `docs/ble-migration.md`.
 - Powering the device off is the **physical power button** (double-click),
   not a firmware feature — see `docs/firmware-notes.md`.
@@ -37,73 +37,54 @@ connection, reconnect after Bluetooth toggle/reboot/deep-sleep).
 
 ## Architecture
 
-Two entrypoints share one pipeline. They differ only in where audio comes from
-and goes back to — everything below the dashed line is identical for both.
+The k3s route is the normal device path. The standalone entrypoints remain
+useful for local development and isolated debugging.
 
 ```mermaid
 flowchart TB
     stick["<b>M5StickS3</b><br>push-to-talk, mic + speaker<br>240×135 pixel-art UI<br>BLE peripheral, no Wi-Fi"]
-    local["<b>Local mic + speaker</b><br>ffmpeg / ffplay"]
-
     relay["<b>android_companion/</b><br>RelayService.kt, foreground service<br>BLE central + WebSocket client<br>host/port/secret set in-app"]
-
-    bridge["<b>bridge_server.py</b><br>WebSocket server<br>PCM16 mono @ 16 kHz"]
-    loop["<b>chat_loop.py</b><br>terminal + speech orb"]
-
-    cli["<b>voicepipe/cli.py</b><br>shared flags, assembled<br>from the registries"]
-    reg{{"<b>voicepipe/registry.py</b><br>STT / LLM / TTS<br>name → backend"}}
-
-    stt["backends/whisper.py<br><i>faster-whisper, GPU</i>"]
-    llmb["backends/ollama.py"]
-    cbb["backends/chatterbox.py"]
-    vitsb["backends/vits.py"]
-
-    ollama[("<b>Ollama</b><br>rina model")]
-    cbw["<b>chatterbox_cli.py --serve</b><br>chatterbox-tts env, GPU<br>voice cloned from a<br>reference clip"]
-    vitsw["<b>tts_cli.py --serve</b><br>uma-tts env, CPU"]
+    gateway["<b>gateway</b><br>k3s on always-on node<br>NodePort 30800"]
+    stt["<b>stt service</b><br>faster-whisper"]
+    agent["<b>agent service</b><br>LLM turn-taking"]
+    tts["<b>tts service</b><br>VITS"]
+    controller["<b>gpu-scheduler</b><br>selects available Ollama"]
+    ollama1650[("<b>Ollama</b><br>GTX 1650 / qwen3.5:4b")]
+    ollama4060[("<b>Ollama</b><br>RTX 4060 / qwen3:8b")]
 
     stick <-->|"BLE GATT<br>bonded + AUTH secret"| relay
-    relay <-->|"WebSocket<br>Tailscale/LAN"| bridge
-    local <--> loop
-
-    bridge --> cli
-    loop --> cli
-    cli --> reg
-    reg --> stt
-    reg --> llmb
-    reg --> cbb
-    reg --> vitsb
-
-    llmb -->|HTTP| ollama
-    cbb -->|"stdin/stdout<br>line protocol"| cbw
-    vitsb -->|"stdin/stdout<br>line protocol"| vitsw
+    relay <-->|"WebSocket<br>Tailscale"| gateway
+    gateway -->|HTTP| stt
+    gateway -->|HTTP| agent
+    gateway -->|HTTP| tts
+    agent --> ollama1650
+    agent -. "when laptop is Ready" .-> ollama4060
+    controller -. "patches agent target" .-> agent
 
     classDef device fill:#eff1f5,stroke:#7287fd,stroke-width:2px,color:#4c4f69
-    classDef entry fill:#e6e9ef,stroke:#8839ef,stroke-width:2px,color:#4c4f69
-    classDef core fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
-    classDef backend fill:#eff1f5,stroke:#40a02b,color:#4c4f69
+    classDef service fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
     classDef worker fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
-    class stick,local,relay device
-    class bridge,loop entry
-    class cli,reg core
-    class stt,llmb,cbb,vitsb backend
-    class ollama,cbw,vitsw worker
+    class stick,relay device
+    class gateway,stt,agent,tts,controller service
+    class ollama1650,ollama4060 worker
 ```
 
 `tools/termux_relay.py` (Termux, Wi-Fi hotspot + Tailscale) did this same
 relay job before the BLE migration and still works standalone, but
-`android_companion/` is what's actually used today — see "Using the Stick
-with either laptop" below.
+`android_companion/` is what's actually used today — see "Using the Stick"
+below.
 
-The heavy TTS models each run in their **own conda env** as a long-lived
+In the standalone/local path, the heavy TTS models each run in their **own
+conda env** as a long-lived
 subprocess, because their torch/CUDA pins conflict with each other and with
 the `chat` env. `voicepipe/subproc.py` owns that plumbing, so a backend only
 declares the command to run. faster-whisper and Ollama need no such isolation
 — whisper runs in-process, Ollama is just HTTP.
 
-One turn over `bridge_server.py`'s WebSocket, including where the on-device
-UI changes state. This is the wire protocol as `bridge_server.py` itself
-sees it; on the Stick's side, `android_companion/RelayService.kt` translates
+One turn over the gateway WebSocket, including where the on-device UI changes
+state. `services/gateway/app.py` and the standalone `bridge_server.py`
+implement the same wire protocol; on the Stick's side,
+`android_companion/RelayService.kt` translates
 it 1:1 to/from the BLE byte-envelope frames described in
 `docs/ble-migration.md` (`START`/`STOP`/`HEARD`/`STATUS`/`REPLY`/
 `AUDIO_CHUNK`/`END`), so the diagram below is accurate for both the pre-BLE
@@ -112,10 +93,10 @@ and current BLE setups — only the transport between "S" and "B" changed:
 ```mermaid
 sequenceDiagram
     participant S as M5StickS3
-    participant B as bridge_server.py
-    participant W as whisper
-    participant O as Ollama
-    participant T as TTS worker
+    participant B as k3s gateway
+    participant W as STT service
+    participant O as agent + Ollama
+    participant T as TTS service
 
     Note over S: BtnA held → listening
     S->>B: "start"
@@ -246,11 +227,9 @@ VITS-Umamusume-voice-synthesizer/   cloned HF Space (model code + weights)
 
 services/               bridge_server.py split into HTTP services along
                          voicepipe/registry.py's existing STT/LLM/TTS
-                         boundaries, for the k3s deployment below — Phase 1
-                         skeleton, not yet what's actually flashed against
+                         boundaries; this is the primary device path
                          (see docs/deployment-architecture.md)
-  gateway/                 the Stick's WebSocket peer (Phase 1 only, not
-                           firmware-protocol-compatible yet)
+  gateway/                 the Stick's protocol-compatible WebSocket peer
   stt/, agent/, tts/       thin FastAPI wrappers, one per registry entry
 
 deploy/kubernetes/      k3s manifests for the home-server (GTX 1650) +
@@ -429,8 +408,9 @@ From most to least isolated:
    path, but the phone app talks to the echo server instead of
    `bridge_server.py`. Isolates the BLE + WebSocket relay path from
    STT/Ollama/VITS.
-3. **`bridge_server.py`** + `firmware/m5stick_bridge/` + `android_companion/`
-   — the real thing.
+3. **k3s `gateway`** + `firmware/m5stick_bridge/` + `android_companion/`
+   — the real deployment. Use `bridge_server.py` on port 8765 as the
+   standalone equivalent when isolating cluster issues.
 
 See `firmware/m5stick_bridge/include/secrets.h.example` for the
 `BLE_SHARED_SECRET` the Stick needs (copy to `secrets.h`, gitignored) — it
@@ -438,17 +418,15 @@ must match the secret entered in the Android app's settings (`Prefs.kt`
 defaults both sides to the same placeholder, so a fresh flash and a fresh
 install interoperate out of the box).
 
-## Using the Stick with either laptop
+## Using the Stick
 
-The Stick only ever talks BLE to the phone; the phone's `android_companion/`
-app is what actually reaches a laptop, over a WebSocket to whichever one is
-running `bridge_server.py` (host + port set in the app's settings, `Prefs.kt`
-— `10.x.x.x` on the LAN or a Tailscale hostname/IP both work, since it's
-plain `ws://`). Switching which laptop answers is a settings-field edit in
-the app, not a firmware reflash. `tools/termux_relay.py` did the equivalent
-job over Wi-Fi before the BLE migration (see `docs/ble-migration.md`) and
-still works as a standalone alternative, but isn't what's used day to day
-anymore.
+The Stick only talks BLE to the phone. The Android app defaults to the
+always-on k3s gateway at `arch-ssd.<tailnet>.ts.net:30800`; install/update
+the app, open it, and tap **Start**. The service reconnects BLE and WebSocket
+failures automatically. Host and port remain editable: point them at any
+machine running `bridge_server.py` on port 8765 for a standalone fallback,
+without reflashing the Stick. `tools/termux_relay.py` is the older Wi-Fi-era
+alternative and is no longer the day-to-day route.
 
 ## Setup
 

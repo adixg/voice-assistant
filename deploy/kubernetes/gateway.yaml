@@ -1,8 +1,6 @@
-# services/gateway/app.py now has full wire-protocol parity with
-# bridge_server.py (2026-09-16) -- see its own docstring. NodePort so the
-# M5StickS3 can reach it directly, though bridge_server.py is still what's
-# actually flashed against; this just gets the manifest itself applied and
-# reachable ahead of the real cutover.
+# Primary M5StickS3 ingress. The Android relay reaches this WebSocket through
+# the home server's stable Tailscale name and NodePort 30800. The standalone
+# bridge_server.py remains a development/fallback path on port 8765.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,6 +30,17 @@ spec:
           readinessProbe:
             httpGet: {path: /health, port: 8000}
             initialDelaySeconds: 5
+          volumeMounts:
+            # Created from the gitignored voiceprint plus the tracked profile;
+            # see deploy/kubernetes/README.md. Without these, the gateway would
+            # silently run without owner voice verification/personalisation.
+            - name: personal-data
+              mountPath: /app/memory
+              readOnly: true
+      volumes:
+        - name: personal-data
+          secret:
+            secretName: aicompanion-personal-data
 ---
 apiVersion: v1
 kind: Service
@@ -39,6 +48,8 @@ metadata:
   name: gateway
   namespace: aicompanion
 spec:
+  # Deliberately fixed: this is the Android app's default port and therefore
+  # part of the device-facing interface, not an incidental cluster detail.
   type: NodePort
   selector:
     app: gateway
