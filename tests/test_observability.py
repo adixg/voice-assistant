@@ -7,7 +7,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from services.metrics import HTTP_REQUESTS, install_http_metrics
+from services.metrics import (
+    GATEWAY_STAGE_DURATION,
+    GATEWAY_TURN_DURATION,
+    GATEWAY_TURNS,
+    HTTP_DURATION,
+    HTTP_REQUESTS,
+    install_http_metrics,
+)
 
 
 ROOT = Path(__file__).parents[1]
@@ -64,3 +71,35 @@ def test_http_metrics_records_error_status():
         and sample.value >= 1
         for sample in samples
     )
+
+
+def test_http_metrics_records_duration_with_same_labels_as_requests():
+    app = FastAPI()
+    install_http_metrics(app, "test-observability-duration")
+
+    @app.get("/ok")
+    def ok():
+        return {"ok": True}
+
+    assert TestClient(app).get("/ok").status_code == 200
+    samples = HTTP_DURATION.collect()[0].samples
+    assert any(
+        sample.name.endswith("_count")
+        and sample.labels["service"] == "test-observability-duration"
+        and sample.labels["route"] == "/ok"
+        and sample.labels["method"] == "GET"
+        and sample.labels["status"] == "200"
+        and sample.value >= 1
+        for sample in samples
+    )
+
+
+def test_gateway_metrics_keep_outcome_and_stage_labels():
+    GATEWAY_TURNS.labels("success").inc()
+    GATEWAY_TURN_DURATION.observe(0.01)
+    GATEWAY_STAGE_DURATION.labels("stt").observe(0.01)
+
+    turn_samples = GATEWAY_TURNS.collect()[0].samples
+    stage_samples = GATEWAY_STAGE_DURATION.collect()[0].samples
+    assert any(sample.labels["outcome"] == "success" and sample.value >= 1 for sample in turn_samples)
+    assert any(sample.labels["stage"] == "stt" and sample.name.endswith("_count") for sample in stage_samples)

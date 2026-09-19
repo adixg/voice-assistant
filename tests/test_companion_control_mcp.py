@@ -1,4 +1,6 @@
 """Tests for the dependency-free companion-control MCP transport and tools."""
+import pytest
+
 from urllib.parse import parse_qs, urlparse
 
 from tools import companion_control_mcp as mcp
@@ -64,6 +66,28 @@ def test_gpu_status_uses_exported_framebuffer_components(monkeypatch):
     assert "DCGM_FI_DEV_FB_TOTAL" not in queries[1]
     for metric in ("DCGM_FI_DEV_FB_USED", "DCGM_FI_DEV_FB_FREE", "DCGM_FI_DEV_FB_RESERVED"):
         assert metric in queries[1]
+
+
+def test_gpu_status_normalizes_labels_and_vram(monkeypatch):
+    monkeypatch.setenv("COMPANION_CONTROL_PROMETHEUS_URL", "http://prometheus.test")
+
+    def get_json(url):
+        query = parse_qs(urlparse(url).query)["query"][0]
+        if query == "DCGM_FI_DEV_GPU_UTIL":
+            return prom_result([sample({"Hostname": "arch-ssd", "gpu": "0"}, 73)])
+        return prom_result([sample({"instance": "10.42.1.92:9400", "gpu": "0"}, 88)])
+
+    result = mcp.gpu_status(get_json)
+    assert result["utilization"] == [{"host": "arch-ssd", "gpu": "0", "utilization_percent": 73.0}]
+    assert result["vram_utilization"] == [{"host": "10.42.1.92:9400", "gpu": "0", "vram_percent": 88.0}]
+
+
+def test_service_health_wraps_prometheus_failure():
+    def fail(_url):
+        raise mcp.ControlPlaneError("Prometheus unavailable")
+
+    with pytest.raises(mcp.ControlPlaneError, match="unavailable"):
+        mcp.service_health(fail)
 
 
 def test_tool_call_rejects_arguments_for_a_zero_argument_tool():

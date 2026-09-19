@@ -79,3 +79,60 @@ def test_mcp_tool_loop_executes_call_and_returns_followup():
     assert second["messages"][-1] == {
         "role": "tool", "tool_call_id": "call-1", "content": '{"utilization": []}'
     }
+
+
+def test_mcp_tool_loop_rejects_malformed_arguments():
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {
+        "content": None,
+        "tool_calls": [{"id": "call-1", "function": {
+            "name": "get_gpu_status", "arguments": "not-json",
+        }}],
+    }}]})
+
+    class FakeMCP:
+        def openai_tools(self):
+            return []
+
+    with pytest.raises(OpenAICompatibleUnavailable, match="chat completion failed"):
+        OpenAICompatibleLLM(client=client, mcp_client=FakeMCP()).ask([])
+
+
+def test_mcp_tool_loop_stops_after_max_rounds():
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {
+        "content": None,
+        "tool_calls": [{"id": "call-1", "function": {
+            "name": "get_gpu_status", "arguments": "{}",
+        }}],
+    }}]})
+
+    class FakeMCP:
+        def openai_tools(self):
+            return [{"type": "function", "function": {"name": "get_gpu_status"}}]
+
+        def call(self, _name, _arguments):
+            return "{}"
+
+    with pytest.raises(OpenAICompatibleUnavailable, match="exceeded max_tool_rounds"):
+        OpenAICompatibleLLM(client=client, mcp_client=FakeMCP(), max_tool_rounds=1).ask([])
+
+
+def test_mcp_tool_error_is_normalized():
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {
+        "content": None,
+        "tool_calls": [{"id": "call-1", "function": {
+            "name": "get_gpu_status", "arguments": "{}",
+        }}],
+    }}]})
+
+    class FakeMCP:
+        def openai_tools(self):
+            return [{"type": "function", "function": {"name": "get_gpu_status"}}]
+
+        def call(self, _name, _arguments):
+            raise RuntimeError("tool failed")
+
+    with pytest.raises(OpenAICompatibleUnavailable, match="chat completion failed"):
+        OpenAICompatibleLLM(client=client, mcp_client=FakeMCP()).ask([])
