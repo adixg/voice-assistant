@@ -35,6 +35,25 @@ Still tracked in `TODO.md`: wake word activation, an IMU wrist-raise gesture
 wake, haptic feedback, voice isolation, and a BLE soak test (hours-long
 connection, reconnect after Bluetooth toggle/reboot/deep-sleep).
 
+### On-device screens
+
+The Stick cycles between Rina's animated face, a clock, and a pomodoro timer
+with BtnA. The repository includes the source sprite and representative
+240×135 previews of the three screens:
+
+<table>
+  <tr>
+    <th>Rina</th>
+    <th>Clock</th>
+    <th>Pomodoro</th>
+  </tr>
+  <tr>
+    <td><img src="assets/sprites/idle.png" alt="Rina-chan pixel-art face" width="240"></td>
+    <td><img src="assets/screens/clock.svg" alt="Catppuccin digital clock screen" width="240"></td>
+    <td><img src="assets/screens/pomodoro.svg" alt="50-minute pomodoro focus timer" width="240"></td>
+  </tr>
+</table>
+
 ## Architecture
 
 The k3s route is the normal device path. The standalone entrypoints remain
@@ -204,7 +223,8 @@ voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
   backends/               the concrete engines, one file each, discovered
                           automatically — adding a file here is all it takes
     whisper.py              faster-whisper           ("faster-whisper", STT)
-    ollama.py               local Ollama compatibility backend ("ollama", LLM)
+    ollama.py               local Ollama compatibility backend ("ollama", LLM;
+                            development only, not the Kubernetes production path)
     openai_compatible.py    OpenAI-compatible Qwen3 + MCP agent backend
                             (llama.cpp, vLLM, LM Studio, LiteLLM)
     chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS)
@@ -239,6 +259,7 @@ speech_orb.py           the desktop face chat_loop.py shows — a port of the
 assets/sprites/         the extracted pixel art, written by
                          tools/make_face_sprites.py alongside sprites.h —
                          the same crops, as PNGs, for speech_orb.py
+assets/screens/         README previews of the clock and pomodoro screens
 
 memory/about-me.md      hand-written facts about you, appended to the system
                          prompt every conversation so she doesn't have to be
