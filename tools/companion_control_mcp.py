@@ -120,7 +120,14 @@ def service_health(get_json: FetchJson = fetch_json) -> Json:
 def gpu_status(get_json: FetchJson = fetch_json) -> Json:
     """Return GPU compute and VRAM percentage from DCGM, without pod-level labels."""
     util = prometheus_query("DCGM_FI_DEV_GPU_UTIL", get_json)
-    vram = prometheus_query("100 * DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL", get_json)
+    # DCGM Exporter exposes framebuffer used/free/reserved, but not a
+    # DCGM_FI_DEV_FB_TOTAL series on this cluster.  Derive the total from the
+    # exported components, matching the Grafana dashboard query.
+    vram = prometheus_query(
+        "100 * DCGM_FI_DEV_FB_USED / "
+        "(DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE + DCGM_FI_DEV_FB_RESERVED)",
+        get_json,
+    )
 
     def series(samples: list[Json], field: str) -> list[Json]:
         output = []

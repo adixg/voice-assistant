@@ -49,6 +49,23 @@ def test_gpu_status_reports_no_data_without_treating_it_as_a_failure(monkeypatch
     assert result["message"] == "No DCGM GPU samples are available yet."
 
 
+def test_gpu_status_uses_exported_framebuffer_components(monkeypatch):
+    monkeypatch.setenv("COMPANION_CONTROL_PROMETHEUS_URL", "http://prometheus.test")
+    queries = []
+
+    def get_json(url):
+        query = parse_qs(urlparse(url).query)["query"][0]
+        queries.append(query)
+        return prom_result([sample({"hostname": "arch-ssd", "gpu": "0"}, 42)])
+
+    result = mcp.gpu_status(get_json)
+
+    assert result["vram_utilization"][0]["vram_percent"] == 42.0
+    assert "DCGM_FI_DEV_FB_TOTAL" not in queries[1]
+    for metric in ("DCGM_FI_DEV_FB_USED", "DCGM_FI_DEV_FB_FREE", "DCGM_FI_DEV_FB_RESERVED"):
+        assert metric in queries[1]
+
+
 def test_tool_call_rejects_arguments_for_a_zero_argument_tool():
     response = mcp.handle_request({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                                    "params": {"name": "get_gpu_status", "arguments": {"unsafe": True}}})
