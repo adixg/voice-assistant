@@ -122,7 +122,10 @@ jobs:
         run: pytest tests/ -v
 
   docker-build:
-    name: build ${{ matrix.image }}
+    # Keep the check name stable; the per-image step below identifies the
+    # selected image without relying on expression expansion in a dynamic
+    # matrix job name.
+    name: build selected image
     needs: changes
     if: ${{ needs.changes.outputs.docker == 'true' }}
     runs-on: ubuntu-latest
