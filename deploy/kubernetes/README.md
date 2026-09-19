@@ -87,8 +87,8 @@ kubectl apply -f namespace.yaml
 # create/update aicompanion-personal-data here (command above)
 kubectl apply -f runtimeclass.yaml
 kubectl apply -f nvidia-device-plugin.yaml
-kubectl apply -f ollama-gtx1650.yaml
-kubectl apply -f ollama-rtx4060.yaml
+kubectl apply -f llama-cpp-gtx1650.yaml
+kubectl apply -f llama-cpp-rtx4060.yaml
 kubectl apply -f stt.yaml
 kubectl apply -f tts.yaml
 kubectl apply -f agent.yaml
@@ -118,10 +118,10 @@ port `8765` in the app, and tap Start; no firmware change is needed.
 
 ## Current service wiring
 
-`agent.yaml` points `--host` at the GTX 1650's Ollama Service by default,
+`agent.yaml` points at the GTX 1650's llama.cpp Service by default,
 since that node is guaranteed to be up. The deployed
-`controller/gpu_scheduler/` controller switches both `OLLAMA_HOST` and
-`OLLAMA_MODEL` to the RTX 4060 while that node is Ready, and back to the GTX
+`controller/gpu_scheduler/` controller switches both `LLM_HOST` and
+`LLM_MODEL` to the RTX 4060 while that node is Ready, and back to the GTX
 1650 when it is not. Both transitions and real cross-node inference were
 verified on the live cluster; see that directory's README.
 

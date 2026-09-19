@@ -3,10 +3,10 @@
 # runtimeClassName: nvidia added -- see runtimeclass.yaml's comment for why
 # that's needed on k3s instead of a containerd default-runtime change. This
 # is what turns nvidia.com/gpu into an allocatable resource kubelet reports,
-# which ollama-gtx1650.yaml, ollama-rtx4060.yaml, and stt.yaml all request.
+# which llama-cpp-gtx1650.yaml, llama-cpp-rtx4060.yaml, and stt.yaml all request.
 #
 # Also carries a time-slicing ConfigMap: the GTX 1650 node has exactly one
-# physical GPU, but both ollama-gtx1650 and stt request nvidia.com/gpu: 1 on
+# physical GPU, but both llama-cpp-gtx1650 and stt request nvidia.com/gpu: 1 on
 # it -- without time-slicing the device plugin treats that as one exclusive
 # claim and the second pod sits Pending ("Insufficient nvidia.com/gpu")
 # forever, confirmed against the live cluster. replicas: 2 matches exactly

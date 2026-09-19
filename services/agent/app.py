@@ -1,17 +1,19 @@
 """LLM turn-taking as an HTTP service: a thin FastAPI wrapper around
-voicepipe's LLM registry (ollama/hermes-agent/...). Same backend-selection
+voicepipe's LLM registry (llama.cpp/OpenAI-compatible, Ollama, Hermes...). Same backend-selection
 contract as services/stt/app.py -- see that file's docstring.
 
 This is the service the GPU scheduler controller (controller/gpu_scheduler/)
-is meant to route around: with `--llm-backend ollama --host <url>`, this
-container does no GPU work itself, it only proxies to whichever Ollama
-instance `--host` points at (see voicepipe/backends/ollama.py) -- the actual
-model runs in a separate Ollama Deployment, one per GPU node. So this
+is meant to route around: with `--llm-backend openai-compatible`, this
+container does no GPU work itself, it only proxies to whichever llama-server
+instance its URL points at -- the actual model runs in a separate Deployment,
+one per GPU node. So this
 service's own container is CPU-only and cheap to run on either node; what
 changes per-request is which Ollama endpoint it's told to use.
 
 Run:
-    python -m services.agent.app --llm-backend ollama --host http://ollama-rtx4060:11434 --model rina --port 8002
+    python -m services.agent.app --llm-backend openai-compatible \
+        --openai-compatible-url http://llama-cpp-rtx4060:8080/v1 \
+        --openai-compatible-model qwen3-8b --host-port 8002
 """
 import argparse
 import json
@@ -40,16 +42,9 @@ class AskResponse(BaseModel):
 
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--llm-backend", default="ollama", choices=LLM.names())
-    # Env default matches voicepipe/cli.py's convention, so the k8s
-    # Deployment (or the GPU scheduler controller) can retarget which Ollama
-    # instance this talks to with `kubectl set env`, no image rebuild.
-    ap.add_argument("--host", default=os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
-    # Same env-default convention as --host: the GPU scheduler controller
-    # patches OLLAMA_MODEL alongside OLLAMA_HOST on a node switch, since each
-    # Ollama instance only has the model sized for its own card pulled
-    # (qwen3.5:4b on the 4GB GTX 1650, qwen3:8b on the 8GB RTX 4060).
-    ap.add_argument("--model", default=os.environ.get("OLLAMA_MODEL", "rina"))
+    ap.add_argument("--llm-backend", default="openai-compatible", choices=LLM.names())
+    # The openai-compatible backend reads LLM_HOST and LLM_MODEL itself. The
+    # controller patches those neutral variables together on a node switch.
     ap.add_argument("--host-port", type=int, default=8002, dest="host_port")
     LLM.add_arguments(ap)
     return ap

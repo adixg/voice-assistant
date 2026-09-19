@@ -1,0 +1,68 @@
+# Always-on CUDA llama-server, pinned to the home server's GTX 1650. It
+# downloads and caches Qwen3.5 4B Q4_K_M (~2.7GB) on this node; that leaves
+# practical room for its KV cache inside the card's 4GB budget.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-cpp-gtx1650
+  namespace: aicompanion
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # only one GPU on this node; never run two model pods at once
+  selector:
+    matchLabels:
+      app: llama-cpp-gtx1650
+  template:
+    metadata:
+      labels:
+        app: llama-cpp-gtx1650
+    spec:
+      nodeSelector:
+        gpu-tier: gtx1650
+      runtimeClassName: nvidia
+      containers:
+        - name: llama-server
+          # Pin this tag/digest after the first live validation; latest is
+          # intentional during the migration because Qwen3.5 support is new.
+          image: ghcr.io/ggml-org/llama.cpp:server-cuda
+          args:
+            - --hf-repo
+            - TheStageAI/Qwen3.5-4B-GGUF
+            - --hf-file
+            - Qwen3.5-4B-Q4_K_M.gguf
+            - --alias
+            - qwen3.5-4b
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
+            - --ctx-size
+            - "4096"
+            - --n-gpu-layers
+            - "99"
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache
+      volumes:
+        - name: model-cache
+          hostPath:
+            path: /var/lib/aicompanion/llama-cpp-gtx1650
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-cpp-gtx1650
+  namespace: aicompanion
+spec:
+  selector:
+    app: llama-cpp-gtx1650
+  ports:
+    - port: 8080
+      targetPort: 8080

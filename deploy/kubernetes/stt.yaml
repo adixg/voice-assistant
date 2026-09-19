@@ -8,7 +8,7 @@ spec:
   strategy:
     type: Recreate  # GPU-constrained node (time-sliced, not partitioned): a
                      # RollingUpdate briefly wants old+new pods live at once,
-                     # which deadlocks here since ollama-gtx1650 already holds
+                     # which deadlocks here since llama-cpp-gtx1650 already holds
                      # one of the two time-sliced nvidia.com/gpu slots, same
                      # reasoning as the ollama-*.yaml Deployments
   selector:

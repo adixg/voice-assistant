@@ -1,0 +1,80 @@
+# CUDA llama-server on the laptop's RTX 4060 -- only Ready when the laptop is up and
+# joined to the cluster; k3s simply won't schedule this pod otherwise. This
+# is the node with headroom for a real model (Chatterbox Nano + an 8B LLM
+# both fit in the measured 8188 MiB budget, see docs/hardware-budget.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-cpp-rtx4060
+  namespace: aicompanion
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: llama-cpp-rtx4060
+  template:
+    metadata:
+      labels:
+        app: llama-cpp-rtx4060
+    spec:
+      nodeSelector:
+        gpu-tier: rtx4060
+      runtimeClassName: nvidia
+      # This node's own resolv.conf carries extra search domains from its
+      # host OS/VPN config, which k8s merges into every pod here. With the
+      # default ndots:5, a 2-dot external name like huggingface.co tries
+      # every search-suffixed variant (several hitting slow/nonexistent
+      # resolvers) before the bare name -- confirmed live (2026-09-16) this
+      # was enough to time out a model download, on the one pod here that
+      # actually needs to reach the public internet. ndots:1 skips that.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "1"
+      containers:
+        - name: llama-server
+          image: ghcr.io/ggml-org/llama.cpp:server-cuda
+          args:
+            - --hf-repo
+            - Qwen/Qwen3-8B-GGUF
+            - --hf-file
+            - Qwen3-8B-Q4_K_M.gguf
+            - --alias
+            - qwen3-8b
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
+            - --ctx-size
+            - "4096"
+            - --n-gpu-layers
+            - "99"
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache
+      volumes:
+        # The GGUF cache is a native-Linux hostPath. Since the Ubuntu VHD now
+        # lives on D:, this avoids both C: pressure and slow DrvFS model I/O.
+        - name: model-cache
+          hostPath:
+            path: /var/lib/aicompanion/llama-cpp-rtx4060
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-cpp-rtx4060
+  namespace: aicompanion
+spec:
+  selector:
+    app: llama-cpp-rtx4060
+  ports:
+    - port: 8080
+      targetPort: 8080

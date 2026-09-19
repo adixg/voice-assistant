@@ -1,5 +1,5 @@
-# Points at ollama-gtx1650 by default (the always-up node); this is the
-# Deployment controller/gpu_scheduler/ patches OLLAMA_HOST on and rolls
+# Points at llama-cpp-gtx1650 by default (the always-up node); this is the
+# Deployment controller/gpu_scheduler/ patches LLM_HOST on and rolls
 # restart when the rtx4060 node becomes Ready, per that directory's README.
 # CPU-only container -- see services/agent/Dockerfile's comment for why.
 #
@@ -28,15 +28,15 @@ spec:
       containers:
         - name: agent
           image: ghcr.io/adixg/aicompanion-agent:latest
-          args: ["--llm-backend", "ollama"]
+          args: ["--llm-backend", "openai-compatible"]
           env:
-            - name: OLLAMA_HOST
-              value: "http://ollama-gtx1650:11434"
-            # Each Ollama instance only has the model sized for its own
+            - name: LLM_HOST
+              value: "http://llama-cpp-gtx1650:8080/v1"
+            # Each llama-server instance has the model sized for its own
             # card pulled -- controller/gpu_scheduler/ patches this
-            # alongside OLLAMA_HOST on a node switch (see its README).
-            - name: OLLAMA_MODEL
-              value: "qwen3.5:4b"
+            # alongside LLM_HOST on a node switch (see its README).
+            - name: LLM_MODEL
+              value: "qwen3.5-4b"
           ports:
             - containerPort: 8002
           readinessProbe:

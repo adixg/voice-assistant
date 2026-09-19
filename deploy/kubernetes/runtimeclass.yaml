@@ -2,7 +2,7 @@
 # nvidia-container-toolkit package) at startup and adds it to the generated
 # containerd config as an *additional* runtime named "nvidia" -- it does not
 # become the default runtime. Pods that need GPU access must opt in with
-# runtimeClassName: nvidia (see ollama-gtx1650.yaml, ollama-rtx4060.yaml,
+# runtimeClassName: nvidia (see llama-cpp-gtx1650.yaml, llama-cpp-rtx4060.yaml,
 # stt.yaml, and nvidia-device-plugin.yaml, which all set it) rather than
 # k3s's containerd config being hand-edited to change the cluster-wide
 # default -- that risks breaking scheduling for every pod on the node if the
