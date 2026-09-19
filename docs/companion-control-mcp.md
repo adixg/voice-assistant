@@ -8,8 +8,9 @@ Version 0.1 is intentionally **read-only**:
   container restarts.
 - `get_gpu_status` reads DCGM GPU and VRAM utilization from Prometheus.
 - `get_agent_status` reads the agent service's `/health` response.
-- `get_model_status` reads the configured llama.cpp route/model and verifies
-  the model exposed by that route's `/v1/models` endpoint.
+- `get_model_status` reads the configured llama.cpp route/model selected by the
+  scheduler. It does not call llama.cpp recursively while a model turn waits
+  for an MCP result.
 - `get_time` returns the current date/time using the local IANA timezone
   database, defaulting to `America/New_York`.
 - `search_web` queries the cluster-internal SearXNG service and returns source
@@ -37,8 +38,8 @@ COMPANION_CONTROL_SEARXNG_URL: http://searxng:8080
 
 `get_service_health` and `get_gpu_status` need only Prometheus. The agent
 health tool reads the in-cluster agent service. `get_model_status` uses the
-`LLM_HOST` and `LLM_MODEL` environment inherited by the MCP subprocess and
-queries the active llama.cpp `/v1/models` endpoint. `search_web` uses SearXNG;
+`LLM_HOST` and `LLM_MODEL` environment inherited by the MCP subprocess.
+`search_web` uses SearXNG;
 `get_weather` uses Open-Meteo directly over HTTPS. Neither requires a secret.
 
 ## Manual protocol smoke test

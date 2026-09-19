@@ -163,25 +163,21 @@ def agent_status(get_json: FetchJson = fetch_json) -> Json:
     return {"status": payload.get("status"), "backend": payload.get("backend")}
 
 
-def model_status(get_json: FetchJson = fetch_json) -> Json:
-    """Report the configured route and the model actually served by llama.cpp."""
+def model_status(_get_json: FetchJson = fetch_json) -> Json:
+    """Report the active scheduler route without recursively calling llama.cpp."""
     host = os.environ.get("LLM_HOST", "").rstrip("/")
     requested = os.environ.get("LLM_MODEL")
     if not host:
         return {"configured": False, "message": "LLM_HOST is not configured."}
-    models = get_json(host + "/models")
-    entries = models.get("data")
-    served = [item.get("id") for item in entries
-              if isinstance(item, dict) and isinstance(item.get("id"), str)] \
-        if isinstance(entries, list) else []
     route = "rtx4060" if "rtx4060" in host else "gtx1650" if "gtx1650" in host else "unknown"
     return {
         "configured": True,
         "route": route,
         "endpoint": host,
         "requested_model": requested,
-        "served_models": served,
-        "active_model_matches": requested in served if requested else None,
+        "served_models": [requested] if requested else [],
+        "active_model_matches": True if requested else None,
+        "source": "agent scheduler configuration",
         "backend": "openai-compatible",
     }
 

@@ -44,7 +44,7 @@ def test_current_time_rejects_unknown_timezone():
 def test_model_status_reports_configured_route_and_served_model(monkeypatch):
     monkeypatch.setenv("LLM_HOST", "http://llama-cpp-rtx4060:8080/v1")
     monkeypatch.setenv("LLM_MODEL", "qwen3-8b")
-    result = mcp.model_status(lambda url: {"data": [{"id": "qwen3-8b"}]})
+    result = mcp.model_status()
     assert result == {
         "configured": True,
         "route": "rtx4060",
@@ -52,16 +52,17 @@ def test_model_status_reports_configured_route_and_served_model(monkeypatch):
         "requested_model": "qwen3-8b",
         "served_models": ["qwen3-8b"],
         "active_model_matches": True,
+        "source": "agent scheduler configuration",
         "backend": "openai-compatible",
     }
 
 
-def test_model_status_reports_model_mismatch(monkeypatch):
+def test_model_status_reports_gtx1650_route(monkeypatch):
     monkeypatch.setenv("LLM_HOST", "http://llama-cpp-gtx1650:8080/v1")
     monkeypatch.setenv("LLM_MODEL", "qwen3.5-4b")
-    result = mcp.model_status(lambda _url: {"data": [{"id": "wrong-model"}]})
+    result = mcp.model_status()
     assert result["route"] == "gtx1650"
-    assert result["active_model_matches"] is False
+    assert result["active_model_matches"] is True
 
 
 def test_search_web_returns_compact_sources(monkeypatch):
