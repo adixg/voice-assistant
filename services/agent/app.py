@@ -1,5 +1,5 @@
 """LLM turn-taking as an HTTP service: a thin FastAPI wrapper around
-voicepipe's LLM registry (llama.cpp/OpenAI-compatible, Ollama, Hermes...). Same backend-selection
+voicepipe's LLM registry (llama.cpp/OpenAI-compatible, Ollama, and other backends). Same backend-selection
 contract as services/stt/app.py -- see that file's docstring.
 
 This is the service the GPU scheduler controller (controller/gpu_scheduler/)

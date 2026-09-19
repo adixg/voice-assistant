@@ -1,8 +1,8 @@
 # Companion-control MCP server
 
 `tools/companion_control_mcp.py` is the project's first MCP server. It is a
-small, dependency-free stdio JSON-RPC server intended to be launched by Hermes
-Agent. Version 0.1 is intentionally **read-only**:
+small, dependency-free stdio JSON-RPC server launched by the agent container.
+Version 0.1 is intentionally **read-only**:
 
 - `get_service_health` reads Prometheus scrape health, pod readiness, and
   container restarts.
@@ -15,44 +15,22 @@ cluster or shell control. Future write tools will use a project-owned,
 authenticated control API, typed bounds, device acknowledgement, explicit
 confirmation in the voice flow, and an audit record.
 
-## Hermes configuration
+## Agent configuration
 
-Hermes uses the Model Context Protocol over stdio. Add this to
-`~/.hermes/config.yaml`, using the real repository path:
+The Kubernetes agent launches this server over stdio:
 
 ```yaml
-mcp_servers:
-  companion_control:
-    command: /usr/bin/python3
-    args: [/home/aditya/aigf/tools/companion_control_mcp.py]
-    enabled: true
-    trust: untrusted
-    tools:
-      include: [get_service_health, get_gpu_status, get_agent_status]
+MCP_SERVER_COMMAND: python /app/tools/companion_control_mcp.py
+COMPANION_CONTROL_PROMETHEUS_URL: http://prometheus:9090
+COMPANION_CONTROL_AGENT_URL: http://agent:8002
 ```
 
-When Hermes runs on the host rather than in the Kubernetes namespace, expose
-Prometheus locally first:
-
-```bash
-kubectl -n aicompanion port-forward svc/prometheus 9090:9090
-```
-
-Then start Hermes with:
-
-```bash
-export COMPANION_CONTROL_PROMETHEUS_URL=http://127.0.0.1:9090
-export COMPANION_CONTROL_AGENT_URL=http://agent:8002
-hermes chat
-```
-
-`get_service_health` and `get_gpu_status` need only Prometheus. For
-`get_agent_status`, either run Hermes inside the namespace or port-forward the
-agent and set `COMPANION_CONTROL_AGENT_URL=http://127.0.0.1:8002`.
+`get_service_health` and `get_gpu_status` need only Prometheus. The agent
+health tool reads the in-cluster agent service.
 
 ## Manual protocol smoke test
 
-This test does not need Hermes or a cluster:
+This test does not need a cluster:
 
 ```bash
 printf '%s\n' \
@@ -61,12 +39,10 @@ printf '%s\n' \
   | python tools/companion_control_mcp.py
 ```
 
-## llama.cpp and `--jinja`
-
 ## Qwen3 + llama.cpp agent path
 
 The CPU-only `services/agent` container can now own the small orchestration
-loop instead of requiring Hermes Agent. Set `MCP_SERVER_COMMAND` to a trusted
+loop instead of requiring a separate agent runtime. Set `MCP_SERVER_COMMAND` to a trusted
 stdio server command. The backend discovers `tools/list`, sends the resulting
 OpenAI tool schemas to llama.cpp, executes returned `tool_calls` through
 `tools/call`, and replays results until a final answer (up to four rounds).

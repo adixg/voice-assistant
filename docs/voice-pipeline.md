@@ -215,5 +215,4 @@ roughly 6K tokens total, so `load_profile()` warns above 4000 chars.
 
 This is the static half of memory. The other halves — things she learns and
 writes back, and searchable notes — need the agent loop and do not exist yet
-(see `docs/hermes-agent.md`). Keep them out of the profile: it is the
-always-resident slice, not a store.
+Keep them out of the profile: it is the always-resident slice, not a store.

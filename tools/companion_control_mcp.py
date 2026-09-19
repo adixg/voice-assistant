@@ -2,12 +2,12 @@
 """Read-only MCP control plane for AI Companion.
 
 This server deliberately speaks the MCP stdio JSON-RPC transport itself rather
-than importing an SDK.  That keeps its runtime small and lets Hermes launch it
+than importing an SDK. That keeps its runtime small and lets the agent launch it
 with just Python 3.10+ installed.  It has no shell, Kubernetes, filesystem, or
 device-write capability: it reads the existing Prometheus and agent HTTP APIs.
 
-Configure the URLs through environment variables.  The defaults work when the
-server runs inside the ``aicompanion`` Kubernetes namespace.  For local Hermes,
+Configure the URLs through environment variables. The defaults work when the
+server runs inside the ``aicompanion`` Kubernetes namespace. For local development,
 point ``COMPANION_CONTROL_PROMETHEUS_URL`` at a port-forward instead.
 """
 from __future__ import annotations

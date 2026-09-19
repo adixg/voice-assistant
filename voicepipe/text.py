@@ -56,7 +56,7 @@ def one_line(text):
 def strip_think(text):
     """Drop a reasoning model's <think> block, keeping only the reply.
 
-    Not specific to any one backend — qwen3, the Hermes models, r1 and others
+    Not specific to any one backend — qwen3, r1 and others
     all emit this, whichever server is in front of them. Only the closing tag
     is required, since a model can be mid-block when thinking is disabled
     server-side and never emits the opener.
