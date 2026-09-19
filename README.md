@@ -174,7 +174,18 @@ tools are:
 The server has no shell, filesystem, Kubernetes, or device-write capability.
 Hermes is optional and is not part of the normal M5Stick path. See
 [`docs/companion-control-mcp.md`](docs/companion-control-mcp.md) for the
-in-cluster configuration and local smoke tests.
+in-cluster configuration and local smoke tests. The model-facing live smoke
+test checks that Qwen actually returns tool-backed GPU/VRAM and service-health
+answers (rather than merely checking the MCP JSON-RPC transport):
+
+```bash
+python tools/smoke_mcp.py \
+  --agent-url http://agent:8002 \
+  --prometheus-url http://prometheus:9090 \
+  --label qwen-route
+```
+
+Run it from an in-cluster pod or use reachable port-forwards for those URLs.
 
 ## Observability
 
