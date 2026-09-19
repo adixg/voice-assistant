@@ -30,6 +30,10 @@ spec:
       labels:
         app: searxng
     spec:
+      # Search is a CPU/network service; keep it on the always-on Arch-SSD
+      # node so it remains available when the RTX 4060 laptop is offline.
+      nodeSelector:
+        gpu-tier: gtx1650
       containers:
         - name: searxng
           image: searxng/searxng:latest
@@ -38,6 +42,11 @@ spec:
               value: http://searxng:8080/
             - name: INSTANCE_NAME
               value: aicompanion-search
+            - name: SEARXNG_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: searxng-secret
+                  key: secret
           ports:
             - {containerPort: 8080, name: http}
           volumeMounts:

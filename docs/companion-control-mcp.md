@@ -8,6 +8,15 @@ Version 0.1 is intentionally **read-only**:
   container restarts.
 - `get_gpu_status` reads DCGM GPU and VRAM utilization from Prometheus.
 - `get_agent_status` reads the agent service's `/health` response.
+- `get_model_status` reads the configured llama.cpp route/model and verifies
+  the model exposed by that route's `/v1/models` endpoint.
+- `get_time` returns the current date/time using the local IANA timezone
+  database, defaulting to `America/New_York`.
+- `search_web` queries the cluster-internal SearXNG service and returns source
+  URLs and snippets.
+- `get_weather` queries Open-Meteo for current conditions, hourly rain timing,
+  and a seven-day daily forecast. It requires no API key for this
+  non-commercial use.
 
 It has no subprocess, filesystem, Kubernetes API, or device-control access.
 That boundary is deliberate: a voice-triggered model must not receive generic
@@ -23,10 +32,14 @@ The Kubernetes agent launches this server over stdio:
 MCP_SERVER_COMMAND: python /app/tools/companion_control_mcp.py
 COMPANION_CONTROL_PROMETHEUS_URL: http://prometheus:9090
 COMPANION_CONTROL_AGENT_URL: http://agent:8002
+COMPANION_CONTROL_SEARXNG_URL: http://searxng:8080
 ```
 
 `get_service_health` and `get_gpu_status` need only Prometheus. The agent
-health tool reads the in-cluster agent service.
+health tool reads the in-cluster agent service. `get_model_status` uses the
+`LLM_HOST` and `LLM_MODEL` environment inherited by the MCP subprocess and
+queries the active llama.cpp `/v1/models` endpoint. `search_web` uses SearXNG;
+`get_weather` uses Open-Meteo directly over HTTPS. Neither requires a secret.
 
 ## Manual protocol smoke test
 
@@ -53,6 +66,7 @@ The Kubernetes deployment wires the read-only companion server automatically:
 MCP_SERVER_COMMAND: python /app/tools/companion_control_mcp.py
 COMPANION_CONTROL_PROMETHEUS_URL: http://prometheus:9090
 COMPANION_CONTROL_AGENT_URL: http://agent:8002
+COMPANION_CONTROL_SEARXNG_URL: http://searxng:8080
 ```
 
 `--jinja` remains a llama.cpp setting: it enables structured function calls,

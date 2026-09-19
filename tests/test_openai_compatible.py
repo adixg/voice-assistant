@@ -81,6 +81,44 @@ def test_mcp_tool_loop_executes_call_and_returns_followup():
     }
 
 
+def test_mcp_tool_loop_executes_search_web_with_query_and_returns_sources():
+    client = Mock()
+    client.post.side_effect = [
+        _response({"choices": [{"message": {"content": None, "tool_calls": [{
+            "id": "search-1", "function": {
+                "name": "search_web",
+                "arguments": '{"query":"who is the president of the USA","max_results":3}',
+            }
+        }]}}]}),
+        _response({"choices": [{"message": {
+            "content": "The search result says the answer is available here: https://example.test/source"
+        }}]}),
+    ]
+
+    class FakeMCP:
+        def openai_tools(self):
+            return [{"type": "function", "function": {
+                "name": "search_web", "description": "Search the web",
+                "parameters": {"type": "object", "properties": {
+                    "query": {"type": "string"}, "max_results": {"type": "integer"}},
+                    "required": ["query"]},
+            }}]
+
+        def call(self, name, arguments):
+            assert name == "search_web"
+            assert arguments == {"query": "who is the president of the USA", "max_results": 3}
+            return '{"query":"who is the president of the USA","results":[{"url":"https://example.test/source"}]}'
+
+    llm = OpenAICompatibleLLM(url="http://llama:8080/v1", model="qwen", client=client,
+                              mcp_client=FakeMCP())
+    reply = llm.ask([{"role": "user", "content": "Who is the president of the USA?"}])
+    assert "https://example.test/source" in reply
+    tool_message = client.post.call_args_list[1].kwargs["json"]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["tool_call_id"] == "search-1"
+    assert "president of the USA" in tool_message["content"]
+
+
 def test_mcp_tool_loop_rejects_malformed_arguments():
     client = Mock()
     client.post.return_value = _response({"choices": [{"message": {

@@ -15,10 +15,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 SERVER_NAME = "aicompanion-companion-control"
@@ -26,6 +28,10 @@ SERVER_VERSION = "0.1.0"
 PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18"}
 Json = dict[str, Any]
 FetchJson = Callable[[str], Json]
+
+# A stable campus-center point avoids a broad-city geocoding result for the
+# common voice request "weather at Georgia Tech".
+GEORGIA_TECH_COORDS = (33.7759, -84.3975)
 
 
 class ControlPlaneError(RuntimeError):
@@ -157,6 +163,50 @@ def agent_status(get_json: FetchJson = fetch_json) -> Json:
     return {"status": payload.get("status"), "backend": payload.get("backend")}
 
 
+def model_status(get_json: FetchJson = fetch_json) -> Json:
+    """Report the configured route and the model actually served by llama.cpp."""
+    host = os.environ.get("LLM_HOST", "").rstrip("/")
+    requested = os.environ.get("LLM_MODEL")
+    if not host:
+        return {"configured": False, "message": "LLM_HOST is not configured."}
+    models = get_json(host + "/models")
+    entries = models.get("data")
+    served = [item.get("id") for item in entries
+              if isinstance(item, dict) and isinstance(item.get("id"), str)] \
+        if isinstance(entries, list) else []
+    route = "rtx4060" if "rtx4060" in host else "gtx1650" if "gtx1650" in host else "unknown"
+    return {
+        "configured": True,
+        "route": route,
+        "endpoint": host,
+        "requested_model": requested,
+        "served_models": served,
+        "active_model_matches": requested in served if requested else None,
+        "backend": "openai-compatible",
+    }
+
+
+def current_time(arguments: Json) -> Json:
+    """Return a precise local date/time without an external API."""
+    requested = arguments.get("timezone") or os.environ.get(
+        "COMPANION_CONTROL_TIMEZONE", "America/New_York")
+    if not isinstance(requested, str) or not requested.strip():
+        raise ControlPlaneError("timezone must be a non-empty IANA timezone")
+    try:
+        zone = ZoneInfo(requested.strip())
+    except ZoneInfoNotFoundError:
+        raise ControlPlaneError(f"unknown IANA timezone: {requested}") from None
+    now = datetime.now(timezone.utc).astimezone(zone)
+    return {
+        "timezone": requested.strip(),
+        "iso": now.isoformat(timespec="seconds"),
+        "date": now.date().isoformat(),
+        "time": now.strftime("%I:%M:%S %p"),
+        "day_of_week": now.strftime("%A"),
+        "utc_offset": now.strftime("%z"),
+    }
+
+
 def search_web(arguments: Json, get_json: FetchJson = fetch_json) -> Json:
     """Search the self-hosted SearXNG instance and return compact sources."""
     query = arguments.get("query")
@@ -195,6 +245,150 @@ def search_web(arguments: Json, get_json: FetchJson = fetch_json) -> Json:
     return {"query": query, "results": sources}
 
 
+def _is_rainy(hour: Json) -> bool:
+    """Use probability, precipitation, and WMO weather codes conservatively."""
+    try:
+        probability = float(hour.get("precipitation_probability") or 0)
+        precipitation = float(hour.get("precipitation") or 0)
+        rain = float(hour.get("rain") or 0)
+        showers = float(hour.get("showers") or 0)
+        code = int(hour.get("weather_code") or 0)
+    except (TypeError, ValueError):
+        return False
+    return (probability >= 40 or precipitation >= 0.1 or rain >= 0.1 or showers >= 0.1
+            or code in {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99})
+
+
+def weather(arguments: Json, get_json: FetchJson = fetch_json) -> Json:
+    """Return current conditions and an hourly rain window for a location."""
+    location = arguments.get("location")
+    if not isinstance(location, str) or not location.strip():
+        raise ControlPlaneError("get_weather requires a non-empty location")
+    location = location.strip()
+    if len(location) > 120:
+        raise ControlPlaneError("weather location is limited to 120 characters")
+    if "georgia tech" in location.lower() or "georgia institute of technology" in location.lower():
+        latitude, longitude = GEORGIA_TECH_COORDS
+        place = {"name": "Georgia Tech", "country": "United States"}
+    else:
+        geo_url = "https://geocoding-api.open-meteo.com/v1/search?" + urlencode({
+            "name": location, "count": 1, "language": "en", "format": "json",
+        })
+        geo = get_json(geo_url)
+        results = geo.get("results")
+        if not isinstance(results, list) or not results or not isinstance(results[0], dict):
+            raise ControlPlaneError(f"no weather location found for {location!r}")
+        place = results[0]
+        try:
+            latitude = float(place["latitude"])
+            longitude = float(place["longitude"])
+        except (KeyError, TypeError, ValueError):
+            raise ControlPlaneError("geocoding returned no usable coordinates") from None
+    forecast_url = "https://api.open-meteo.com/v1/forecast?" + urlencode({
+        "latitude": latitude,
+        "longitude": longitude,
+        "current": "temperature_2m,apparent_temperature,precipitation,rain,showers,weather_code,wind_speed_10m",
+        "hourly": "precipitation_probability,precipitation,rain,showers,weather_code",
+        "daily": "precipitation_probability_max,precipitation_sum,rain_sum,showers_sum,weather_code",
+        "forecast_days": 7,
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+        "timezone": "auto",
+    })
+    forecast = get_json(forecast_url)
+    current = forecast.get("current")
+    hourly = forecast.get("hourly")
+    if not isinstance(current, dict) or not isinstance(hourly, dict):
+        raise ControlPlaneError("weather response was missing current or hourly data")
+    times = hourly.get("time", [])
+    if not isinstance(times, list):
+        raise ControlPlaneError("weather response had no hourly times")
+    hours = []
+    fields = ("precipitation_probability", "precipitation", "rain", "showers", "weather_code")
+    for index, timestamp in enumerate(times):
+        if not isinstance(timestamp, str):
+            continue
+        hour = {field: hourly.get(field, [None] * len(times))[index]
+                for field in fields if isinstance(hourly.get(field), list) and index < len(hourly[field])}
+        hour["time"] = timestamp
+        hours.append(hour)
+    now = str(current.get("time", ""))
+    upcoming = [hour for hour in hours if hour["time"] >= now]
+    first_rain = next((hour for hour in upcoming if _is_rainy(hour)), None)
+    stop_time = None
+    if first_rain:
+        start_index = upcoming.index(first_rain)
+        dry_run = 0
+        for hour in upcoming[start_index + 1:]:
+            if _is_rainy(hour):
+                dry_run = 0
+            else:
+                dry_run += 1
+                if dry_run >= 2:
+                    stop_time = hour["time"]
+                    break
+    today = now[:10]
+    today_hours = [hour for hour in upcoming if hour["time"][:10] == today]
+    today_first_rain = next((hour for hour in today_hours if _is_rainy(hour)), None)
+    today_stop = None
+    if today_first_rain:
+        dry_run = 0
+        start_index = today_hours.index(today_first_rain)
+        for hour in today_hours[start_index + 1:]:
+            if _is_rainy(hour):
+                dry_run = 0
+            else:
+                dry_run += 1
+                if dry_run >= 2:
+                    today_stop = hour["time"]
+                    break
+    daily = forecast.get("daily") if isinstance(forecast.get("daily"), dict) else {}
+    daily_days = daily.get("time", [])
+    daily_rain = []
+    if isinstance(daily_days, list):
+        for index, day in enumerate(daily_days):
+            if not isinstance(day, str):
+                continue
+            def daily_value(name: str) -> Any:
+                values = daily.get(name)
+                return values[index] if isinstance(values, list) and index < len(values) else None
+            probability = daily_value("precipitation_probability_max") or 0
+            rain_sum = daily_value("rain_sum") or 0
+            showers_sum = daily_value("showers_sum") or 0
+            code = daily_value("weather_code") or 0
+            try:
+                rainy = float(probability) >= 40 or float(rain_sum) >= 0.1 or float(showers_sum) >= 0.1 \
+                    or int(code) in {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99}
+            except (TypeError, ValueError):
+                rainy = False
+            daily_rain.append({
+                "date": day,
+                "rain_expected": rainy,
+                "precipitation_probability_max": probability,
+                "rain_mm": rain_sum,
+                "showers_mm": showers_sum,
+            })
+    return {
+        "location": place.get("name", location),
+        "country": place.get("country"),
+        "timezone": forecast.get("timezone"),
+        "current": current,
+        "rain": {
+            "raining_now": _is_rainy(current),
+            "expected": first_rain is not None,
+            "starts": first_rain["time"] if first_rain else None,
+            "stops": stop_time,
+            "today_expected": today_first_rain is not None,
+            "today_starts": today_first_rain["time"] if today_first_rain else None,
+            "today_stops": today_stop,
+            "stop_note": "Estimated from hourly forecast; conditions can change." if first_rain else None,
+        },
+        "coordinates": {"latitude": latitude, "longitude": longitude},
+        "daily_forecast": daily_rain,
+        "source": "Open-Meteo",
+    }
+
+
 TOOLS: list[Json] = [
     {
         "name": "get_service_health",
@@ -212,6 +406,22 @@ TOOLS: list[Json] = [
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "get_model_status",
+        "description": "Read the active GPU route, configured Qwen model, and models actually served by llama.cpp. Read-only.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "get_time",
+        "description": "Return the current local date and time. Uses America/New_York by default; accepts an IANA timezone.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "timezone": {"type": "string", "description": "IANA timezone such as America/New_York or UTC."},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "search_web",
         "description": "Search the public web through the local SearXNG service. Returns source URLs and snippets; read-only.",
         "inputSchema": {
@@ -225,14 +435,29 @@ TOOLS: list[Json] = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "get_weather",
+        "description": "Get current weather, future hourly rain timing, and a seven-day daily forecast using Open-Meteo. Use today_expected/today_stops for today or when-rain-stops questions, and daily_forecast for this-week questions. Free, read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City, region, or postal address."},
+            },
+            "required": ["location"],
+            "additionalProperties": False,
+        },
+    },
 ]
 TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_service_health": lambda _args: service_health(),
     "get_gpu_status": lambda _args: gpu_status(),
     "get_agent_status": lambda _args: agent_status(),
+    "get_model_status": lambda _args: model_status(),
+    "get_time": current_time,
     "search_web": search_web,
+    "get_weather": weather,
 }
-NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status"}
+NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status"}
 
 
 def _tool_result(payload: Json, is_error: bool = False) -> Json:

@@ -24,7 +24,44 @@ def test_initialize_negotiates_the_client_protocol_version():
 def test_tools_list_exposes_only_read_only_tools():
     response = mcp.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert [tool["name"] for tool in response["result"]["tools"]] == [
-        "get_service_health", "get_gpu_status", "get_agent_status", "search_web"]
+        "get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
+        "get_time", "search_web", "get_weather"]
+
+
+def test_current_time_returns_requested_timezone(monkeypatch):
+    result = mcp.current_time({"timezone": "UTC"})
+    assert result["timezone"] == "UTC"
+    assert result["iso"].endswith("+00:00")
+    assert result["date"] == result["iso"][:10]
+    assert result["day_of_week"]
+
+
+def test_current_time_rejects_unknown_timezone():
+    with pytest.raises(mcp.ControlPlaneError, match="unknown IANA timezone"):
+        mcp.current_time({"timezone": "Moon/Base"})
+
+
+def test_model_status_reports_configured_route_and_served_model(monkeypatch):
+    monkeypatch.setenv("LLM_HOST", "http://llama-cpp-rtx4060:8080/v1")
+    monkeypatch.setenv("LLM_MODEL", "qwen3-8b")
+    result = mcp.model_status(lambda url: {"data": [{"id": "qwen3-8b"}]})
+    assert result == {
+        "configured": True,
+        "route": "rtx4060",
+        "endpoint": "http://llama-cpp-rtx4060:8080/v1",
+        "requested_model": "qwen3-8b",
+        "served_models": ["qwen3-8b"],
+        "active_model_matches": True,
+        "backend": "openai-compatible",
+    }
+
+
+def test_model_status_reports_model_mismatch(monkeypatch):
+    monkeypatch.setenv("LLM_HOST", "http://llama-cpp-gtx1650:8080/v1")
+    monkeypatch.setenv("LLM_MODEL", "qwen3.5-4b")
+    result = mcp.model_status(lambda _url: {"data": [{"id": "wrong-model"}]})
+    assert result["route"] == "gtx1650"
+    assert result["active_model_matches"] is False
 
 
 def test_search_web_returns_compact_sources(monkeypatch):
@@ -59,6 +96,76 @@ def test_search_web_is_callable_through_mcp():
     # The default in-cluster endpoint is unavailable in unit tests, but the
     # protocol should turn that dependency failure into an MCP tool error.
     assert response["result"]["isError"] is True
+
+
+def test_weather_reports_rain_window(monkeypatch):
+    calls = []
+
+    def get_json(url):
+        calls.append(url)
+        if "geocoding-api" in url:
+            return {"results": [{"name": "Atlanta", "country": "United States",
+                                  "latitude": 33.75, "longitude": -84.39}]}
+        return {
+            "timezone": "America/New_York",
+            "current": {"time": "2026-09-19T12:00", "temperature_2m": 78,
+                         "precipitation": 0, "rain": 0, "showers": 0, "weather_code": 1},
+            "hourly": {
+                "time": ["2026-09-19T12:00", "2026-09-19T13:00", "2026-09-19T14:00",
+                         "2026-09-19T15:00", "2026-09-19T16:00", "2026-09-19T17:00"],
+                "precipitation_probability": [10, 80, 70, 60, 10, 5],
+                "precipitation": [0, 0.4, 0.3, 0.2, 0, 0],
+                "rain": [0, 0.4, 0.3, 0.2, 0, 0],
+                "showers": [0, 0, 0, 0, 0, 0],
+                "weather_code": [1, 61, 61, 61, 1, 1],
+            },
+            "daily": {
+                "time": ["2026-09-19", "2026-09-20"],
+                "precipitation_probability_max": [80, 10],
+                "precipitation_sum": [0.9, 0],
+                "rain_sum": [0.9, 0],
+                "showers_sum": [0, 0],
+                "weather_code": [61, 1],
+            },
+        }
+
+    result = mcp.weather({"location": "Atlanta, GA"}, get_json)
+    assert len(calls) == 2
+    assert result["location"] == "Atlanta"
+    assert result["rain"] == {
+        "raining_now": False,
+        "expected": True,
+        "starts": "2026-09-19T13:00",
+        "stops": "2026-09-19T17:00",
+        "today_expected": True,
+        "today_starts": "2026-09-19T13:00",
+        "today_stops": "2026-09-19T17:00",
+        "stop_note": "Estimated from hourly forecast; conditions can change.",
+    }
+    assert result["daily_forecast"][0]["rain_expected"] is True
+    assert result["daily_forecast"][1]["rain_expected"] is False
+
+
+def test_weather_uses_fixed_georgia_tech_coordinates():
+    urls = []
+
+    def get_json(url):
+        urls.append(url)
+        return {"timezone": "America/New_York",
+                "current": {"time": "2026-09-19T12:00", "weather_code": 1,
+                             "precipitation": 0, "rain": 0, "showers": 0},
+                "hourly": {"time": [], "precipitation_probability": [],
+                           "precipitation": [], "rain": [], "showers": [], "weather_code": []}}
+
+    result = mcp.weather({"location": "Georgia Tech, Atlanta"}, get_json)
+    assert urls[0].startswith("https://api.open-meteo.com/v1/forecast?")
+    assert "geocoding-api" not in urls[0]
+    assert result["coordinates"] == {"latitude": 33.7759, "longitude": -84.3975}
+
+
+def test_weather_rejects_unknown_location():
+    with pytest.raises(mcp.ControlPlaneError, match="no weather location"):
+        mcp.weather({"location": "Atlantis"}, lambda _url: {"results": []})
 
 
 def test_service_health_normalizes_prometheus_results(monkeypatch):

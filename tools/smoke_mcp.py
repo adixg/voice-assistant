@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 
 PERCENT = re.compile(r"\b\d+(?:\.\d+)?%")
+URL = re.compile(r"https?://[^\s)]+")
 
 
 def get_json(url: str) -> dict:
@@ -80,9 +81,29 @@ def main() -> int:
     if missing_services:
         raise RuntimeError(f"{args.label}: service reply omitted {missing_services}; reply={health_reply!r}")
 
-    print(f"PASS {args.label}: model produced GPU/VRAM and service-health MCP answers")
+    search_reply = ask(
+        args.agent_url,
+        "Use the search_web MCP tool to answer: who is the current president of the "
+        "United States? Do not answer from memory. Include at least one complete "
+        "source URL from the search results and state that the result may change.",
+    )
+    if not URL.search(search_reply) or "president" not in search_reply.lower():
+        raise RuntimeError(f"{args.label}: search reply lacked a source URL or answer; reply={search_reply!r}")
+
+    model_reply = ask(
+        args.agent_url,
+        "Use the get_model_status MCP tool and report the actual active route, "
+        "requested model, and served model. Do not guess.",
+    )
+    if "qwen" not in model_reply.lower() or not any(route in model_reply.lower()
+                                                     for route in ("rtx4060", "gtx1650")):
+        raise RuntimeError(f"{args.label}: model-status reply lacked route/model data; reply={model_reply!r}")
+
+    print(f"PASS {args.label}: model produced GPU/VRAM, service-health, web-search, and model-status MCP answers")
     print("GPU reply:", gpu_reply)
     print("Health reply:", health_reply)
+    print("Search reply:", search_reply)
+    print("Model reply:", model_reply)
     return 0
 
 
