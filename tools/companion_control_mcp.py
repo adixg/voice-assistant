@@ -157,6 +157,44 @@ def agent_status(get_json: FetchJson = fetch_json) -> Json:
     return {"status": payload.get("status"), "backend": payload.get("backend")}
 
 
+def search_web(arguments: Json, get_json: FetchJson = fetch_json) -> Json:
+    """Search the self-hosted SearXNG instance and return compact sources."""
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise ControlPlaneError("search_web requires a non-empty query")
+    query = query.strip()
+    if len(query) > 600:
+        raise ControlPlaneError("search_web query is limited to 600 characters")
+    try:
+        max_results = int(arguments.get("max_results", 5))
+    except (TypeError, ValueError):
+        raise ControlPlaneError("max_results must be an integer") from None
+    max_results = max(1, min(max_results, 5))
+    freshness = arguments.get("freshness")
+    if freshness not in (None, "day", "week", "month", "year"):
+        raise ControlPlaneError("freshness must be day, week, month, or year")
+    params = {"q": query, "format": "json", "categories": "general"}
+    if freshness:
+        params["time_range"] = freshness
+    base_url = _env_url("COMPANION_CONTROL_SEARXNG_URL", "http://searxng:8080")
+    payload = get_json(f"{base_url}/search?{urlencode(params)}")
+    results = payload.get("results")
+    if not isinstance(results, list):
+        raise ControlPlaneError("SearXNG response had no results list")
+    sources = []
+    for item in results[:max_results]:
+        if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+            continue
+        sources.append({
+            "title": str(item.get("title", "")),
+            "url": item["url"],
+            "snippet": str(item.get("content", ""))[:1000],
+            "published": item.get("publishedDate"),
+            "engines": item.get("engines", []),
+        })
+    return {"query": query, "results": sources}
+
+
 TOOLS: list[Json] = [
     {
         "name": "get_service_health",
@@ -173,12 +211,28 @@ TOOLS: list[Json] = [
         "description": "Read the AI Companion agent health and configured backend class. Read-only.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
+    {
+        "name": "search_web",
+        "description": "Search the public web through the local SearXNG service. Returns source URLs and snippets; read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The web search query."},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 5, "default": 5},
+                "freshness": {"type": "string", "enum": ["day", "week", "month", "year"]},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
 ]
-TOOL_HANDLERS: dict[str, Callable[[], Json]] = {
-    "get_service_health": service_health,
-    "get_gpu_status": gpu_status,
-    "get_agent_status": agent_status,
+TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
+    "get_service_health": lambda _args: service_health(),
+    "get_gpu_status": lambda _args: gpu_status(),
+    "get_agent_status": lambda _args: agent_status(),
+    "search_web": search_web,
 }
+NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status"}
 
 
 def _tool_result(payload: Json, is_error: bool = False) -> Json:
@@ -223,10 +277,10 @@ def handle_request(request: Json) -> Json | None:
         arguments = params.get("arguments", {})
         if not isinstance(name, str) or name not in TOOL_HANDLERS:
             return _response(request, _tool_result({"error": f"unknown tool: {name}"}, True))
-        if not isinstance(arguments, dict) or arguments:
+        if not isinstance(arguments, dict) or (name in NO_ARGUMENT_TOOLS and arguments):
             return _response(request, _tool_result({"error": f"{name} takes no arguments"}, True))
         try:
-            return _response(request, _tool_result(TOOL_HANDLERS[name]()))
+            return _response(request, _tool_result(TOOL_HANDLERS[name](arguments)))
         except ControlPlaneError as exc:
             return _response(request, _tool_result({"error": str(exc)}, True))
     if method is None:

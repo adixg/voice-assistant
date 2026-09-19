@@ -20,8 +20,18 @@ def test_agent_manifest_wires_mcp_and_tracing():
         "http://prometheus:9090",
         "COMPANION_CONTROL_AGENT_URL",
         "http://agent:8002",
+        "COMPANION_CONTROL_SEARXNG_URL",
+        "http://searxng:8080",
     ):
         assert value in manifest
+
+
+def test_searxng_is_internal_and_json_enabled():
+    manifest = read("deploy/kubernetes/searxng.yaml")
+    assert "name: searxng" in manifest
+    assert "app: searxng" in manifest
+    assert "- json" in manifest
+    assert "containerPort: 8080" in manifest
 
 
 def test_http_services_expose_metrics_and_tracing():

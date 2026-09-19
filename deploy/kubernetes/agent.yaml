@@ -45,6 +45,8 @@ spec:
               value: "http://prometheus:9090"
             - name: COMPANION_CONTROL_AGENT_URL
               value: "http://agent:8002"
+            - name: COMPANION_CONTROL_SEARXNG_URL
+              value: "http://searxng:8080"
           ports:
             - {containerPort: 8002, name: metrics}
           readinessProbe:

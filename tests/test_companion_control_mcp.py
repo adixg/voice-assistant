@@ -24,7 +24,41 @@ def test_initialize_negotiates_the_client_protocol_version():
 def test_tools_list_exposes_only_read_only_tools():
     response = mcp.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert [tool["name"] for tool in response["result"]["tools"]] == [
-        "get_service_health", "get_gpu_status", "get_agent_status"]
+        "get_service_health", "get_gpu_status", "get_agent_status", "search_web"]
+
+
+def test_search_web_returns_compact_sources(monkeypatch):
+    monkeypatch.setenv("COMPANION_CONTROL_SEARXNG_URL", "http://searxng.test")
+
+    def get_json(url):
+        parsed = parse_qs(urlparse(url).query)
+        assert parsed["q"] == ["python mcp"]
+        assert parsed["format"] == ["json"]
+        return {"results": [
+            {"title": "MCP", "url": "https://example.test/mcp", "content": "A protocol",
+             "publishedDate": "2026-01-01", "engines": ["example"]},
+        ]}
+
+    result = mcp.search_web({"query": "python mcp", "max_results": 3}, get_json)
+    assert result["results"] == [{
+        "title": "MCP", "url": "https://example.test/mcp", "snippet": "A protocol",
+        "published": "2026-01-01", "engines": ["example"],
+    }]
+
+
+def test_search_web_validates_query_and_freshness():
+    with pytest.raises(mcp.ControlPlaneError, match="non-empty"):
+        mcp.search_web({}, lambda _url: {})
+    with pytest.raises(mcp.ControlPlaneError, match="freshness"):
+        mcp.search_web({"query": "test", "freshness": "forever"}, lambda _url: {})
+
+
+def test_search_web_is_callable_through_mcp():
+    response = mcp.handle_request({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                                   "params": {"name": "search_web", "arguments": {"query": "test"}}})
+    # The default in-cluster endpoint is unavailable in unit tests, but the
+    # protocol should turn that dependency failure into an MCP tool error.
+    assert response["result"]["isError"] is True
 
 
 def test_service_health_normalizes_prometheus_results(monkeypatch):

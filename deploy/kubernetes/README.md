@@ -41,7 +41,7 @@ file is just the how-to-apply.
 
 ## Getting the images
 
-`.github/workflows/ci.yml`'s `docker-build` job pushes all five images to
+`.github/workflows/ci.yml`'s `docker-build` job pushes all six images to
 `ghcr.io/adixg/<image>:latest` on every push to `main` (build-only, no push,
 on PRs). That's the only place these images get built and hosted -- nothing
 builds them on the home server itself.
@@ -91,9 +91,14 @@ kubectl apply -f llama-cpp-gtx1650.yaml
 kubectl apply -f llama-cpp-rtx4060.yaml
 kubectl apply -f stt.yaml
 kubectl apply -f tts.yaml
+kubectl apply -f searxng.yaml
 kubectl apply -f agent.yaml
 kubectl apply -f gateway.yaml
 ```
+
+`searxng.yaml` provides the cluster-internal, API-key-free web search service
+used by the agent's `search_web` MCP tool. It is not exposed through a
+NodePort; only the agent can reach it at `http://searxng:8080`.
 
 ## Primary device path
 
