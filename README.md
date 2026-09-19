@@ -372,7 +372,7 @@ practical equivalent for the firmware side.
 ## CI
 
 `.github/workflows/ci.yml` runs on every push/PR: the pytest suite above,
-building all five Docker images in `services/`/`controller/gpu_scheduler/`
+building all six Docker images in `services/`/`controller/gpu_scheduler/`
 (catches a broken Dockerfile — this dev environment has no working Docker
 daemon to test them locally), applying every `deploy/kubernetes/` and
 `controller/gpu_scheduler/deploy.yaml` manifest against a throwaway `kind`
