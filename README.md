@@ -1,6 +1,6 @@
 # aicompanion
 
-A voice assistant: mic → faster-whisper (STT) → Ollama (LLM) → VITS-Umamusume (TTS) → speaker.
+A voice assistant: mic → faster-whisper (STT) → llama.cpp (LLM) → VITS-Umamusume (TTS) → speaker.
 The primary device path is M5StickS3 → BLE → Android relay → the k3s gateway
 and split STT/agent/TTS services. `bridge_server.py` remains the standalone
 development fallback, and `chat_loop.py` runs the same backends with this
@@ -48,17 +48,17 @@ flowchart TB
     stt["<b>stt service</b><br>faster-whisper"]
     agent["<b>agent service</b><br>LLM turn-taking"]
     tts["<b>tts service</b><br>VITS"]
-    controller["<b>gpu-scheduler</b><br>selects available Ollama"]
-    ollama1650[("<b>Ollama</b><br>GTX 1650 / qwen3.5:4b")]
-    ollama4060[("<b>Ollama</b><br>RTX 4060 / qwen3:8b")]
+    controller["<b>gpu-scheduler</b><br>selects available llama.cpp"]
+    llama1650[("<b>llama.cpp</b><br>GTX 1650 / qwen3.5-4b")]
+    llama4060[("<b>llama.cpp</b><br>RTX 4060 / qwen3-8b")]
 
     stick <-->|"BLE GATT<br>bonded + AUTH secret"| relay
     relay <-->|"WebSocket<br>Tailscale"| gateway
     gateway -->|HTTP| stt
     gateway -->|HTTP| agent
     gateway -->|HTTP| tts
-    agent --> ollama1650
-    agent -. "when laptop is Ready" .-> ollama4060
+    agent --> llama1650
+    agent -. "when laptop is Ready" .-> llama4060
     controller -. "patches agent target" .-> agent
 
     classDef device fill:#eff1f5,stroke:#7287fd,stroke-width:2px,color:#4c4f69
@@ -66,7 +66,7 @@ flowchart TB
     classDef worker fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
     class stick,relay device
     class gateway,stt,agent,tts,controller service
-    class ollama1650,ollama4060 worker
+    class llama1650,llama4060 worker
 ```
 
 `tools/termux_relay.py` (Termux, Wi-Fi hotspot + Tailscale) did this same
@@ -78,8 +78,9 @@ In the standalone/local path, the heavy TTS models each run in their **own
 conda env** as a long-lived
 subprocess, because their torch/CUDA pins conflict with each other and with
 the `chat` env. `voicepipe/subproc.py` owns that plumbing, so a backend only
-declares the command to run. faster-whisper and Ollama need no such isolation
-— whisper runs in-process, Ollama is just HTTP.
+declares the command to run. faster-whisper and the HTTP-based LLM backends
+need no such isolation — whisper runs in-process and the model server is
+reached over HTTP.
 
 One turn over the gateway WebSocket, including where the on-device UI changes
 state. `services/gateway/app.py` and the standalone `bridge_server.py`
@@ -95,7 +96,7 @@ sequenceDiagram
     participant S as M5StickS3
     participant B as k3s gateway
     participant W as STT service
-    participant O as agent + Ollama
+    participant O as agent + llama.cpp
     participant T as TTS service
 
     Note over S: BtnA held → listening
@@ -120,6 +121,77 @@ sequenceDiagram
 Every turn sends exactly one `end`, including failures — the Stick stays in
 its speaking state until it arrives.
 
+## Current Kubernetes path
+
+The production route is:
+
+```text
+M5StickS3 → BLE → Android relay → gateway NodePort 30800
+  → STT / agent / TTS services → scheduler-selected llama.cpp server
+```
+
+The k3s cluster has two GPU nodes. `arch-ssd` is the always-on GTX 1650 node;
+the laptop node is an optional RTX 4060 worker. The GPU scheduler patches the
+agent's `LLM_HOST` and `LLM_MODEL`: the preferred route is `qwen3-8b` on the
+RTX 4060, with `qwen3.5-4b` on the GTX 1650 as the fallback. MCP remains
+available on both routes because the MCP server runs in the CPU-side agent
+container, independently of the model server. STT, VITS TTS, gateway, agent,
+and the core observability services are pinned to `arch-ssd`; DCGM Exporter
+still runs on both GPU nodes. The laptop can therefore disappear without
+taking down the primary route or monitoring. See
+[`deploy/kubernetes/README.md`](deploy/kubernetes/README.md).
+
+## MCP tool use
+
+The deployed agent runs a read-only MCP server from
+`tools/companion_control_mcp.py`. The Qwen3-compatible agent discovers its
+tools over stdio and executes tool calls in the agent container. Available
+tools are:
+
+- `get_service_health` — Prometheus scrape health, pod readiness, and restarts
+- `get_gpu_status` — DCGM GPU and VRAM utilization
+- `get_agent_status` — the agent service health and configured backend
+
+The server has no shell, filesystem, Kubernetes, or device-write capability.
+Hermes is optional and is not part of the normal M5Stick path. See
+[`docs/companion-control-mcp.md`](docs/companion-control-mcp.md) for the
+in-cluster configuration and local smoke tests.
+
+## Observability
+
+The cluster runs Prometheus, Grafana, Tempo, OpenTelemetry, kube-state-
+metrics, and NVIDIA DCGM Exporter. Prometheus scrapes the gateway, STT,
+agent, TTS, kube-state-metrics, and DCGM Exporter every 15 seconds. Grafana
+provisions Prometheus and Tempo datasources and a service-performance
+dashboard covering target health, request/error rate, HTTP and gateway
+latency, pod readiness/restarts, GPU/VRAM usage, traces, and optional
+ElevenLabs usage.
+
+Prometheus and Tempo use 5 GiB `local-path` PVCs pinned to `arch-ssd`:
+`prometheus-data-arch` and `tempo-data-arch`. DCGM Exporter remains a
+DaemonSet on both GPU nodes, so a missing RTX 4060 appears as an unavailable
+target while the monitoring stack stays online on the GTX 1650 node.
+
+OpenTelemetry is enabled in the FastAPI services through `OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317`.
+Grafana reads those distributed traces from Tempo. For local access:
+
+```bash
+kubectl -n aicompanion port-forward svc/prometheus 9090:9090
+kubectl -n aicompanion port-forward svc/grafana 3000:3000
+```
+
+The provisioned dashboard path is
+`/d/aicompanion/ai-companion-service-performance`.
+
+## TTS backends
+
+The deployed TTS backend is VITS-Umamusume. Chatterbox remains available for
+local voice cloning, and ElevenLabs is an optional hosted backend. The
+ElevenLabs backend reads its API key, voice ID, model ID, and optional credit
+estimate from environment variables or a Kubernetes Secret; none of those
+values belong in Git. It exports character usage and estimated-credit metrics
+to Prometheus when that backend is selected.
+
 ## Layout
 
 ```
@@ -132,7 +204,7 @@ voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
   backends/               the concrete engines, one file each, discovered
                           automatically — adding a file here is all it takes
     whisper.py              faster-whisper           ("faster-whisper", STT)
-    ollama.py               Ollama chat + check()    ("ollama", LLM)
+    ollama.py               local Ollama compatibility backend ("ollama", LLM)
     openai_compatible.py    OpenAI-compatible Qwen3 + MCP agent backend
                             (llama.cpp, vLLM, LM Studio, LiteLLM)
     chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS)
@@ -183,7 +255,7 @@ android_companion/      the Android app that bridges the Stick's BLE
 
 tools/
   echo_server.py        same WebSocket protocol as bridge_server.py, but skips
-                         STT/Ollama/VITS entirely — mic audio goes straight
+                         STT/LLM/VITS entirely — mic audio goes straight
                          back to the speaker. Use this to tell a network/
                          firmware problem apart from a model problem.
   make_face_sprites.py  extracts the pixel-art face sheet into both
@@ -209,7 +281,8 @@ firmware/
                          relation to the WebSocket protocol — GETs a plain
                          HTTP server and reports Wi-Fi/TCP/HTTP status
 
-tests/                  pytest suite for voicepipe/ and bridge_server.py's
+tests/                  pytest suite for voicepipe/, services/, MCP,
+                         observability, deployment contracts, and bridge_server.py
                          wire protocol — see "Running the tests" below
 
 docs/                   detailed investigation logs behind CLAUDE.md's
@@ -219,7 +292,7 @@ docs/                   detailed investigation logs behind CLAUDE.md's
                          — CLAUDE.md itself is a lean index
 TODO.md                 the active punch list
 
-models/                 Ollama Modelfiles (`rina`'s persona on top of qwen3:8b)
+models/                 local Ollama Modelfiles for the development compatibility path
 requirements/           the three conda envs' pinned dependencies
 
 VITS-Umamusume-voice-synthesizer/   cloned HF Space (model code + weights)
@@ -230,14 +303,21 @@ services/               bridge_server.py split into HTTP services along
                          (see docs/deployment-architecture.md)
   gateway/                 the Stick's protocol-compatible WebSocket peer
   stt/, agent/, tts/       thin FastAPI wrappers, one per registry entry
+  metrics.py               shared Prometheus HTTP and gateway instrumentation
+  telemetry.py             optional OpenTelemetry/Tempo setup
+  tts/elevenlabs.py        optional hosted ElevenLabs TTS backend
+
+tools/companion_control_mcp.py  read-only Prometheus/agent MCP server
+voicepipe/mcp_stdio.py          stdio MCP client used by the agent tool loop
 
 deploy/kubernetes/      k3s manifests for the home-server (GTX 1650) +
                          laptop (RTX 4060) cluster
 controller/gpu_scheduler/  custom controller that retargets the agent
                          service to whichever GPU node is up
-observability/, benchmarks/, deploy/helm/, deploy/argocd/
-                         later phases of the same track, not built yet —
-                         see docs/deployment-architecture.md
+observability/           Prometheus, Grafana, Tempo, OpenTelemetry, kube-state-
+                         metrics, and DCGM Exporter manifests
+benchmarks/              benchmark scripts and comparison notes
+deploy/helm/, deploy/argocd/  future GitOps packaging; not the active deploy path
 ```
 
 ## Running the tests
@@ -255,7 +335,8 @@ script), `bridge_server.py`'s wire protocol with STT/LLM/TTS and the
 WebSocket mocked out, the `services/*/app.py` HTTP wrappers (FastAPI's test
 client against a fake backend, same seam as above), and
 `controller/gpu_scheduler/controller.py`'s routing logic (a recording fake
-in place of the Kubernetes client) — no GPU, model, cluster, or network
+in place of the Kubernetes client), MCP transport/tool loops, observability
+queries, and Kubernetes manifest contracts — no GPU, model, cluster, or network
 needed, runs in a few seconds. Run it after any change to `voicepipe/`,
 `bridge_server.py`, `services/`, or `controller/`.
 
@@ -376,7 +457,7 @@ From most to least isolated:
    `android_companion/` app — the real firmware and the real BLE/WebSocket
    path, but the phone app talks to the echo server instead of
    `bridge_server.py`. Isolates the BLE + WebSocket relay path from
-   STT/Ollama/VITS.
+   STT/LLM/VITS.
 3. **k3s `gateway`** + `firmware/m5stick_bridge/` + `android_companion/`
    — the real deployment. Use `bridge_server.py` on port 8765 as the
    standalone equivalent when isolating cluster issues.
