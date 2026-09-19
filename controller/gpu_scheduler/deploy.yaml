@@ -20,6 +20,17 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "watch", "patch"]
+  # kopf also posts a Kubernetes Event recording each handler run, for its
+  # own diagnostics -- and since Node is cluster-scoped (no namespace of its
+  # own), kopf targets the "default" namespace for these specifically.
+  # Confirmed live (2026-09-16): without this, every single handler run logs
+  # 9 escalating 403 retries ("events is forbidden ... in the namespace
+  # default") before giving up and continuing anyway -- the actual
+  # patch/failover logic isn't blocked by it, but it's real log noise and
+  # wasted retry latency on every node transition.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
