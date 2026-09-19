@@ -3,7 +3,88 @@ kind: ConfigMap
 metadata: {name: grafana-dashboard-aicompanion, namespace: aicompanion}
 data:
   aicompanion.json: |
-    {"annotations":{"list":[]},"editable":true,"panels":[{"type":"timeseries","title":"HTTP request rate","targets":[{"expr":"sum by (service) (rate(aicompanion_http_requests_total[5m]))","legendFormat":"{{service}}"}]},{"type":"timeseries","title":"HTTP p95 latency","targets":[{"expr":"histogram_quantile(0.95, sum by (le, service) (rate(aicompanion_http_request_duration_seconds_bucket[5m])))","legendFormat":"{{service}}"}]},{"type":"timeseries","title":"Gateway p95 turn latency","targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(aicompanion_gateway_turn_duration_seconds_bucket[5m])))","legendFormat":"p95"}]},{"type":"timeseries","title":"Gateway stage p95 latency","targets":[{"expr":"histogram_quantile(0.95, sum by (le, stage) (rate(aicompanion_gateway_stage_duration_seconds_bucket[5m])))","legendFormat":"{{stage}}"}]}],"schemaVersion":41,"title":"AI Companion","version":1}
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "description": "Number of services Prometheus can scrape. Four is healthy.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 3}, {"color": "green", "value": 4}]}, "unit": "none"}, "overrides": []},
+          "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "targets": [{"expr": "sum(up{service=~\"gateway|stt|agent|tts\"})", "legendFormat": "services up", "refId": "A"}],
+          "title": "Service targets up",
+          "type": "stat"
+        },
+        {
+          "description": "Prometheus scrape reachability for each application service.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [{"options": {"0": {"color": "red", "text": "DOWN"}, "1": {"color": "green", "text": "UP"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "unit": "none"}, "overrides": []},
+          "gridPos": {"h": 5, "w": 18, "x": 6, "y": 0},
+          "id": 2,
+          "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name", "wideLayout": true},
+          "targets": [{"expr": "up{service=~\"gateway|stt|agent|tts\"}", "legendFormat": "{{service}}", "refId": "A"}],
+          "title": "Per-service scrape health",
+          "type": "stat"
+        },
+        {
+          "description": "Completed HTTP requests per second, averaged across the last five minutes.",
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "reqps"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+          "id": 3,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (service) (rate(aicompanion_http_requests_total[5m]))", "legendFormat": "{{service}}", "refId": "A"}],
+          "title": "HTTP request rate",
+          "type": "timeseries"
+        },
+        {
+          "description": "Share of completed HTTP requests returning a 5xx status. Alert if sustained above 5%.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "max": 100, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]}, "unit": "percent"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+          "id": 4,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "100 * sum by (service) (rate(aicompanion_http_requests_total{status=~\"5..\"}[5m])) / sum by (service) (rate(aicompanion_http_requests_total[5m]))", "legendFormat": "{{service}}", "refId": "A"}],
+          "title": "HTTP 5xx error rate",
+          "type": "timeseries"
+        },
+        {
+          "description": "p95 HTTP duration by service. Includes the agent request that waits for the LLM response.",
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "s"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+          "id": 5,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "histogram_quantile(0.95, sum by (le, service) (rate(aicompanion_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}", "refId": "A"}],
+          "title": "HTTP p95 latency",
+          "type": "timeseries"
+        },
+        {
+          "description": "End-to-end time for a completed gateway voice turn, from received utterance to final response.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 10}, {"color": "red", "value": 20}]}, "unit": "s"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+          "id": 6,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "histogram_quantile(0.50, sum by (le) (rate(aicompanion_gateway_turn_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A"}, {"expr": "histogram_quantile(0.95, sum by (le) (rate(aicompanion_gateway_turn_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B"}],
+          "title": "Gateway turn latency",
+          "type": "timeseries"
+        },
+        {
+          "description": "p95 contribution of each gateway stage: speech-to-text, agent/LLM, and text-to-speech.",
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "min": 0, "unit": "s"}, "overrides": []},
+          "gridPos": {"h": 9, "w": 24, "x": 0, "y": 21},
+          "id": 7,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "histogram_quantile(0.95, sum by (le, stage) (rate(aicompanion_gateway_stage_duration_seconds_bucket[5m])))", "legendFormat": "{{stage}}", "refId": "A"}],
+          "title": "Gateway stage p95 latency",
+          "type": "timeseries"
+        }
+      ],
+      "schemaVersion": 41,
+      "tags": ["aicompanion", "operations"],
+      "time": {"from": "now-15m", "to": "now"},
+      "title": "AI Companion / Service Performance",
+      "version": 2
+    }
 ---
 apiVersion: v1
 kind: ConfigMap
