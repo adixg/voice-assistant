@@ -1,9 +1,9 @@
 # Prometheus
 
-`prometheus.yaml` discovers the named `metrics` ports for the four application
-services, `kube-state-metrics`, and DCGM Exporter, and scrapes their `/metrics`
-endpoint every 15 seconds. It uses `emptyDir` for an initial, non-durable
-deployment; add a PVC before treating historical data as durable.
+`prometheus.yaml` discovers the named `metrics` ports for the gateway, STT,
+agent, TTS, `kube-state-metrics`, and DCGM Exporter, and scrapes their
+`/metrics` endpoint every 15 seconds. Prometheus stores its TSDB on the
+`prometheus-data` 5 GiB `local-path` PVC.
 
 Apply after the rebuilt service images are running:
 
