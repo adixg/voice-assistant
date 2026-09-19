@@ -29,12 +29,15 @@ class OpenAICompatibleLLM:
     """
 
     def __init__(self, url=DEFAULT_URL, model=DEFAULT_MODEL, key=None,
-                 timeout=DEFAULT_TIMEOUT, client=None):
+                 timeout=DEFAULT_TIMEOUT, client=None, mcp_client=None,
+                 max_tool_rounds=4):
         self.url = url.rstrip("/")
         self.model = model
         self.key = key or os.environ.get("OPENAI_COMPATIBLE_API_KEY")
         self.timeout = timeout
         self._client = client
+        self.mcp = mcp_client
+        self.max_tool_rounds = max_tool_rounds
 
     @staticmethod
     def add_arguments(group):
@@ -49,13 +52,20 @@ class OpenAICompatibleLLM:
         group.add_argument("--openai-compatible-timeout", type=float,
                            default=DEFAULT_TIMEOUT,
                            help=f"turn timeout in seconds (default: {DEFAULT_TIMEOUT})")
+        group.add_argument("--mcp-server-command", default=os.environ.get("MCP_SERVER_COMMAND"),
+                           help="trusted MCP stdio server command (also via MCP_SERVER_COMMAND)")
 
     @classmethod
     def from_args(cls, args):
+        mcp = None
+        command = getattr(args, "mcp_server_command", None) or os.environ.get("MCP_SERVER_COMMAND")
+        if command:
+            from ..mcp_stdio import StdioMCPClient
+            mcp = StdioMCPClient(command)
         return cls(url=args.openai_compatible_url,
                    model=args.openai_compatible_model,
                    key=args.openai_compatible_key,
-                   timeout=args.openai_compatible_timeout)
+                   timeout=args.openai_compatible_timeout, mcp_client=mcp)
 
     @property
     def client(self):
@@ -71,18 +81,41 @@ class OpenAICompatibleLLM:
         # portable field for it.  Reasoning tags, if a model emits them, are
         # removed at the common text boundary just as they are for Ollama.
         try:
-            response = self.client.post("/chat/completions", json={
-                "model": self.model,
-                "messages": messages,
-            })
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            working = list(messages)
+            tools = self.mcp.openai_tools() if self.mcp else None
+            for _ in range(self.max_tool_rounds + 1):
+                request = {"model": self.model, "messages": working}
+                if tools:
+                    request["tools"] = tools
+                response = self.client.post("/chat/completions", json=request)
+                response.raise_for_status()
+                message = response.json()["choices"][0]["message"]
+                tool_calls = message.get("tool_calls") or []
+                if not tool_calls or not self.mcp:
+                    content = message.get("content") or ""
+                    break
+                working.append(message)
+                for call in tool_calls:
+                    function = call.get("function", {})
+                    name = function.get("name")
+                    arguments = json.loads(function.get("arguments") or "{}")
+                    result = self.mcp.call(name, arguments)
+                    working.append({"role": "tool", "tool_call_id": call.get("id", name), "content": result})
+            else:
+                raise OpenAICompatibleUnavailable("MCP tool loop exceeded max_tool_rounds")
         except Exception as e:  # noqa: BLE001 - normalize endpoint failures
             raise OpenAICompatibleUnavailable(
                 f"OpenAI-compatible chat completion failed at {self.url}: {e}") from e
         return strip_think(content or "")
 
     def ask_stream(self, messages, think=None):
+        # Tool calls require a complete response so the MCP loop can execute
+        # them and replay the result.  Keep the streaming API functional by
+        # returning the completed answer as one final event for MCP-enabled
+        # sessions; ordinary no-tool sessions retain token streaming below.
+        if self.mcp is not None:
+            yield FINAL, self.ask(messages, think)
+            return
         request = {"model": self.model, "messages": messages, "stream": True}
         try:
             with self.client.stream("POST", "/chat/completions", json=request) as response:
@@ -125,3 +158,5 @@ class OpenAICompatibleLLM:
         if self._client is not None:
             self._client.close()
             self._client = None
+        if self.mcp is not None:
+            self.mcp.close()

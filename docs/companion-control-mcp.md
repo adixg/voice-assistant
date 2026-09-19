@@ -63,8 +63,22 @@ printf '%s\n' \
 
 ## llama.cpp and `--jinja`
 
-The MCP server is separate from llama.cpp. `--jinja` switches llama.cpp to the
-model's Jinja chat template, enabling its OpenAI-compatible endpoint to render
-and parse structured function calls. It belongs on a llama.cpp canary only
-after this MCP transport is proven; it does **not** grant the model any tool by
-itself. Hermes owns MCP discovery and execution.
+## Qwen3 + llama.cpp agent path
+
+The CPU-only `services/agent` container can now own the small orchestration
+loop instead of requiring Hermes Agent. Set `MCP_SERVER_COMMAND` to a trusted
+stdio server command. The backend discovers `tools/list`, sends the resulting
+OpenAI tool schemas to llama.cpp, executes returned `tool_calls` through
+`tools/call`, and replays results until a final answer (up to four rounds).
+
+The Kubernetes deployment wires the read-only companion server automatically:
+
+```yaml
+MCP_SERVER_COMMAND: python /app/tools/companion_control_mcp.py
+COMPANION_CONTROL_PROMETHEUS_URL: http://prometheus:9090
+COMPANION_CONTROL_AGENT_URL: http://agent:8002
+```
+
+`--jinja` remains a llama.cpp setting: it enables structured function calls,
+but it does not execute tools. The agent container is the orchestrator and MCP
+server is the permission boundary.

@@ -47,3 +47,35 @@ def test_streaming_openai_sse():
 
 def test_registered():
     assert "openai-compatible" in LLM.names()
+
+
+def test_mcp_tool_loop_executes_call_and_returns_followup():
+    client = Mock()
+    client.post.side_effect = [
+        _response({"choices": [{"message": {"content": None, "tool_calls": [{
+            "id": "call-1", "function": {"name": "get_gpu_status", "arguments": "{}"}
+        }]}}]}),
+        _response({"choices": [{"message": {"content": "GPU is healthy."}}]}),
+    ]
+
+    class FakeMCP:
+        def openai_tools(self):
+            return [{"type": "function", "function": {
+                "name": "get_gpu_status", "description": "Read GPU status",
+                "parameters": {"type": "object", "properties": {}},
+            }}]
+
+        def call(self, name, arguments):
+            assert name == "get_gpu_status"
+            assert arguments == {}
+            return '{"utilization": []}'
+
+    llm = OpenAICompatibleLLM(url="http://llama:8080/v1", model="qwen", client=client,
+                              mcp_client=FakeMCP())
+    assert llm.ask([{"role": "user", "content": "check the GPU"}]) == "GPU is healthy."
+    first = client.post.call_args_list[0].kwargs["json"]
+    second = client.post.call_args_list[1].kwargs["json"]
+    assert first["tools"][0]["function"]["name"] == "get_gpu_status"
+    assert second["messages"][-1] == {
+        "role": "tool", "tool_call_id": "call-1", "content": '{"utilization": []}'
+    }

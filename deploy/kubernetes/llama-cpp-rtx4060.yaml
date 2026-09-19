@@ -47,8 +47,21 @@ spec:
             - 0.0.0.0
             - --port
             - "8080"
+            # Qwen3's native Jinja template is required for OpenAI-style
+            # tool calls; llama.cpp auto-selects it from the GGUF metadata.
+            - --jinja
             - --ctx-size
-            - "4096"
+            - "40960"
+            - --parallel
+            - "1"
+            - --flash-attn
+            - "on"
+            - --cache-type-k
+            - q8_0
+            - --cache-type-v
+            - q8_0
+            - --temp
+            - "0.2"
             - --n-gpu-layers
             - "99"
           ports:

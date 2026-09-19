@@ -13,6 +13,7 @@ COPY services/agent/requirements.txt services/agent/requirements.txt
 RUN pip install --no-cache-dir -r services/agent/requirements.txt
 
 COPY voicepipe/ voicepipe/
+COPY tools/companion_control_mcp.py tools/companion_control_mcp.py
 COPY services/agent/app.py services/agent/app.py
 COPY services/metrics.py services/metrics.py
 COPY services/telemetry.py services/telemetry.py
