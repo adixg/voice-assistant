@@ -1,0 +1,123 @@
+# Kubernetes object state (readiness, restarts, and rollout state), limited to
+# the aicompanion namespace.  Prometheus discovers its named metrics Service.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: kube-state-metrics, namespace: aicompanion}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: kube-state-metrics, namespace: aicompanion}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: kube-state-metrics, namespace: aicompanion}
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+    namespace: aicompanion
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kube-state-metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: kube-state-metrics, namespace: aicompanion}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: kube-state-metrics}}
+  template:
+    metadata: {labels: {app: kube-state-metrics}}
+    spec:
+      serviceAccountName: kube-state-metrics
+      automountServiceAccountToken: true
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0
+          args: ["--namespaces=aicompanion", "--resources=pods,deployments"]
+          ports:
+            - {containerPort: 8080, name: metrics}
+            - {containerPort: 8081, name: telemetry}
+          livenessProbe:
+            httpGet: {path: /livez, port: metrics}
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: {path: /readyz, port: telemetry}
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile: {type: RuntimeDefault}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: kube-state-metrics, namespace: aicompanion}
+spec:
+  selector: {app: kube-state-metrics}
+  ports:
+    - {name: metrics, port: 8080, targetPort: metrics}
+---
+# One DCGM exporter per GPU node. The NVIDIA runtime and pod-resources socket
+# let it report GPU utilization and framebuffer use without consuming a
+# time-sliced nvidia.com/gpu workload slot.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: dcgm-exporter, namespace: aicompanion}
+spec:
+  selector: {matchLabels: {app: dcgm-exporter}}
+  template:
+    metadata: {labels: {app: dcgm-exporter}}
+    spec:
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: gpu-tier
+                    operator: In
+                    values: [gtx1650, rtx4060]
+      runtimeClassName: nvidia
+      containers:
+        - name: dcgm-exporter
+          image: nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless
+          env:
+            - {name: DCGM_EXPORTER_LISTEN, value: ":9400"}
+            - {name: DCGM_EXPORTER_KUBERNETES, value: "true"}
+            - name: NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          ports:
+            - {containerPort: 9400, name: metrics}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 200m, memory: 256Mi}
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            capabilities: {add: [SYS_ADMIN], drop: [ALL]}
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - {name: pod-gpu-resources, mountPath: /var/lib/kubelet/pod-resources, readOnly: true}
+      volumes:
+        - name: pod-gpu-resources
+          hostPath: {path: /var/lib/kubelet/pod-resources, type: Directory}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: dcgm-exporter, namespace: aicompanion}
+spec:
+  selector: {app: dcgm-exporter}
+  ports:
+    - {name: metrics, port: 9400, targetPort: metrics}

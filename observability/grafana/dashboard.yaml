@@ -77,13 +77,53 @@ data:
           "targets": [{"expr": "histogram_quantile(0.95, sum by (le, stage) (rate(aicompanion_gateway_stage_duration_seconds_bucket[5m])))", "legendFormat": "{{stage}}", "refId": "A"}],
           "title": "Gateway stage p95 latency",
           "type": "timeseries"
+        },
+        {
+          "description": "Current Kubernetes readiness for every aicompanion pod. A value of one means the pod is ready to serve.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [{"options": {"0": {"color": "red", "text": "NOT READY"}, "1": {"color": "green", "text": "READY"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "unit": "none"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+          "id": 8,
+          "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name", "wideLayout": true},
+          "targets": [{"expr": "max by (pod) (kube_pod_status_ready{namespace=\"aicompanion\",condition=\"true\"})", "legendFormat": "{{pod}}", "refId": "A"}],
+          "title": "Pod readiness",
+          "type": "stat"
+        },
+        {
+          "description": "Container restarts observed during the last hour. Investigate any non-zero series.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "unit": "none"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
+          "id": 9,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (pod, container) (increase(kube_pod_container_status_restarts_total{namespace=\"aicompanion\"}[1h]))", "legendFormat": "{{pod}} / {{container}}", "refId": "A"}],
+          "title": "Container restarts (last hour)",
+          "type": "timeseries"
+        },
+        {
+          "description": "NVIDIA GPU utilization reported by DCGM on each labeled GPU node.",
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "max": 100, "min": 0, "unit": "percent"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+          "id": 10,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "DCGM_FI_DEV_GPU_UTIL", "legendFormat": "{{Hostname}} / GPU {{gpu}}", "refId": "A"}],
+          "title": "GPU utilization",
+          "type": "timeseries"
+        },
+        {
+          "description": "NVIDIA framebuffer use as a percentage of total VRAM. DCGM reports one series per physical GPU.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "max": 100, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 80}, {"color": "red", "value": 95}]}, "unit": "percent"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+          "id": 11,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "100 * DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL", "legendFormat": "{{Hostname}} / GPU {{gpu}}", "refId": "A"}],
+          "title": "VRAM utilization",
+          "type": "timeseries"
         }
       ],
       "schemaVersion": 41,
       "tags": ["aicompanion", "operations"],
       "time": {"from": "now-15m", "to": "now"},
       "title": "AI Companion / Service Performance",
-      "version": 2
+      "version": 3
     }
 ---
 apiVersion: v1
