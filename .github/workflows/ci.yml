@@ -6,6 +6,66 @@ on:
   pull_request:
 
 jobs:
+  changes:
+    name: detect affected images
+    runs-on: ubuntu-latest
+    outputs:
+      stt: ${{ steps.filter.outputs.stt }}
+      tts: ${{ steps.filter.outputs.tts }}
+      agent: ${{ steps.filter.outputs.agent }}
+      gateway: ${{ steps.filter.outputs.gateway }}
+      scheduler: ${{ steps.filter.outputs.scheduler }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect changed runtime areas
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # New files under a package directory match automatically. Keep
+          # root-level files that Dockerfiles COPY explicitly (for example
+          # tts_cli.py) in the owning filter below; shared voicepipe/ and
+          # instrumentation changes intentionally rebuild every affected
+          # service image.
+          filters: |
+            stt:
+              - 'services/stt/**'
+              - 'services/stt/Dockerfile'
+              - 'voicepipe/**'
+              - 'services/metrics.py'
+              - 'services/telemetry.py'
+              - '.dockerignore'
+            tts:
+              - 'services/tts/**'
+              - 'services/tts/Dockerfile'
+              - 'voicepipe/**'
+              - 'services/metrics.py'
+              - 'services/telemetry.py'
+              - 'requirements/chatterbox.txt'
+              - 'requirements/uma-tts.txt'
+              - 'tts_cli.py'
+              - 'chatterbox_cli.py'
+              - '.dockerignore'
+            agent:
+              - 'services/agent/**'
+              - 'services/agent/Dockerfile'
+              - 'voicepipe/**'
+              - 'tools/companion_control_mcp.py'
+              - 'services/metrics.py'
+              - 'services/telemetry.py'
+              - '.dockerignore'
+            gateway:
+              - 'services/gateway/**'
+              - 'services/gateway/Dockerfile'
+              - 'voicepipe/**'
+              - 'services/metrics.py'
+              - 'services/telemetry.py'
+              - '.dockerignore'
+            scheduler:
+              - 'controller/gpu_scheduler/**'
+              - '.dockerignore'
+
   test:
     name: pytest (voicepipe + services + controller)
     runs-on: ubuntu-latest
@@ -32,6 +92,8 @@ jobs:
 
   docker-build:
     name: build ${{ matrix.image }}
+    needs: changes
+    if: ${{ needs.changes.outputs[matrix.filter] == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,21 +103,27 @@ jobs:
       matrix:
         include:
           - image: aicompanion-stt
+            filter: stt
             dockerfile: services/stt/Dockerfile
             build-args: ""
           - image: aicompanion-tts
+            filter: tts
             dockerfile: services/tts/Dockerfile
             build-args: "REQUIREMENTS_FILE=chatterbox.txt"
           - image: aicompanion-tts-vits
+            filter: tts
             dockerfile: services/tts/Dockerfile
             build-args: "REQUIREMENTS_FILE=uma-tts.txt"
           - image: aicompanion-agent
+            filter: agent
             dockerfile: services/agent/Dockerfile
             build-args: ""
           - image: aicompanion-gateway
+            filter: gateway
             dockerfile: services/gateway/Dockerfile
             build-args: ""
           - image: aicompanion-gpu-scheduler
+            filter: scheduler
             dockerfile: controller/gpu_scheduler/Dockerfile
             context: controller/gpu_scheduler
             build-args: ""
