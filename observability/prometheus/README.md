@@ -3,7 +3,9 @@
 `prometheus.yaml` discovers the named `metrics` ports for the gateway, STT,
 agent, TTS, `kube-state-metrics`, and DCGM Exporter, and scrapes their
 `/metrics` endpoint every 15 seconds. Prometheus stores its TSDB on the
-`prometheus-data` 5 GiB `local-path` PVC.
+`prometheus-data-arch` 5 GiB `local-path` PVC pinned to the always-on
+`arch-ssd` node. The previous `prometheus-data` claim is retained separately
+until its history is explicitly migrated or retired.
 
 Apply after the rebuilt service images are running:
 

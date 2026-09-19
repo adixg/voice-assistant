@@ -27,6 +27,7 @@ spec:
   template:
     metadata: {labels: {app: grafana}}
     spec:
+      nodeSelector: {gpu-tier: gtx1650}
       containers:
         - name: grafana
           image: grafana/grafana:12.1.1

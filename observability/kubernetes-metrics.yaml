@@ -36,6 +36,7 @@ spec:
   template:
     metadata: {labels: {app: kube-state-metrics}}
     spec:
+      nodeSelector: {gpu-tier: gtx1650}
       serviceAccountName: kube-state-metrics
       automountServiceAccountToken: true
       containers:

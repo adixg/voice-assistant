@@ -1,7 +1,9 @@
 # Grafana
 
 `grafana.yaml` provisions Prometheus and Tempo (distributed traces). Tempo
-stores traces on the `tempo-data` 5 GiB `local-path` PVC. Change the default
+stores traces on the `tempo-data-arch` 5 GiB `local-path` PVC pinned to
+`arch-ssd`. The previous `tempo-data` claim is retained separately until its
+history is explicitly migrated or retired. Change the default
 admin password before exposing Grafana beyond a local port-forward.
 `dashboard.yaml` provisions the AI Companion service-performance dashboard:
 scrape health, request/error rate, HTTP and gateway latency, pod readiness,

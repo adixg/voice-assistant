@@ -19,7 +19,7 @@ data:
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: tempo-data, namespace: aicompanion}
+metadata: {name: tempo-data-arch, namespace: aicompanion}
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -35,13 +35,14 @@ spec:
   template:
     metadata: {labels: {app: tempo}}
     spec:
+      nodeSelector: {gpu-tier: gtx1650}
       containers:
         - name: tempo
           image: grafana/tempo:2.7.2
           args: ["-config.file=/etc/tempo/tempo.yaml"]
           ports: [{name: http, containerPort: 3200}, {name: otlp-grpc, containerPort: 4317}]
           volumeMounts: [{name: config, mountPath: /etc/tempo}, {name: data, mountPath: /var/tempo}]
-      volumes: [{name: config, configMap: {name: tempo-config}}, {name: data, persistentVolumeClaim: {claimName: tempo-data}}]
+      volumes: [{name: config, configMap: {name: tempo-config}}, {name: data, persistentVolumeClaim: {claimName: tempo-data-arch}}]
 ---
 apiVersion: v1
 kind: Service

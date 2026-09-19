@@ -42,7 +42,7 @@ data:
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: {name: prometheus-data, namespace: aicompanion}
+metadata: {name: prometheus-data-arch, namespace: aicompanion}
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -60,6 +60,7 @@ spec:
   template:
     metadata: {labels: {app: prometheus}}
     spec:
+      nodeSelector: {gpu-tier: gtx1650}
       serviceAccountName: prometheus
       containers:
         - name: prometheus
@@ -71,7 +72,7 @@ spec:
             - {name: data, mountPath: /prometheus}
       volumes:
         - {name: config, configMap: {name: prometheus-config}}
-        - {name: data, persistentVolumeClaim: {claimName: prometheus-data}}
+        - {name: data, persistentVolumeClaim: {claimName: prometheus-data-arch}}
 ---
 apiVersion: v1
 kind: Service
