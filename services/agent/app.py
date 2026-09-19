@@ -45,6 +45,12 @@ def build_parser():
     ap.add_argument("--llm-backend", default="openai-compatible", choices=LLM.names())
     # The openai-compatible backend reads LLM_HOST and LLM_MODEL itself. The
     # controller patches those neutral variables together on a node switch.
+    # Keep the legacy flags too: an already-deployed Ollama-configured agent
+    # must remain able to start while its manifest rolls over to llama.cpp.
+    ap.add_argument("--host", default=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
+                    help=argparse.SUPPRESS)
+    ap.add_argument("--model", default=os.environ.get("OLLAMA_MODEL", "rina"),
+                    help=argparse.SUPPRESS)
     ap.add_argument("--host-port", type=int, default=8002, dest="host_port")
     LLM.add_arguments(ap)
     return ap
