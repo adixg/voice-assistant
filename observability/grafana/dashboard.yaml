@@ -4,6 +4,7 @@ metadata: {name: grafana-dashboard-aicompanion, namespace: aicompanion}
 data:
   aicompanion.json: |
     {
+      "uid": "aicompanion",
       "annotations": {"list": []},
       "editable": true,
       "graphTooltip": 1,
@@ -117,6 +118,16 @@ data:
           "targets": [{"expr": "100 * DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE + DCGM_FI_DEV_FB_RESERVED)", "legendFormat": "{{hostname}} / GPU {{gpu}}", "refId": "A"}],
           "title": "VRAM utilization",
           "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "tempo", "uid": "tempo"},
+          "description": "Distributed traces emitted by the FastAPI services through OpenTelemetry and stored in Tempo.",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 47},
+          "id": 12,
+          "options": {"showSearch": true, "showTable": true, "spanBar": {"type": "Tag"}},
+          "targets": [{"queryType": "traceql", "query": "{ resource.service.name =~ \".+\" }", "refId": "A"}],
+          "title": "Recent distributed traces",
+          "type": "traces"
         }
       ],
       "schemaVersion": 41,

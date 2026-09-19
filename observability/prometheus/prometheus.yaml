@@ -40,6 +40,15 @@ data:
             regex: metrics
             action: keep
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: prometheus-data, namespace: aicompanion}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 5Gi}
+  storageClassName: local-path
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,7 +71,7 @@ spec:
             - {name: data, mountPath: /prometheus}
       volumes:
         - {name: config, configMap: {name: prometheus-config}}
-        - {name: data, emptyDir: {}}
+        - {name: data, persistentVolumeClaim: {claimName: prometheus-data}}
 ---
 apiVersion: v1
 kind: Service

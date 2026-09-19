@@ -17,6 +17,15 @@ data:
         local: {path: /var/tempo/blocks}
     usage_report: {reporting_enabled: false}
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: tempo-data, namespace: aicompanion}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 5Gi}
+  storageClassName: local-path
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: tempo, namespace: aicompanion}
@@ -32,7 +41,7 @@ spec:
           args: ["-config.file=/etc/tempo/tempo.yaml"]
           ports: [{name: http, containerPort: 3200}, {name: otlp-grpc, containerPort: 4317}]
           volumeMounts: [{name: config, mountPath: /etc/tempo}, {name: data, mountPath: /var/tempo}]
-      volumes: [{name: config, configMap: {name: tempo-config}}, {name: data, emptyDir: {}}]
+      volumes: [{name: config, configMap: {name: tempo-config}}, {name: data, persistentVolumeClaim: {claimName: tempo-data}}]
 ---
 apiVersion: v1
 kind: Service

@@ -39,6 +39,7 @@ def test_dashboard_readiness_panel_is_instant_query():
     dashboard = _dashboard_json()
     target = _panel(dashboard, "Pod readiness")["targets"][0]
 
+    assert dashboard["uid"] == "aicompanion"
     assert target["instant"] is True
     assert 'condition="true"' in target["expr"]
 
