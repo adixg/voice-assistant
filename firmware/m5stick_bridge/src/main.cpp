@@ -854,8 +854,8 @@ void setup() {
   // The panel is a real backlit LCD (Panel_ST7789, PWM backlight on GPIO 38 --
   // verified in M5GFX's board config, not an OLED), so the backlight is a
   // genuine, non-trivial draw on battery -- M5GFX defaults it near max.
-  // 0-255 range; dimmed for battery life while staying readable.
-  M5.Display.setBrightness(60);
+  // 0-255 range; 15% (38/255) keeps it readable while reducing battery draw.
+  M5.Display.setBrightness(38);
   // 16-bit to match sprites.h's RGB565 data exactly — 8-bit here was
   // forcing every pushImage() to downconvert 65536 colors to ~256,
   // mangling the pixel art. Costs ~65KB more canvas RAM (240x135x2),

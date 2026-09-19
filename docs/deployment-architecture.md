@@ -35,9 +35,11 @@ dir directly rather than copying models into the pod -- a copy attempt
 (`sudo rsync` of the whole ~20GB store) crashed this laptop when it filled
 the real ~25GB free on `C:` (WSL2's `df -h` inside Linux had reported
 ~880GB free, which was the virtual disk's logical cap, not real headroom --
-see the check-disk-space-before-bulk-writes lesson). Pod-to-internet
-egress on this node is a separate, still-unfixed WSL2 networking gap
-(harmless now that models are shared rather than pulled in-pod). `gateway`
+see the check-disk-space-before-bulk-writes lesson). Pod-to-public-internet
+egress on this node was re-verified on 2026-09-18 with a temporary pod
+pinned to this node: it resolved `registry.ollama.ai` and made an HTTPS
+request successfully (the registry's expected bare-URL 404 made BusyBox
+`wget` return nonzero). `gateway`
 is **applied and `Running`** too, confirmed with the same live wire-protocol
 test. The repository's Android endpoint now points at its stable NodePort
 route; applying the updated gateway manifest/Secret and a real Stick
@@ -200,9 +202,8 @@ automated-switching design.
    round-trips a real reply through either node, including the automatic
    node-up/node-down switch (see status section above for the full bug
    chain this took). Still open: chart into `deploy/helm/`, wire
-   `deploy/argocd/` for GitOps sync, and the laptop node's separate
-   pod-to-internet-egress gap (harmless today since `ollama-rtx4060` shares
-   the node's existing model store instead of pulling its own).
+   `deploy/argocd/` for GitOps sync. Pod-to-public-internet egress on the
+   laptop node was separately verified on 2026-09-18.
 3. **Observability** — `observability/prometheus/` + `observability/grafana/`,
    turning the hand-measured numbers this repo already tracks into live
    dashboards.

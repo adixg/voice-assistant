@@ -1,11 +1,34 @@
-# benchmarks/latency
+# latency benchmarks
 
-Not built yet. Phase 4 of `docs/deployment-architecture.md`. Intent: measure
-end-to-end turn latency (mic stop -> reply audio starts playing) for the
-service-split architecture (`services/` over HTTP, `deploy/kubernetes/`) and
-compare directly against the monolithic `bridge_server.py`'s numbers, since
-splitting into network-separated services necessarily adds hops on a path
-where latency is what users actually feel — see the caution about this in
-`docs/deployment-architecture.md`'s design section. This directory should
-hold the actual measured numbers once that comparison is run, same
-convention as `docs/hardware-budget.md`.
+`benchmark_streaming.py` measures streaming text latency with only the Python
+standard library. It writes per-request JSON/CSV records plus p50/p95/mean/max
+summaries. Results stay local in `benchmarks/results/`.
+
+Run it from a temporary pod that can resolve the cluster service names, or
+from any machine with network access to the relevant endpoint. Warm up first,
+then take ten samples of each fixed prompt:
+
+```bash
+python benchmarks/latency/benchmark_streaming.py --kind agent \
+  --base-url http://agent:8002 --warmups 3 --repetitions 10
+
+python benchmarks/latency/benchmark_streaming.py --kind openai \
+  --base-url http://llama-cpp-gtx1650:8080/v1 --model qwen3.5-4b \
+  --warmups 3 --repetitions 10
+```
+
+The first command measures the routed service path; the second isolates a
+llama.cpp server. Run each against both GPU nodes, and record cold-start runs
+separately from warm runs. The harness reports TTFT and total duration in
+milliseconds, as well as output characters/sec. It intentionally does not
+claim token/sec because the agent's NDJSON API does not report token usage.
+
+## Full voice turns
+
+For 20 prerecorded utterances plus 20 real-device turns, record these
+timestamps in one row per turn: mic/WAV end, STT complete, first agent delta,
+agent final reply, TTS complete, and first audio frame delivered to Android.
+Report p50/p95/max for mic-stop → first audio (the user-facing metric), each
+component duration, success rate, speaker-gate accept/reject, transcription
+accuracy, and BLE/audio-drop count. Keep fixed prompts, model/quantization,
+context size, node, and cold/warm state with every result.

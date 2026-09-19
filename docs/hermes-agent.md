@@ -714,8 +714,8 @@ it means adding MCP servers no longer costs context linearly.
 
 ### The wishlist is mostly built in — MCP is for the rest
 
-Mapping the four things wanted (persistent memory, reminders, notes, search)
-onto what Hermes ships:
+Mapping the desired tools (persistent memory, reminders, notes, search, and
+companion controls) onto what Hermes ships:
 
 | Want | Hermes feature | Needs an MCP server? |
 | --- | --- | --- |
@@ -724,6 +724,8 @@ onto what Hermes ships:
 | Reminders / timers | built-in cron, drivable in plain language through the `cronjob` tool | no |
 | Web search | `web_search` / `web_extract`, **keyless out of the box** (DDGS, plus a rotating Exa/Parallel/Firecrawl/Keenable free ring); SearXNG self-hosted is the free keyed option | no |
 | Notes | nothing purpose-built; memory is deliberately capped and is not a store | **yes** |
+| Switch active LLM backend/model | a project-owned, authenticated control API with health-check + rollback; do not give an agent direct cluster/shell control | **yes** |
+| M5StickS3 brightness and volume | project-owned device-control messages with bounded values and device acknowledgement | **yes** |
 
 So MCP is not the way in — it is the extension point once the built-ins are
 running. Config shape:

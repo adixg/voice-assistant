@@ -12,6 +12,9 @@ __pycache__/
 # tools/bench_tts.py's running log (local data)
 /bench_tts_log.csv
 
+# Benchmark outputs contain request/response text and are machine-specific.
+/benchmarks/results/
+
 # M5StickS3 firmware: PlatformIO build artifacts + real WiFi/host creds
 /firmware/*/.pio/
 /firmware/*/include/secrets.h

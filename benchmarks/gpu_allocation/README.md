@@ -1,9 +1,14 @@
-# benchmarks/gpu_allocation
+# GPU allocation and failover benchmarks
 
-Not built yet. Phase 4 of `docs/deployment-architecture.md`. Intent: measure
-how quickly `controller/gpu_scheduler/` actually retargets the `agent`
-service after the RTX 4060 node transitions Ready/NotReady (laptop
-wake/sleep, network drop, `kubectl label` change) — the controller's whole
-value is that this happens automatically and promptly instead of a human
-running `kubectl set env` by hand, so that gap needs a real measured number,
-not just "it should work."
+Measure an intentional 4060 departure and return at least five times each.
+Do this only between voice turns; it deliberately causes an agent rollout.
+
+For every run, timestamp: trigger (laptop sleep/k3s-agent stop), Kubernetes
+Node `NotReady`, scheduler log showing `LLM_HOST` change, new agent pod
+Ready, and the first successful `POST /ask`. Report trigger → first successful
+reply as the primary recovery metric, plus each intermediate interval.
+
+Capture resource state before and during load on each node: `nvidia-smi`
+(VRAM used, utilization, power, temperature), pod restarts, and error rate.
+Use the same benchmark prompt across the 1650 and 4060 so model-size changes
+are labelled rather than mistaken for routing overhead.
