@@ -101,8 +101,8 @@ spec:
           ports:
             - {containerPort: 9400, name: metrics}
           resources:
-            requests: {cpu: 100m, memory: 128Mi}
-            limits: {cpu: 200m, memory: 256Mi}
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 200m, memory: 512Mi}
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
