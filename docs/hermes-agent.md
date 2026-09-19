@@ -742,6 +742,11 @@ picker over a Nous-reviewed catalog; `/reload-mcp` reloads without a restart.
 Hermes also reads Claude Code's `mcpServers` block via `hermes import-agent
 claude-code`.
 
+The first project-owned server now lives in
+[`docs/companion-control-mcp.md`](companion-control-mcp.md). It exposes only
+read-only operational status while the authentication, confirmation, and
+device-acknowledgement design for write controls is built.
+
 ### Two cautions specific to this project
 
 1. **`approvals.mode: smart` costs a second inference.** It calls an auxiliary
