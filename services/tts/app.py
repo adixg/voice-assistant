@@ -21,6 +21,7 @@ from voicepipe import backends  # noqa: F401 - registers backends as a side effe
 from voicepipe.registry import TTS
 from services.metrics import install_http_metrics
 from services.telemetry import install_tracing
+from services.tts.elevenlabs import ElevenLabsTTS
 
 app = FastAPI(title="aicompanion-tts")
 install_http_metrics(app, "tts")
@@ -38,7 +39,7 @@ class SynthResponse(BaseModel):
 
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--tts-backend", default="chatterbox", choices=TTS.names())
+    ap.add_argument("--tts-backend", default="chatterbox", choices=[*TTS.names(), "elevenlabs"])
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8003)
     TTS.add_arguments(ap)
@@ -65,7 +66,8 @@ def synth(req: SynthRequest):
 def main():
     global _backend
     args = build_parser().parse_args()
-    _backend = TTS.build(args.tts_backend, args)
+    _backend = (ElevenLabsTTS.from_environment() if args.tts_backend == "elevenlabs"
+                else TTS.build(args.tts_backend, args))
     try:
         uvicorn.run(app, host=args.host, port=args.port)
     finally:

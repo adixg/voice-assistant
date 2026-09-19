@@ -23,8 +23,14 @@ spec:
       containers:
         - name: tts
           image: ghcr.io/adixg/aicompanion-tts-vits:latest
-          args: ["--tts-backend", "vits"]
-          env: [{name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}]
+          imagePullPolicy: Always
+          args: ["--tts-backend", "elevenlabs"]
+          env:
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
+            - {name: ELEVENLABS_VOICE_ID, value: "aalCGJcUMZVTTt7aH2BX"}
+            - name: ELEVENLABS_API_KEY
+              valueFrom:
+                secretKeyRef: {name: elevenlabs, key: ELEVENLABS_API_KEY}
           ports:
             - {containerPort: 8003, name: metrics}
           readinessProbe:

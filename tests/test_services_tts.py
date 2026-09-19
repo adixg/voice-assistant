@@ -3,10 +3,12 @@ returns a list of wav chunk paths; the service reads and base64-encodes
 each, in order, which is what these tests check."""
 import base64
 import tempfile
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 
 import services.tts.app as tts_app
+from services.tts.elevenlabs import ElevenLabsTTS
 
 
 class FakeTTS:
@@ -64,3 +66,17 @@ class TestSynth:
         resp = client.post("/synth", json={"text": ""})
 
         assert resp.json()["chunks_b64"] == []
+
+
+class TestElevenLabs:
+    def test_wraps_pcm_response_as_wav(self, tmp_path):
+        backend = ElevenLabsTTS("voice", "key")
+        backend.client.close()
+        backend.client = Mock()
+        backend.client.post.return_value = Mock(content=b"\x00\x00" * 8)
+        backend.client.post.return_value.raise_for_status = Mock()
+
+        [path] = backend.synth("hello")
+        with open(path, "rb") as audio:
+            assert audio.read(4) == b"RIFF"
+        backend.close()
