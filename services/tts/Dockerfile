@@ -29,6 +29,8 @@ RUN pip3 install --no-cache-dir -r requirements/backend.txt
 
 COPY voicepipe/ voicepipe/
 COPY services/tts/app.py services/tts/app.py
+COPY services/metrics.py services/metrics.py
+COPY services/telemetry.py services/telemetry.py
 COPY services/__init__.py services/__init__.py
 
 # Both CLIs are the actual worker command voicepipe/backends/vits.py and

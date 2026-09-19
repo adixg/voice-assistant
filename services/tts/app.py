@@ -19,8 +19,12 @@ from pydantic import BaseModel
 
 from voicepipe import backends  # noqa: F401 - registers backends as a side effect
 from voicepipe.registry import TTS
+from services.metrics import install_http_metrics
+from services.telemetry import install_tracing
 
 app = FastAPI(title="aicompanion-tts")
+install_http_metrics(app, "tts")
+install_tracing(app, "tts")
 _backend = None
 
 

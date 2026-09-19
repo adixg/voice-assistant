@@ -1,8 +1,12 @@
-# observability/prometheus
+# Prometheus
 
-Not built yet. Phase 3 of `docs/deployment-architecture.md`. Intent: each
-service in `services/` exposes latency and (for stt/tts) GPU-memory metrics
-at `/metrics`, scraped by a Prometheus instance in the cluster. This turns
-the measured-by-hand numbers this repo already tracks in
-`docs/hardware-budget.md` into a live, queryable series instead of a
-point-in-time note in a markdown file.
+`prometheus.yaml` discovers the four named service ports and scrapes their
+`/metrics` endpoint every 15 seconds. It uses `emptyDir` for an initial,
+non-durable deployment; add a PVC before treating historical data as durable.
+
+Apply after the rebuilt service images are running:
+
+```bash
+kubectl apply -f observability/prometheus/prometheus.yaml
+kubectl -n aicompanion port-forward svc/prometheus 9090:9090
+```

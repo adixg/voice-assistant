@@ -30,6 +30,8 @@ spec:
           image: ghcr.io/adixg/aicompanion-agent:latest
           args: ["--llm-backend", "openai-compatible"]
           env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: tempo:4317
             - name: LLM_HOST
               value: "http://llama-cpp-gtx1650:8080/v1"
             # Each llama-server instance has the model sized for its own
@@ -38,7 +40,7 @@ spec:
             - name: LLM_MODEL
               value: "qwen3.5-4b"
           ports:
-            - containerPort: 8002
+            - {containerPort: 8002, name: metrics}
           readinessProbe:
             httpGet: {path: /health, port: 8002}
             initialDelaySeconds: 5
@@ -52,5 +54,6 @@ spec:
   selector:
     app: agent
   ports:
-    - port: 8002
+    - name: metrics
+      port: 8002
       targetPort: 8002

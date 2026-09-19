@@ -26,8 +26,9 @@ spec:
         - name: stt
           image: ghcr.io/adixg/aicompanion-stt:latest
           args: ["--stt-backend", "faster-whisper", "--whisper-model", "small", "--whisper-device", "cuda"]
+          env: [{name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}]
           ports:
-            - containerPort: 8001
+            - {containerPort: 8001, name: metrics}
           resources:
             limits:
               nvidia.com/gpu: 1
@@ -44,5 +45,6 @@ spec:
   selector:
     app: stt
   ports:
-    - port: 8001
+    - name: metrics
+      port: 8001
       targetPort: 8001

@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r services/gateway/requirements.txt
 
 COPY voicepipe/ voicepipe/
 COPY services/gateway/app.py services/gateway/app.py
+COPY services/metrics.py services/metrics.py
+COPY services/telemetry.py services/telemetry.py
 COPY services/__init__.py services/__init__.py
 
 EXPOSE 8000

@@ -22,8 +22,12 @@ from pydantic import BaseModel
 
 from voicepipe import backends  # noqa: F401 - registers backends as a side effect
 from voicepipe.registry import STT
+from services.metrics import install_http_metrics
+from services.telemetry import install_tracing
 
 app = FastAPI(title="aicompanion-stt")
+install_http_metrics(app, "stt")
+install_tracing(app, "stt")
 _backend = None
 
 

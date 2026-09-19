@@ -39,6 +39,7 @@ import random
 import tempfile
 import wave
 from contextlib import suppress
+from time import perf_counter
 
 import httpx
 import uvicorn
@@ -49,8 +50,13 @@ from voicepipe.personas import DEFAULT_PERSONA, PERSONAS
 from voicepipe.registry import FINAL, STATUS, SV
 from voicepipe.speaker import REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT, rejection_line, too_short_line
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
+from services.metrics import (GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
+                              install_http_metrics)
+from services.telemetry import install_tracing
 
 app = FastAPI(title="aicompanion-gateway")
+install_http_metrics(app, "gateway")
+install_tracing(app, "gateway")
 
 MIN_UTTERANCE_BYTES = SAMPLE_RATE * 2 // 4  # ignore stray <0.25s blips, same threshold bridge_server.py uses
 
@@ -224,6 +230,16 @@ class GatewaySession:
         return reply
 
     async def _turn(self, ws, pcm):
+        turn_started = perf_counter()
+        outcome = "error"
+        try:
+            await self._turn_inner(ws, pcm)
+            outcome = "success"
+        finally:
+            GATEWAY_TURNS.labels(outcome).inc()
+            GATEWAY_TURN_DURATION.observe(perf_counter() - turn_started)
+
+    async def _turn_inner(self, ws, pcm):
         with wave.open(self.wav_in, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
@@ -250,11 +266,13 @@ class GatewaySession:
 
         with open(self.wav_in, "rb") as f:
             wav_bytes = f.read()
+        stage_started = perf_counter()
         stt_resp = await self.client.post(
             f"{self.urls['stt']}/transcribe",
             files={"audio": ("turn.wav", wav_bytes, "audio/wav")},
             params={"lang": self.stt_lang} if self.stt_lang else None)
         stt_resp.raise_for_status()
+        GATEWAY_STAGE_DURATION.labels("stt").observe(perf_counter() - stage_started)
         text = stt_resp.json()["text"]
         print(f"  you said: {text or '(nothing heard)'}")
         if not text:
@@ -264,7 +282,9 @@ class GatewaySession:
         await ws.send_text(f"heard:{text}")
         self.messages.append({"role": "user", "content": text})
         try:
+            stage_started = perf_counter()
             reply = await self._ask(ws)
+            GATEWAY_STAGE_DURATION.labels("agent").observe(perf_counter() - stage_started)
         except Exception as e:  # noqa: BLE001
             self.messages.pop()  # don't leave a dangling user turn in the history
             print(f"  ! llm error: {e}")
@@ -274,7 +294,9 @@ class GatewaySession:
         print(f"  Rina: {reply}")
 
         await ws.send_text(f"reply:{reply}")
+        stage_started = perf_counter()
         await self._speak(ws, reply)
+        GATEWAY_STAGE_DURATION.labels("tts_and_wire_audio").observe(perf_counter() - stage_started)
 
 
 class _AsgiWebSocketAdapter:
