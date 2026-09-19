@@ -4,8 +4,7 @@
 agent, TTS, `kube-state-metrics`, and DCGM Exporter, and scrapes their
 `/metrics` endpoint every 15 seconds. Prometheus stores its TSDB on the
 `prometheus-data-arch` 5 GiB `local-path` PVC pinned to the always-on
-`arch-ssd` node. The previous `prometheus-data` claim is retained separately
-until its history is explicitly migrated or retired.
+`arch-ssd` node.
 
 Apply after the rebuilt service images are running:
 
