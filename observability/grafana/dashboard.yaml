@@ -128,6 +128,16 @@ data:
           "targets": [{"queryType": "traceql", "query": "{ resource.service.name =~ \".+\" }", "refId": "A"}],
           "title": "Recent distributed traces",
           "type": "traces"
+        },
+        {
+          "description": "Estimated ElevenLabs credits used in the selected 30-day window. This assumes one credit per character.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "unit": "short"}, "overrides": []},
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 57},
+          "id": 13,
+          "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "targets": [{"expr": "sum(increase(elevenlabs_characters_total[30d]))", "legendFormat": "estimated credits", "refId": "A"}],
+          "title": "ElevenLabs credits used (estimated)",
+          "type": "stat"
         }
       ],
       "schemaVersion": 41,

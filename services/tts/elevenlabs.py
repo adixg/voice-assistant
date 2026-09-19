@@ -5,6 +5,14 @@ import tempfile
 import wave
 
 import httpx
+from prometheus_client import Counter
+
+
+ELEVENLABS_CHARACTERS = Counter(
+    "elevenlabs_characters_total",
+    "Characters successfully sent to ElevenLabs; approximately one credit per character",
+    ("model",),
+)
 
 
 class ElevenLabsTTS:
@@ -38,6 +46,7 @@ class ElevenLabsTTS:
             json={"text": text, "model_id": self.model_id},
         )
         response.raise_for_status()
+        ELEVENLABS_CHARACTERS.labels(self.model_id).inc(len(text))
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as output:
             path = output.name
         with wave.open(path, "wb") as wav:

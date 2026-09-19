@@ -8,7 +8,7 @@ from unittest.mock import Mock
 from fastapi.testclient import TestClient
 
 import services.tts.app as tts_app
-from services.tts.elevenlabs import ElevenLabsTTS
+from services.tts.elevenlabs import ELEVENLABS_CHARACTERS, ElevenLabsTTS
 
 
 class FakeTTS:
@@ -80,3 +80,7 @@ class TestElevenLabs:
         with open(path, "rb") as audio:
             assert audio.read(4) == b"RIFF"
         backend.close()
+        sample = next(sample for sample in ELEVENLABS_CHARACTERS.collect()[0].samples
+                      if sample.name == "elevenlabs_characters_total"
+                      and sample.labels["model"] == "eleven_multilingual_v2")
+        assert sample.value >= 5
