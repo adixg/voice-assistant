@@ -44,7 +44,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
           "id": 4,
           "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
-          "targets": [{"expr": "100 * sum by (service) (rate(aicompanion_http_requests_total{status=~\"5..\"}[5m])) / sum by (service) (rate(aicompanion_http_requests_total[5m]))", "legendFormat": "{{service}}", "refId": "A"}],
+          "targets": [{"expr": "(100 * sum by (service) (rate(aicompanion_http_requests_total{status=~\"5..\"}[5m])) / sum by (service) (rate(aicompanion_http_requests_total[5m]))) or (sum by (service) (rate(aicompanion_http_requests_total[5m])) * 0)", "legendFormat": "{{service}}", "refId": "A"}],
           "title": "HTTP 5xx error rate",
           "type": "timeseries"
         },
