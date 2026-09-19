@@ -10,11 +10,8 @@ jobs:
     name: detect affected images
     runs-on: ubuntu-latest
     outputs:
-      stt: ${{ steps.filter.outputs.stt }}
-      tts: ${{ steps.filter.outputs.tts }}
-      agent: ${{ steps.filter.outputs.agent }}
-      gateway: ${{ steps.filter.outputs.gateway }}
-      scheduler: ${{ steps.filter.outputs.scheduler }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      docker: ${{ steps.matrix.outputs.docker }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +62,40 @@ jobs:
             scheduler:
               - 'controller/gpu_scheduler/**'
               - '.dockerignore'
+      - name: Build affected image matrix
+        id: matrix
+        env:
+          STT: ${{ steps.filter.outputs.stt }}
+          TTS: ${{ steps.filter.outputs.tts }}
+          AGENT: ${{ steps.filter.outputs.agent }}
+          GATEWAY: ${{ steps.filter.outputs.gateway }}
+          SCHEDULER: ${{ steps.filter.outputs.scheduler }}
+        run: |
+          matrix='{"include":[]}'
+          if [ "$STT" = true ]; then
+            matrix=$(jq -c '.include += [{"image":"aicompanion-stt","dockerfile":"services/stt/Dockerfile","build-args":""}]' <<<"$matrix")
+          fi
+          if [ "$TTS" = true ]; then
+            matrix=$(jq -c '.include += [
+              {"image":"aicompanion-tts","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=chatterbox.txt"},
+              {"image":"aicompanion-tts-vits","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=uma-tts.txt"}
+            ]' <<<"$matrix")
+          fi
+          if [ "$AGENT" = true ]; then
+            matrix=$(jq -c '.include += [{"image":"aicompanion-agent","dockerfile":"services/agent/Dockerfile","build-args":""}]' <<<"$matrix")
+          fi
+          if [ "$GATEWAY" = true ]; then
+            matrix=$(jq -c '.include += [{"image":"aicompanion-gateway","dockerfile":"services/gateway/Dockerfile","build-args":""}]' <<<"$matrix")
+          fi
+          if [ "$SCHEDULER" = true ]; then
+            matrix=$(jq -c '.include += [{"image":"aicompanion-gpu-scheduler","dockerfile":"controller/gpu_scheduler/Dockerfile","context":"controller/gpu_scheduler","build-args":""}]' <<<"$matrix")
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          if [ "$(jq '.include | length' <<<"$matrix")" -gt 0 ]; then
+            echo 'docker=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'docker=false' >> "$GITHUB_OUTPUT"
+          fi
 
   test:
     name: pytest (voicepipe + services + controller)
@@ -93,40 +124,14 @@ jobs:
   docker-build:
     name: build ${{ matrix.image }}
     needs: changes
-    if: ${{ needs.changes.outputs[matrix.filter] == 'true' }}
+    if: ${{ needs.changes.outputs.docker == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write  # only used to push on `push` to main, see the login step below
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - image: aicompanion-stt
-            filter: stt
-            dockerfile: services/stt/Dockerfile
-            build-args: ""
-          - image: aicompanion-tts
-            filter: tts
-            dockerfile: services/tts/Dockerfile
-            build-args: "REQUIREMENTS_FILE=chatterbox.txt"
-          - image: aicompanion-tts-vits
-            filter: tts
-            dockerfile: services/tts/Dockerfile
-            build-args: "REQUIREMENTS_FILE=uma-tts.txt"
-          - image: aicompanion-agent
-            filter: agent
-            dockerfile: services/agent/Dockerfile
-            build-args: ""
-          - image: aicompanion-gateway
-            filter: gateway
-            dockerfile: services/gateway/Dockerfile
-            build-args: ""
-          - image: aicompanion-gpu-scheduler
-            filter: scheduler
-            dockerfile: controller/gpu_scheduler/Dockerfile
-            context: controller/gpu_scheduler
-            build-args: ""
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
