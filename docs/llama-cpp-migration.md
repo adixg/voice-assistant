@@ -10,7 +10,9 @@ STT, TTS, firmware, and the wire protocol do not change.
 | RTX 4060 | `llama-cpp-rtx4060:8080` | `Qwen/Qwen3-8B-GGUF` / `Qwen3-8B-Q4_K_M.gguf` | `qwen3-8b` | `/var/lib/aicompanion/llama-cpp-rtx4060` |
 
 Both use all GPU layers and a 4096-token context. The first startup downloads
-about 2.7 GB on the 1650 and 5 GB on the 4060. The laptop cache is native
+about 2.7 GB on the 1650 and 5 GB on the 4060. `/health` intentionally returns
+503 until model loading completes; the Deployment readiness probe therefore
+withholds the Service endpoint during that interval. The laptop cache is native
 Linux storage inside the D:-hosted WSL VHD, never DrvFS.
 
 ## Cutover

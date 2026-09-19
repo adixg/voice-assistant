@@ -43,6 +43,13 @@ spec:
             - "99"
           ports:
             - containerPort: 8080
+          # llama-server returns 503 while downloading/loading the GGUF. Do
+          # not publish this endpoint to agent until the model is usable.
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
           resources:
             limits:
               nvidia.com/gpu: 1
