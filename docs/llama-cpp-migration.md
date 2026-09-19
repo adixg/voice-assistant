@@ -6,7 +6,7 @@ STT, TTS, firmware, and the wire protocol do not change.
 
 | Node | Service | GGUF | Alias | Cache host path |
 | --- | --- | --- | --- | --- |
-| GTX 1650 | `llama-cpp-gtx1650:8080` | `TheStageAI/Qwen3.5-4B-GGUF` / `Qwen3.5-4B-Q4_K_M.gguf` | `qwen3.5-4b` | `/var/lib/aicompanion/llama-cpp-gtx1650` |
+| GTX 1650 | `llama-cpp-gtx1650:8080` | `TheStageAI/Qwen3.5-4B-GGUF` / `Qwen3.5-4B-M-TS-Q4_K_M.gguf` | `qwen3.5-4b` | `/var/lib/aicompanion/llama-cpp-gtx1650` |
 | RTX 4060 | `llama-cpp-rtx4060:8080` | `Qwen/Qwen3-8B-GGUF` / `Qwen3-8B-Q4_K_M.gguf` | `qwen3-8b` | `/var/lib/aicompanion/llama-cpp-rtx4060` |
 
 Both use all GPU layers and a 4096-token context. The first startup downloads

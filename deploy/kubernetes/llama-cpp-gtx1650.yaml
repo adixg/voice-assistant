@@ -30,7 +30,7 @@ spec:
             - --hf-repo
             - TheStageAI/Qwen3.5-4B-GGUF
             - --hf-file
-            - Qwen3.5-4B-Q4_K_M.gguf
+            - Qwen3.5-4B-M-TS-Q4_K_M.gguf
             - --alias
             - qwen3.5-4b
             - --host
