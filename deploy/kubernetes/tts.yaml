@@ -28,6 +28,7 @@ spec:
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
             - {name: ELEVENLABS_VOICE_ID, value: "aalCGJcUMZVTTt7aH2BX"}
+            - {name: ELEVENLABS_CREDITS_REMAINING, value: "8764"}
             - name: ELEVENLABS_API_KEY
               valueFrom:
                 secretKeyRef: {name: elevenlabs, key: ELEVENLABS_API_KEY}

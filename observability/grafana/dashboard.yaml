@@ -138,6 +138,16 @@ data:
           "targets": [{"expr": "sum(increase(elevenlabs_characters_total[30d]))", "legendFormat": "estimated credits", "refId": "A"}],
           "title": "ElevenLabs credits used (estimated)",
           "type": "stat"
+        },
+        {
+          "description": "Estimated remaining ElevenLabs credits, initialized from the configured account balance.",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 1000}, {"color": "green", "value": 3000}]}, "unit": "short"}, "overrides": []},
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 57},
+          "id": 14,
+          "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "targets": [{"expr": "sum(elevenlabs_credits_remaining_estimate)", "legendFormat": "estimated credits remaining", "refId": "A"}],
+          "title": "ElevenLabs credits remaining (estimated)",
+          "type": "stat"
         }
       ],
       "schemaVersion": 41,
