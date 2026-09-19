@@ -26,6 +26,7 @@ scipy==1.15.3                  # is normally run standalone (see tools/make_face
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
+prometheus-client==0.22.1       # services/metrics.py, imported by every HTTP service
 
 # controller/gpu_scheduler/controller.py + tests/test_gpu_scheduler_controller.py
 kopf==1.37.4
