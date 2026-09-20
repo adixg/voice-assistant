@@ -41,6 +41,7 @@ jobs:
               - 'services/telemetry.py'
               - 'requirements/chatterbox.txt'
               - 'requirements/uma-tts.txt'
+              - 'requirements/kokoro.txt'
               - 'tts_cli.py'
               - 'chatterbox_cli.py'
               - '.dockerignore'
@@ -78,7 +79,8 @@ jobs:
           if [ "$TTS" = true ]; then
             matrix=$(jq -c '.include += [
               {"image":"aicompanion-tts","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=chatterbox.txt"},
-              {"image":"aicompanion-tts-vits","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=uma-tts.txt"}
+              {"image":"aicompanion-tts-vits","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=uma-tts.txt"},
+              {"image":"aicompanion-tts-kokoro","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=kokoro.txt"}
             ]' <<<"$matrix")
           fi
           if [ "$AGENT" = true ]; then

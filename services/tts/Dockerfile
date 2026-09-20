@@ -9,7 +9,7 @@ FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 ARG REQUIREMENTS_FILE=chatterbox.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip ffmpeg git git-lfs && rm -rf /var/lib/apt/lists/*
+    python3 python3-pip ffmpeg espeak-ng git git-lfs && rm -rf /var/lib/apt/lists/*
 # The base image's apt-installed pip is old enough to mis-handle the git+
 # install below: it discards the built wheel with "produced metadata for
 # project name unknown" even though chatterbox's pyproject.toml declares
@@ -22,8 +22,8 @@ WORKDIR /app
 COPY services/tts/requirements.txt services/tts/requirements.txt
 RUN pip3 install --no-cache-dir -r services/tts/requirements.txt
 
-# The backend-specific deps: requirements/chatterbox.txt or
-# requirements/uma-tts.txt, from the repo root (see README.md's Layout).
+# The backend-specific deps: requirements/chatterbox.txt,
+# requirements/uma-tts.txt, or requirements/kokoro.txt, from the repo root.
 COPY requirements/${REQUIREMENTS_FILE} requirements/backend.txt
 RUN pip3 install --no-cache-dir -r requirements/backend.txt
 

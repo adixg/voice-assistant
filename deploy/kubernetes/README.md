@@ -132,6 +132,6 @@ verified on the live cluster; see that directory's README.
 
 `stt` and `tts` are pinned to the GTX 1650 node (`nodeSelector: gpu-tier:
 gtx1650`) so they're always reachable regardless of whether the laptop is
-up; `tts` runs the `vits` backend for that reason too (the only backend
-that's free on VRAM — see `docs/hardware-budget.md`). Chatterbox on the
-4060 for when it's actually up is future work, not wired in yet.
+up. `tts` runs Kokoro-82M with the `af_bella` voice on CPU, leaving the GPU
+available for Whisper and the selected LLM. The original VITS backend,
+Chatterbox, and ElevenLabs remain selectable in local/service configurations.

@@ -144,7 +144,7 @@ class TestBackendsAreAutoDiscovered:
 
         assert "faster-whisper" in STT.names()
         assert "ollama" in LLM.names()
-        assert {"chatterbox", "vits"} <= set(TTS.names())
+        assert {"chatterbox", "kokoro", "vits"} <= set(TTS.names())
 
     def test_load_all_is_idempotent(self):
         from voicepipe.backends import load_all

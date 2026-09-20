@@ -21,6 +21,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="qwen3-tts-ono-anna-1650.wav")
     parser.add_argument("--text", default=SAMPLE)
+    parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--dtype", choices=("float16", "float32"), default="float32")
     args = parser.parse_args()
 
     import soundfile as sf
@@ -30,13 +32,14 @@ def main() -> int:
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable; run this on the GTX 1650 node")
     device = torch.cuda.current_device()
+    model_dtype = torch.float32 if args.dtype == "float32" else torch.float16
     print(f"GPU: {torch.cuda.get_device_name(device)}")
     print(f"VRAM before load: {torch.cuda.memory_reserved(device) / 2**20:.0f} MiB reserved")
     started = time.perf_counter()
     model = Qwen3TTSModel.from_pretrained(
         "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         device_map=f"cuda:{device}",
-        dtype=torch.float16,
+        dtype=model_dtype,
         attn_implementation="eager",
     )
     load_seconds = time.perf_counter() - started
@@ -47,6 +50,13 @@ def main() -> int:
         text=args.text,
         language="Japanese",
         speaker="Ono_Anna",
+        do_sample=True,
+        top_p=0.9,
+        temperature=0.7,
+        subtalker_dosample=True,
+        subtalker_top_p=0.9,
+        subtalker_temperature=0.7,
+        max_new_tokens=args.max_new_tokens,
     )
     synth_seconds = time.perf_counter() - started
     sf.write(args.output, wavs[0], sample_rate)

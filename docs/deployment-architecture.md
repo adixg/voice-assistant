@@ -164,7 +164,7 @@ it's a real, deliberate tradeoff, not a free one.
 
 | Node | Label | Runs |
 |---|---|---|
-| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `ollama-gtx1650`, `stt`, `tts` (vits), `gateway`, `agent`, `gpu-scheduler` |
+| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `ollama-gtx1650`, `stt`, `tts` (Kokoro CPU), `gateway`, `agent`, `gpu-scheduler` |
 | Laptop (RTX 4060) | `gpu-tier=rtx4060` | k3s agent, `ollama-rtx4060` (only while the laptop is up) |
 
 `agent` and `gpu-scheduler` are pinned here too (`nodeSelector`, added

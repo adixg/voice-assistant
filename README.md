@@ -1,12 +1,13 @@
 # aicompanion
 
-A voice assistant: mic → faster-whisper (STT) → llama.cpp (LLM) → VITS-Umamusume (TTS) → speaker.
+A voice assistant: mic → faster-whisper (STT) → llama.cpp (LLM) → TTS → speaker
+(Kokoro-82M in Kubernetes, VITS locally by default).
 The primary device path is M5StickS3 → BLE → Android relay → the k3s gateway
 and split STT/agent/TTS services. `bridge_server.py` remains the standalone
 development fallback, and `chat_loop.py` runs the same backends with this
 machine's local mic/speaker. TTS is
-swappable (`--tts-backend vits` (default) or `chatterbox`, which can clone a
-voice from a reference clip) — see "Swapping backends" below.
+swappable (`--tts-backend kokoro` (the deployed default), `vits`, `chatterbox`,
+or `elevenlabs`) — see "Swapping backends" below.
 
 ## What the M5Stick does today
 
@@ -215,8 +216,11 @@ The provisioned dashboard path is
 
 ## TTS backends
 
-The deployed TTS backend is VITS-Umamusume. Chatterbox remains available for
-local voice cloning, and ElevenLabs is an optional hosted backend. The
+The deployed TTS backend is Kokoro-82M with the `af_bella` American-English
+female voice. It runs on CPU and uses very little VRAM, leaving the GTX 1650
+available for Whisper. VITS-Umamusume remains available for the original
+Umamusume voice, Chatterbox remains available for local voice cloning, and
+ElevenLabs is an optional hosted backend. The
 ElevenLabs backend reads its API key, voice ID, model ID, and optional credit
 estimate from environment variables or a Kubernetes Secret; none of those
 values belong in Git. It exports character usage and estimated-credit metrics
@@ -239,7 +243,8 @@ voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
     openai_compatible.py    OpenAI-compatible Qwen3 + MCP agent backend
                             (llama.cpp, vLLM, LM Studio, LiteLLM)
     chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS)
-    vits.py                 VITS-Umamusume           ("vits", TTS, default)
+    kokoro.py               Kokoro-82M              ("kokoro", TTS, default)
+    vits.py                 VITS-Umamusume           ("vits", TTS)
   cli.py                  the flags every entrypoint shares, assembled from
                           the registries — this is why no entrypoint mentions
                           a concrete backend
@@ -287,7 +292,7 @@ android_companion/      the Android app that bridges the Stick's BLE
 
 tools/
   echo_server.py        same WebSocket protocol as bridge_server.py, but skips
-                         STT/LLM/VITS entirely — mic audio goes straight
+                         STT/LLM/TTS entirely — mic audio goes straight
                          back to the speaker. Use this to tell a network/
                          firmware problem apart from a model problem.
   make_face_sprites.py  extracts the pixel-art face sheet into both

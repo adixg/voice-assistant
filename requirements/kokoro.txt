@@ -1,0 +1,4 @@
+# Kokoro-82M with the American-English female af_bella voice.
+# The service pins inference to CPU by default so Whisper retains the GPU.
+kokoro>=0.9.4
+soundfile>=0.13.1

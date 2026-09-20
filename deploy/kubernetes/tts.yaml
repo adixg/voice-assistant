@@ -1,8 +1,5 @@
-# vits, not chatterbox: the only TTS backend that's free on VRAM (see
-# docs/hardware-budget.md), which matters because this pod is pinned to the
-# always-on 1650 alongside stt and (one of) the ollama pods, and it can't
-# clone a voice -- Chatterbox on the 4060 for when that node is up is
-# future work, not wired in yet.
+# Kokoro-82M: small, local female voice backend. It runs on CPU so the
+# always-on 1650 remains available to Whisper and the selected LLM.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,9 +19,9 @@ spec:
         gpu-tier: gtx1650
       containers:
         - name: tts
-          image: ghcr.io/adixg/aicompanion-tts-vits:latest
+          image: ghcr.io/adixg/aicompanion-tts-kokoro:latest
           imagePullPolicy: Always
-          args: ["--tts-backend", "vits"]
+          args: ["--tts-backend", "kokoro", "--kokoro-voice", "af_bella", "--kokoro-language", "a", "--kokoro-device", "cpu"]
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
           ports:
