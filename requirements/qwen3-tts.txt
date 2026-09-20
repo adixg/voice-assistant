@@ -1,0 +1,5 @@
+# Experimental, isolated Qwen3-TTS probe; do not install into the production
+# VITS/Chatterbox environment. Install a CUDA-compatible torch build first if
+# pip does not select one automatically for this host.
+qwen-tts
+soundfile
