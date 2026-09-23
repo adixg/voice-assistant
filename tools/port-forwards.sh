@@ -9,10 +9,20 @@ if ! sudo -v; then
   exit 1
 fi
 
+STOP=0
+
 cleanup() {
-  kill "${PROM_PID:-}" "${GRAFANA_PID:-}" 2>/dev/null || true
+  [[ -n "${PROM_PID:-}" ]] && kill "$PROM_PID" 2>/dev/null || true
+  [[ -n "${GRAFANA_PID:-}" ]] && kill "$GRAFANA_PID" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+
+stop() {
+  STOP=1
+  cleanup
+}
+
+trap stop INT TERM
+trap cleanup EXIT
 
 while true; do
   sudo k3s kubectl -n aicompanion port-forward svc/prometheus 9090:9090 &
@@ -25,5 +35,6 @@ while true; do
   wait -n "$PROM_PID" "$GRAFANA_PID" || true
 
   cleanup
+  [[ "$STOP" -eq 1 ]] && exit 0
   sleep 3
 done
