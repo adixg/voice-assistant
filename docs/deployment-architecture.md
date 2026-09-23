@@ -153,6 +153,39 @@ been measured for the split version yet (`benchmarks/latency/`, Phase 4).
 Splitting was still the right call given the goals above, but
 it's a real, deliberate tradeoff, not a free one.
 
+## Memory budget on arch-ssd (8GB, shared by everything)
+
+`arch-ssd` has 7.6GiB of RAM (one 8GB stick, one empty slot) and runs the
+whole always-on stack plus a desktop session. Measured 2026-09-23 with
+everything running: ~340MB available and 1.5GB in swap, and two pods had
+already been killed for it (`llama-cpp-gtx1650` OOM-killed once, `tts`
+restarted 5 times) before any of the guardrails below existed.
+
+- **Every workload here has a memory limit and a priority class**
+  (`tests/test_deployment_manifests.py` enforces it). `voice-critical`
+  (llama-cpp, stt, tts, agent, gateway, gpu-scheduler) outranks the default;
+  `monitoring` (grafana, tempo, prometheus, kube-state-metrics, dcgm-exporter,
+  searxng) is below it, so monitoring is evicted first. Definitions:
+  `deploy/kubernetes/priorityclasses.yaml`.
+- **Requests sit near measured use, limits well above it.** A limit that is
+  too tight is worse than none: Tempo replays its WAL on each start and a
+  384Mi limit OOM-killed it in a crash loop (now 1Gi), so size a limit to the
+  startup peak, not the steady state.
+- **`tts` and the LLM pods use `strategy: Recreate`**: a rolling update would
+  briefly hold two ~1GB copies of the pod on this node.
+- **`tools/lean-mode.sh`** pauses optional pods to free RAM on demand (`on`:
+  Grafana+Tempo, ~0.2GB, nothing functional lost; `deep`: also Prometheus,
+  kube-state-metrics and this node's dcgm-exporter, taking available RAM from
+  ~340MB to ~1.1GB, but the agent's status/GPU tools stop answering; `max`:
+  also SearXNG, so web search stops; `off` restores). The voice pipeline is
+  never touched. dcgm-exporter is a DaemonSet, so it is paused per node with
+  the `aicompanion/monitoring-paused` node label, which its affinity excludes.
+- Not applied via whole-manifest `kubectl apply`: `agent` (the GPU scheduler
+  retargets its `LLM_HOST`/`LLM_MODEL` live, so a full apply would undo that)
+  and `llama-cpp-gtx1650` (its manifest carries `--jinja` and a readiness probe
+  that were never applied live). Their limits were patched onto the live
+  objects with `kubectl set resources` instead.
+
 ## Why k3s, not plain docker-compose or full upstream k8s
 
 - `docker-compose` doesn't do multi-node scheduling at all — it can't

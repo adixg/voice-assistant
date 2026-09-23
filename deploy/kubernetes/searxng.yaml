@@ -34,6 +34,7 @@ spec:
       # node so it remains available when the RTX 4060 laptop is offline.
       nodeSelector:
         gpu-tier: gtx1650
+      priorityClassName: monitoring
       containers:
         - name: searxng
           image: searxng/searxng:latest

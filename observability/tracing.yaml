@@ -36,11 +36,19 @@ spec:
     metadata: {labels: {app: tempo}}
     spec:
       nodeSelector: {gpu-tier: gtx1650}
+      priorityClassName: monitoring
       containers:
         - name: tempo
           image: grafana/tempo:2.7.2
           args: ["-config.file=/etc/tempo/tempo.yaml"]
           ports: [{name: http, containerPort: 3200}, {name: otlp-grpc, containerPort: 4317}]
+          # Steady state is ~95-315Mi (2026-09-23), but on every start Tempo
+          # replays its WAL and flushes a block, which peaked well above 384Mi:
+          # a 384Mi limit OOM-killed it in a crash loop within seconds of
+          # each start. The limit has to cover that startup spike.
+          resources:
+            requests: {memory: 128Mi}
+            limits: {memory: 1Gi}
           volumeMounts: [{name: config, mountPath: /etc/tempo}, {name: data, mountPath: /var/tempo}]
       volumes: [{name: config, configMap: {name: tempo-config}}, {name: data, persistentVolumeClaim: {claimName: tempo-data-arch}}]
 ---

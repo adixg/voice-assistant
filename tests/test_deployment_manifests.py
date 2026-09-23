@@ -71,3 +71,68 @@ def test_dcgm_exporter_has_both_gpu_tiers_and_required_metrics_port():
     assert "values: [gtx1650, rtx4060]" in manifest
     assert "containerPort: 9400" in manifest
     assert "name: metrics" in manifest
+
+
+# --- memory guardrails for the 8GB always-on node (arch-ssd) -----------------
+
+import yaml
+
+ARCH_SSD_MANIFESTS = (
+    "deploy/kubernetes/agent.yaml",
+    "deploy/kubernetes/gateway.yaml",
+    "deploy/kubernetes/llama-cpp-gtx1650.yaml",
+    "deploy/kubernetes/searxng.yaml",
+    "deploy/kubernetes/stt.yaml",
+    "deploy/kubernetes/tts.yaml",
+    "controller/gpu_scheduler/deploy.yaml",
+    "observability/grafana/grafana.yaml",
+    "observability/kubernetes-metrics.yaml",
+    "observability/prometheus/prometheus.yaml",
+    "observability/tracing.yaml",
+)
+
+
+def arch_ssd_workloads():
+    for path in ARCH_SSD_MANIFESTS:
+        for doc in yaml.safe_load_all(read(path)):
+            if doc and doc.get("kind") in ("Deployment", "DaemonSet"):
+                yield path, doc
+
+
+def test_every_arch_ssd_workload_has_a_memory_limit_and_a_priority_class():
+    """arch-ssd has 8GB shared by everything, so an unbounded pod can push the
+    whole node into swap. Every workload needs a memory limit (so a leak gets
+    the pod restarted) and a priority class (so monitoring is evicted before
+    the voice pipeline)."""
+    seen = 0
+    for path, doc in arch_ssd_workloads():
+        seen += 1
+        name = doc["metadata"]["name"]
+        spec = doc["spec"]["template"]["spec"]
+        assert spec.get("priorityClassName") in ("voice-critical", "monitoring"), (path, name)
+        for container in spec["containers"]:
+            limits = container.get("resources", {}).get("limits", {})
+            assert "memory" in limits, (path, name, container["name"])
+    assert seen >= 11
+
+
+def test_priority_classes_rank_voice_above_default_above_monitoring():
+    classes = {d["metadata"]["name"]: d["value"]
+               for d in yaml.safe_load_all(read("deploy/kubernetes/priorityclasses.yaml"))}
+    assert classes["voice-critical"] > 0 > classes["monitoring"]
+
+
+def test_lean_mode_pause_label_matches_the_dcgm_daemonset_affinity():
+    script = read("tools/lean-mode.sh")
+    manifest = read("observability/kubernetes-metrics.yaml")
+    assert 'PAUSE_LABEL="aicompanion/monitoring-paused"' in script
+    assert "key: aicompanion/monitoring-paused" in manifest
+    assert "operator: NotIn" in manifest
+
+
+def test_lean_mode_never_touches_the_voice_pipeline():
+    script = read("tools/lean-mode.sh")
+    for name in ("llama-cpp", "stt", "tts", "agent", "gateway", "gpu-scheduler"):
+        for line in script.splitlines():
+            if line.startswith(("UI=", "METRICS=", "SEARCH=")):
+                assert name not in line.replace("kube-state-metrics", "")

@@ -61,12 +61,18 @@ spec:
     metadata: {labels: {app: prometheus}}
     spec:
       nodeSelector: {gpu-tier: gtx1650}
+      priorityClassName: monitoring
       serviceAccountName: prometheus
       containers:
         - name: prometheus
           image: prom/prometheus:v3.7.3
           args: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
           ports: [{containerPort: 9090, name: http}]
+          # Measured ~40Mi (2026-09-23) but it grows with retained series and
+          # spikes replaying its WAL on start, so the limit is deliberately loose.
+          resources:
+            requests: {memory: 64Mi}
+            limits: {memory: 512Mi}
           volumeMounts:
             - {name: config, mountPath: /etc/prometheus}
             - {name: data, mountPath: /prometheus}

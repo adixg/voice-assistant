@@ -21,6 +21,7 @@ spec:
       nodeSelector:
         gpu-tier: gtx1650
       runtimeClassName: nvidia
+      priorityClassName: voice-critical
       containers:
         - name: llama-server
           # Pin this tag/digest after the first live validation; latest is
@@ -51,8 +52,14 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
+          # Measured ~720-785Mi (2026-09-23) with all layers offloaded to the
+          # GPU. The limit is generous because the cgroup also counts the GGUF's
+          # page cache while it loads; that part is reclaimable, but a tight
+          # limit would make the load crawl.
           resources:
+            requests: {memory: 768Mi}
             limits:
+              memory: 2Gi
               nvidia.com/gpu: 1
           volumeMounts:
             - name: model-cache

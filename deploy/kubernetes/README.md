@@ -86,6 +86,7 @@ applied and whenever either file changes.
 kubectl apply -f namespace.yaml
 # create/update aicompanion-personal-data here (command above)
 kubectl apply -f runtimeclass.yaml
+kubectl apply -f priorityclasses.yaml   # before any workload that sets priorityClassName
 kubectl apply -f nvidia-device-plugin.yaml
 kubectl apply -f llama-cpp-gtx1650.yaml
 kubectl apply -f llama-cpp-rtx4060.yaml

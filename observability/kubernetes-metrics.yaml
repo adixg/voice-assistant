@@ -37,6 +37,7 @@ spec:
     metadata: {labels: {app: kube-state-metrics}}
     spec:
       nodeSelector: {gpu-tier: gtx1650}
+      priorityClassName: monitoring
       serviceAccountName: kube-state-metrics
       automountServiceAccountToken: true
       containers:
@@ -46,6 +47,10 @@ spec:
           ports:
             - {containerPort: 8080, name: metrics}
             - {containerPort: 8081, name: telemetry}
+          # Measured ~19Mi (2026-09-23).
+          resources:
+            requests: {memory: 32Mi}
+            limits: {memory: 128Mi}
           livenessProbe:
             httpGet: {path: /livez, port: metrics}
             initialDelaySeconds: 5
@@ -90,6 +95,13 @@ spec:
                   - key: gpu-tier
                     operator: In
                     values: [gtx1650, rtx4060]
+                  # tools/lean-mode.sh labels a node with this to free the
+                  # exporter's ~430Mi on that node only, leaving the other
+                  # node's exporter running. Unlabelled nodes match as before.
+                  - key: aicompanion/monitoring-paused
+                    operator: NotIn
+                    values: ["true"]
+      priorityClassName: monitoring
       runtimeClassName: nvidia
       containers:
         - name: dcgm-exporter

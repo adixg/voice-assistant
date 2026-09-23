@@ -28,11 +28,16 @@ spec:
     metadata: {labels: {app: grafana}}
     spec:
       nodeSelector: {gpu-tier: gtx1650}
+      priorityClassName: monitoring
       containers:
         - name: grafana
           image: grafana/grafana:12.1.1
           env: [{name: GF_SECURITY_ADMIN_PASSWORD, value: admin}]
           ports: [{containerPort: 3000, name: http}]
+          # Measured ~90-115Mi idle (2026-09-23); limit leaves ~3x headroom.
+          resources:
+            requests: {memory: 96Mi}
+            limits: {memory: 384Mi}
           volumeMounts:
             - {name: datasource, mountPath: /etc/grafana/provisioning/datasources}
             - {name: dashboard-provider, mountPath: /etc/grafana/provisioning/dashboards}

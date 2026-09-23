@@ -1,0 +1,24 @@
+# arch-ssd has 8GB of RAM shared by the whole stack, so who gets squeezed first
+# under memory pressure matters. Kubernetes evicts lower-priority pods first
+# and the kernel's OOM killer scores pods by how far they exceed their
+# memory request, so:
+#   voice-critical  the pipeline that answers the Stick (llama-cpp, stt, tts,
+#                   agent, gateway, gpu-scheduler). Never preempted by, or
+#                   evicted before, anything below.
+#   monitoring      dashboards, traces, metrics and search. Below the default
+#                   priority of 0, so they are the first to go.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: voice-critical
+value: 100000
+globalDefault: false
+description: The voice pipeline that answers the Stick; last to be evicted.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: monitoring
+value: -100
+globalDefault: false
+description: Dashboards, traces, metrics and search; first to be evicted.
