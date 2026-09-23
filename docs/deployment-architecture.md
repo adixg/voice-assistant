@@ -180,6 +180,17 @@ restarted 5 times) before any of the guardrails below existed.
   also SearXNG, so web search stops; `off` restores). The voice pipeline is
   never touched. dcgm-exporter is a DaemonSet, so it is paused per node with
   the `aicompanion/monitoring-paused` node label, which its affinity excludes.
+- **`tools/obs_tui.py`** is a terminal dashboard that replaces opening Grafana
+  in a browser day to day: host RAM/swap/memory-pressure (from `/proc`), GPU
+  util/VRAM/temp/power, per-pod readiness/restarts/OOM kills/memory vs limit,
+  and gateway turn + per-stage + per-route latency, each toggled with
+  `--NAME`/`--no-NAME` or `--only a,b`. Standard library only; one full frame
+  measured 26MiB peak RSS, versus ~500MB for Firefox plus the Grafana pod. It
+  reads Prometheus (so lean-mode `on` or lighter, not `deep`); traces in Tempo
+  are not shown, use Grafana for those. Per-container memory does not exist in
+  Prometheus here (only `process_resident_memory_bytes` for the four Python
+  services), so the pods panel shows RSS vs limit for those and just the limit
+  for the rest.
 - Not applied via whole-manifest `kubectl apply`: `agent` (the GPU scheduler
   retargets its `LLM_HOST`/`LLM_MODEL` live, so a full apply would undo that)
   and `llama-cpp-gtx1650` (its manifest carries `--jinja` and a readiness probe
