@@ -5,6 +5,7 @@
 #   tools/lean-mode.sh deep     also pause metrics          (~0.7 GB total)
 #   tools/lean-mode.sh max      also pause web search       (~0.8 GB total)
 #   tools/lean-mode.sh dashboards  resume just Grafana + Tempo, leave deeper levels as-is
+#   tools/lean-mode.sh traces   resume just Tempo (for obs_tui.py --traces), Grafana stays off
 #   tools/lean-mode.sh off      bring everything back
 #   tools/lean-mode.sh status   what's running, plus free memory
 #
@@ -67,9 +68,10 @@ case "${1:-status}" in
   deep) pause "${UI[@]}" "${METRICS[@]}"; pause_dcgm ;;
   max)  pause "${UI[@]}" "${METRICS[@]}" "${SEARCH[@]}"; pause_dcgm ;;
   dashboards) kc scale deployment "${UI[@]}" --replicas=1 ;;
+  traces) kc scale deployment tempo --replicas=1 ;;
   off)  restore ;;
   status) ;;
-  *) sed -n '2,11p' "$0"; exit 2 ;;
+  *) sed -n '2,12p' "$0"; exit 2 ;;
 esac
 
 # Give the cluster a few seconds to actually stop/start pods before reporting.

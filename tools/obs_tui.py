@@ -12,8 +12,11 @@ Panels (each has --NAME / --no-NAME, all on by default):
     gpu      per-GPU utilisation, VRAM, temperature and power (DCGM)
     pods     per-pod readiness, restarts, OOM kills, and memory vs its limit
     latency  gateway turn and per-stage latency, and HTTP latency by route
+    traces   the last few real Stick turns from Tempo, split into stt / agent
+             (LLM) / tts. Off by default, because Tempo is normally paused:
+             run `tools/lean-mode.sh traces` first, then `--traces`.
 
-Everything but `memory` reads Prometheus. tools/port-forwards.sh exposes it on
+Everything but `memory` and `traces` reads Prometheus. tools/port-forwards.sh exposes it on
 localhost:9090; point --prometheus (or $PROMETHEUS_URL) elsewhere if needed.
 It needs `tools/lean-mode.sh` at `on` or lighter, since `deep` pauses Prometheus.
 Standard library only, on purpose.
@@ -29,15 +32,26 @@ from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-PANELS = ("memory", "gpu", "pods", "latency")
+PANELS = ("memory", "gpu", "pods", "latency", "traces")
+OPT_IN = ("traces",)  # off unless asked for; needs Tempo, which lean-mode pauses
 # process_resident_memory_bytes is only scraped from these Python services.
 RSS_SERVICES = ("gateway", "agent", "stt", "tts")
 NOISE_ROUTES = "/health|/metrics"
+# On a Prometheus failure, keep showing a panel's last good data (marked stale)
+# for this long before giving up and showing the error: a tunnel restart or a
+# pod rollout takes a few seconds and shouldn't wipe the screen.
+STALE_SECONDS = 60
 WINDOW_RE = re.compile(r"^\d+[smhd]$")
 
 
 class PromError(RuntimeError):
-    pass
+    source = "prometheus"
+    hint = "is tools/port-forwards.sh running, and lean-mode below `deep`?"
+
+
+class TempoError(PromError):
+    source = "tempo"
+    hint = "start it with tools/lean-mode.sh traces (tools/port-forwards.sh tunnels it)"
 
 
 def fetch_json(url, timeout=5):
@@ -210,8 +224,9 @@ def panel_latency(style, base, window, get_json=fetch_json):
     stage = "aicompanion_gateway_stage_duration_seconds"
     s50 = {m["stage"]: v for m, v in _q(base, get_json, 0.5, ", stage", stage, window)}
     s95 = {m["stage"]: v for m, v in _q(base, get_json, 0.95, ", stage", stage, window)}
+    width = max((len(n) for n in s50), default=0)
     for name in sorted(s50):
-        lines.append(f"    {name:8} p50 {_secs(s50[name]):>8}   p95 {_secs(s95.get(name, 0)):>8}")
+        lines.append(f"    {name:{width}} p50 {_secs(s50[name]):>8}   p95 {_secs(s95.get(name, 0)):>8}")
     http = "aicompanion_http_request_duration_seconds"
     matcher = f'{{route!~"{NOISE_ROUTES}"}}'
     counts = prom(base, f"sum by (exported_service, route) (increase({http}_count{matcher}[{window}]))", get_json)
@@ -225,15 +240,98 @@ def panel_latency(style, base, window, get_json=fetch_json):
     return lines
 
 
+# ------------------------------------------------------------------ traces
+# Server-side span names, one per pipeline stage. The gateway's own client span
+# for a streaming call closes when the response *starts* (5ms for the agent),
+# so the server-side spans are the ones that hold the real duration.
+STAGES = (("stt", "POST /transcribe"), ("agent", "POST /ask_stream"), ("tts", "POST /synth"))
+STAGE_STYLE = {"stt": ("c", "▓"), "agent": ("y", "█"), "tts": ("g", "▒")}
+UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def window_seconds(window):
+    return int(window[:-1]) * UNIT_SECONDS[window[-1]]
+
+
+def tempo_search(base, name, start, end, get_json):
+    query = urlencode({"q": '{ name = "%s" }' % name, "limit": 50, "spss": 100,
+                       "start": int(start), "end": int(end)})
+    try:
+        return get_json(f"{base.rstrip('/')}/api/search?{query}").get("traces", [])
+    except PromError as exc:
+        raise TempoError(str(exc)) from exc
+
+
+def collect_turns(base, window, get_json=fetch_json, now=time.time):
+    """Stick turns, newest first, each {start_ns, end_ns, stt, agent, tts} in ms.
+
+    Queried one stage at a time: a single regex over all three names returned
+    only some of a turn's spans from Tempo. A trace is skipped when it was
+    started directly at a service (root span "POST /..."), since that is someone
+    calling an endpoint rather than the gateway running a turn. A live Stick
+    connection is one long-lived WebSocket whose root span has not finished, so
+    its trace holds many turns; a new turn begins at each transcribe span.
+    """
+    end = now()
+    events = {}  # trace id -> [(start_ns, stage, dur_ns)]
+    for stage, name in STAGES:
+        for trace in tempo_search(base, name, end - window_seconds(window), end, get_json):
+            if (trace.get("rootTraceName") or "").startswith("POST /"):
+                continue
+            for span_set in trace.get("spanSets") or [trace.get("spanSet") or {}]:
+                for span in span_set.get("spans", []):
+                    events.setdefault(trace["traceID"], []).append(
+                        (int(span["startTimeUnixNano"]), stage, int(span["durationNanos"])))
+    turns = []
+    for trace_events in events.values():
+        current = None
+        for start, stage, dur in sorted(trace_events):
+            if stage == "stt" or current is None:
+                current = {"start_ns": start, "end_ns": start, "stt": 0.0, "agent": 0.0, "tts": 0.0}
+                turns.append(current)
+            current[stage] += dur / 1e6
+            current["end_ns"] = max(current["end_ns"], start + dur)
+    return sorted(turns, key=lambda t: t["start_ns"], reverse=True)
+
+
+def stage_bar(style, turn, width=30):
+    total = sum(turn[s] for s, _ in STAGES) or 1.0
+    out = ""
+    for stage, _ in STAGES:
+        code, char = STAGE_STYLE[stage]
+        out += style(code, char * max(1 if turn[stage] else 0, round(width * turn[stage] / total)))
+    return out
+
+
+def panel_traces(style, base, window, count, get_json=fetch_json, now=time.time):
+    lines = heading(style, "traces", f"(Tempo, last {window}, newest first)")
+    turns = collect_turns(base, window, get_json, now)[:count]
+    if not turns:
+        return lines + [style("d", "  no Stick turns in this window (direct calls to a service are excluded)")]
+    lines.append("  " + "  ".join(style(STAGE_STYLE[s][0], f"{STAGE_STYLE[s][1]} {s}") for s, _ in STAGES)
+                 + style("d", "   (agent is mostly the LLM)"))
+    for turn in turns:
+        clock = time.strftime("%H:%M:%S", time.localtime(turn["start_ns"] / 1e9))
+        slowest = max((s for s, _ in STAGES), key=lambda s: turn[s])
+        lines.append(f"  {clock}  {_secs((turn['end_ns'] - turn['start_ns']) / 1e9):>7}  {stage_bar(style, turn)}  "
+                     + "  ".join(f"{s} {_secs(turn[s] / 1000)}" for s, _ in STAGES)
+                     + style("d", f"  slowest: {slowest}"))
+    return lines
+
+
 # ---------------------------------------------------------------- assembly
-def build_frame(args, style, get_json=fetch_json, **overrides):
-    """Every panel is isolated: one failing (Prometheus down) can't blank the rest."""
+def build_frame(args, style, get_json=fetch_json, cache=None, **overrides):
+    """Every panel is isolated: one failing (Prometheus down) can't blank the rest.
+
+    `cache` (a dict the caller keeps between frames) holds each panel's last good
+    lines so a brief outage shows them, marked stale, instead of an error."""
     base = args.prometheus
     makers = {
         "memory": lambda: panel_memory(style, **overrides.get("memory", {})),
         "gpu": lambda: panel_gpu(style, base, get_json),
         "pods": lambda: panel_pods(style, base, get_json),
         "latency": lambda: panel_latency(style, base, args.window, get_json),
+        "traces": lambda: panel_traces(style, args.tempo, args.window, args.turns, get_json),
     }
     frame = [style("b", "aicompanion") + style("d", f"  {time.strftime('%H:%M:%S')}  "
                                                     f"prometheus={base}  refresh={args.interval:g}s  Ctrl-C quits")]
@@ -241,11 +339,19 @@ def build_frame(args, style, get_json=fetch_json, **overrides):
         if not getattr(args, name):
             continue
         try:
-            frame += [""] + makers[name]()
+            lines = makers[name]()
+            if cache is not None:
+                cache[name] = (time.time(), lines)
+            frame += [""] + lines
         except PromError as exc:
-            frame += [""] + heading(style, name) + [
-                style("r", f"  prometheus unreachable: {exc}"),
-                style("d", "  is tools/port-forwards.sh running, and lean-mode below `deep`?")]
+            age = time.time() - cache[name][0] if cache and name in cache else None
+            if age is not None and age <= STALE_SECONDS:
+                old = cache[name][1]
+                frame += ["", old[0], style("y", f"  stale: {exc.source} unreachable for {age:.0f}s, showing last data")] + old[1:]
+            else:
+                frame += [""] + heading(style, name) + [
+                    style("r", f"  {exc.source} unreachable: {exc}"),
+                    style("d", f"  {exc.hint}")]
     return frame
 
 
@@ -253,11 +359,14 @@ def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     for name in PANELS:
-        ap.add_argument(f"--{name}", action=argparse.BooleanOptionalAction, default=True,
-                        help=f"show the {name} panel (default: on)")
+        ap.add_argument(f"--{name}", action=argparse.BooleanOptionalAction, default=name not in OPT_IN,
+                        help=f"show the {name} panel (default: {'off' if name in OPT_IN else 'on'})")
     ap.add_argument("--only", metavar="LIST", help="comma list of panels to show, "
                     f"turning all others off (from: {', '.join(PANELS)})")
     ap.add_argument("--prometheus", default=os.environ.get("PROMETHEUS_URL", "http://localhost:9090"))
+    ap.add_argument("--tempo", default=os.environ.get("TEMPO_URL", "http://localhost:3200"),
+                    help="Tempo URL for the traces panel (env TEMPO_URL)")
+    ap.add_argument("--turns", type=int, default=5, help="how many recent turns the traces panel shows")
     ap.add_argument("--interval", type=float, default=5.0, help="seconds between refreshes")
     ap.add_argument("--window", default="1h", help="latency window, e.g. 15m, 1h, 1d (default: 1h)")
     ap.add_argument("--once", action="store_true", help="print one frame and exit")
@@ -286,10 +395,11 @@ def main(argv=None):
     if not interactive:
         print("\n".join(build_frame(args, style)))
         return 0
+    cache = {}
     try:
         sys.stdout.write("\033[?25l\033[2J")  # hide cursor, clear once
         while True:
-            frame = build_frame(args, style)
+            frame = build_frame(args, style, cache=cache)
             sys.stdout.write("\033[H" + "\033[K\n".join(frame) + "\033[K\n\033[J")
             sys.stdout.flush()
             time.sleep(args.interval)

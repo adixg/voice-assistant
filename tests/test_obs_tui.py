@@ -35,9 +35,10 @@ MEM = {"memory": {"meminfo": lambda: MEMINFO, "pressure": lambda: 0.0}}
 
 
 # --------------------------------------------------------------- arguments
-def test_every_panel_is_on_by_default():
+def test_every_panel_is_on_by_default_except_the_opt_in_ones():
     args = parse()
-    assert all(getattr(args, p) for p in obs_tui.PANELS)
+    assert all(getattr(args, p) for p in obs_tui.PANELS if p not in obs_tui.OPT_IN)
+    assert not any(getattr(args, p) for p in obs_tui.OPT_IN)
 
 
 def test_each_panel_can_be_switched_off_on_its_own():
@@ -191,3 +192,162 @@ def test_latency_queries_exclude_health_and_metrics_noise():
 def test_prom_errors_are_reported_not_swallowed():
     with pytest.raises(obs_tui.PromError):
         obs_tui.prom("http://p", "up", lambda _u: {"status": "error", "error": "bad query"})
+
+
+# ------------------------------------------------- brief outages stay quiet
+def test_a_brief_outage_shows_last_data_marked_stale_not_an_error(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(obs_tui.time, "time", lambda: clock[0])
+    cache = {}
+    args = parse("--only", "pods")
+    good = obs_tui.build_frame(args, PLAIN, fake_prom(pod_routes()), cache=cache)
+    assert any("stt-abc" in line for line in good)
+
+    clock[0] += 5                        # Prometheus goes away for 5 seconds
+    during = "\n".join(obs_tui.build_frame(args, PLAIN, down, cache=cache))
+    assert "stt-abc" in during           # last good rows are still on screen
+    assert "stale" in during and "5s" in during
+    assert "port-forwards.sh" not in during     # the full error block is not shown
+
+
+def test_an_outage_longer_than_the_grace_period_shows_the_real_error(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(obs_tui.time, "time", lambda: clock[0])
+    cache = {}
+    args = parse("--only", "pods")
+    obs_tui.build_frame(args, PLAIN, fake_prom(pod_routes()), cache=cache)
+
+    clock[0] += obs_tui.STALE_SECONDS + 1
+    later = "\n".join(obs_tui.build_frame(args, PLAIN, down, cache=cache))
+    assert "prometheus unreachable" in later and "stt-abc" not in later   # old data must not linger
+
+
+def test_no_cache_means_no_stale_data_on_first_failure():
+    text = "\n".join(obs_tui.build_frame(parse("--only", "pods"), PLAIN, down, cache={}))
+    assert "prometheus unreachable" in text and "stale" not in text
+
+
+def test_a_recovered_panel_replaces_the_stale_one(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(obs_tui.time, "time", lambda: clock[0])
+    cache = {}
+    args = parse("--only", "pods")
+    obs_tui.build_frame(args, PLAIN, fake_prom(pod_routes()), cache=cache)
+    clock[0] += 3
+    obs_tui.build_frame(args, PLAIN, down, cache=cache)
+    clock[0] += 3
+    back = "\n".join(obs_tui.build_frame(args, PLAIN, fake_prom(pod_routes()), cache=cache))
+    assert "stale" not in back and "stt-abc" in back
+
+
+# ------------------------------------------------------------------ traces
+NS = 1_000_000_000
+
+
+def span(start_s, dur_ms):
+    return {"spanID": "x", "startTimeUnixNano": str(int(start_s * NS)), "durationNanos": str(int(dur_ms * 1e6))}
+
+
+def tempo(traces_by_stage):
+    """A get_json for Tempo's search: answers by the span name in the TraceQL."""
+    def get_json(url):
+        q = parse_qs(urlparse(url).query)["q"][0]
+        for name, traces in traces_by_stage.items():
+            if f'"{name}"' in q:
+                return {"traces": traces}
+        return {"traces": []}
+    return get_json
+
+
+def trace(tid, root, spans):
+    return {"traceID": tid, "rootTraceName": root, "spanSets": [{"spans": spans}]}
+
+
+NOW = 10_000.0
+
+
+def turn_traces():
+    return {
+        "POST /transcribe": [trace("aaa", "HTTP /stick", [span(9000, 2000)])],
+        "POST /ask_stream": [trace("aaa", "HTTP /stick", [span(9002, 8000)])],
+        "POST /synth": [trace("aaa", "HTTP /stick", [span(9010, 6000)])],
+    }
+
+
+def test_traces_are_off_by_default_and_on_with_the_flag_or_only():
+    assert parse().traces is False
+    assert parse("--traces").traces is True
+    assert parse("--only", "traces").traces is True and parse("--only", "traces").gpu is False
+
+
+def test_a_turn_is_split_into_stt_agent_and_tts_from_the_server_side_spans():
+    (turn,) = obs_tui.collect_turns("http://t", "1h", tempo(turn_traces()), now=lambda: NOW)
+    assert (turn["stt"], turn["agent"], turn["tts"]) == (2000, 8000, 6000)
+    # from the stt span starting at t=9000s to the tts span ending at 9010+6 = 9016s
+    assert turn["end_ns"] - turn["start_ns"] == 16 * NS
+
+
+def test_calls_made_directly_to_a_service_are_not_stick_turns():
+    traces = turn_traces()
+    traces["POST /synth"].append(trace("direct", "POST /synth", [span(9500, 3000)]))
+    turns = obs_tui.collect_turns("http://t", "1h", tempo(traces), now=lambda: NOW)
+    assert len(turns) == 1
+
+
+def test_a_long_lived_websocket_trace_yields_one_turn_per_transcribe():
+    """A Stick connection is one WebSocket whose root span has not finished (no
+    root name yet), so a single trace holds many turns."""
+    traces = {
+        "POST /transcribe": [trace("ws", None, [span(100, 1000), span(200, 1500)])],
+        "POST /ask_stream": [trace("ws", None, [span(101, 4000), span(202, 5000)])],
+        "POST /synth": [trace("ws", None, [span(106, 2000), span(208, 3000)])],
+    }
+    turns = obs_tui.collect_turns("http://t", "1h", tempo(traces), now=lambda: NOW)
+    assert [(t["stt"], t["agent"], t["tts"]) for t in turns] == [(1500, 5000, 3000), (1000, 4000, 2000)]  # newest first
+
+
+def test_a_failed_turn_with_no_tts_span_is_still_shown():
+    traces = turn_traces()
+    traces["POST /synth"] = []
+    (turn,) = obs_tui.collect_turns("http://t", "1h", tempo(traces), now=lambda: NOW)
+    assert turn["tts"] == 0 and turn["agent"] == 8000
+
+
+def test_traces_panel_shows_total_stages_and_the_slowest():
+    text = "\n".join(obs_tui.panel_traces(PLAIN, "http://t", "1h", 5, tempo(turn_traces()), now=lambda: NOW))
+    assert "stt 2.00s" in text and "agent 8.00s" in text and "tts 6.00s" in text
+    assert "slowest: agent" in text and "16.00s" in text
+    assert "▓" in text and "█" in text and "▒" in text
+
+
+def test_traces_panel_limits_the_number_of_turns():
+    traces = {
+        "POST /transcribe": [trace("ws", None, [span(100 + i * 10, 500) for i in range(8)])],
+        "POST /ask_stream": [], "POST /synth": []}
+    lines = obs_tui.panel_traces(PLAIN, "http://t", "1h", 3, tempo(traces), now=lambda: NOW)
+    assert len([l for l in lines if "slowest:" in l]) == 3
+
+
+def test_traces_panel_says_when_there_are_no_turns():
+    text = "\n".join(obs_tui.panel_traces(PLAIN, "http://t", "1h", 5, tempo({}), now=lambda: NOW))
+    assert "no Stick turns" in text
+
+
+def test_tempo_being_off_is_reported_as_tempo_with_the_lean_mode_hint():
+    frame = "\n".join(obs_tui.build_frame(parse("--only", "traces"), PLAIN, down))
+    assert "tempo unreachable" in frame and "lean-mode.sh traces" in frame
+    assert "prometheus" not in frame.split("──", 1)[1].split("\n", 1)[1]
+
+
+def test_the_search_is_bounded_to_the_requested_window():
+    seen = []
+
+    def spy(url):
+        seen.append(parse_qs(urlparse(url).query))
+        return {"traces": []}
+    obs_tui.collect_turns("http://t", "15m", spy, now=lambda: NOW)
+    assert all(int(q["end"][0]) - int(q["start"][0]) == 900 for q in seen) and len(seen) == 3
+
+
+def test_window_seconds():
+    assert [obs_tui.window_seconds(w) for w in ("30s", "15m", "2h", "1d")] == [30, 900, 7200, 86400]

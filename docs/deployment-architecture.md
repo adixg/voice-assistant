@@ -161,6 +161,13 @@ everything running: ~340MB available and 1.5GB in swap, and two pods had
 already been killed for it (`llama-cpp-gtx1650` OOM-killed once, `tts`
 restarted 5 times) before any of the guardrails below existed.
 
+`tts` (Kokoro on CPU) is by far the largest pod and is bigger than it first
+looked: 1.6Gi right after start, 2.2Gi after one reply-sized synth, 2.8Gi after
+a ~1000-character one, and it does not shrink afterwards (measured through its
+own `process_resident_memory_bytes`). Its limit is 3Gi, and a first cut of
+1792Mi, sized from an idle reading, OOM-killed it mid-reply. Reducing this is
+the most valuable remaining RAM lever.
+
 - **Every workload here has a memory limit and a priority class**
   (`tests/test_deployment_manifests.py` enforces it). `voice-critical`
   (llama-cpp, stt, tts, agent, gateway, gpu-scheduler) outranks the default;
@@ -177,7 +184,8 @@ restarted 5 times) before any of the guardrails below existed.
   Grafana+Tempo, ~0.2GB, nothing functional lost; `deep`: also Prometheus,
   kube-state-metrics and this node's dcgm-exporter, taking available RAM from
   ~340MB to ~1.1GB, but the agent's status/GPU tools stop answering; `max`:
-  also SearXNG, so web search stops; `off` restores). The voice pipeline is
+  also SearXNG, so web search stops; `traces` starts only Tempo, for
+  `obs_tui.py --traces`; `off` restores). The voice pipeline is
   never touched. dcgm-exporter is a DaemonSet, so it is paused per node with
   the `aicompanion/monitoring-paused` node label, which its affinity excludes.
 - **`tools/obs_tui.py`** is a terminal dashboard that replaces opening Grafana
@@ -187,10 +195,24 @@ restarted 5 times) before any of the guardrails below existed.
   `--NAME`/`--no-NAME` or `--only a,b`. Standard library only; one full frame
   measured 26MiB peak RSS, versus ~500MB for Firefox plus the Grafana pod. It
   reads Prometheus (so lean-mode `on` or lighter, not `deep`); traces in Tempo
-  are not shown, use Grafana for those. Per-container memory does not exist in
+  are not shown by default: `--traces` adds a panel of the last few Stick
+  turns from Tempo split into stt / agent / tts, which needs Tempo running
+  (`tools/lean-mode.sh traces`) and is off by default. It uses the servers'
+  own spans, because the gateway's client span for a streaming call closes when
+  the response starts (5ms for the agent, whose real time is 8s). A live Stick
+  connection is one long-lived WebSocket trace holding many turns, so turns are
+  split at each `/transcribe`. Per-container memory does not exist in
   Prometheus here (only `process_resident_memory_bytes` for the four Python
   services), so the pods panel shows RSS vs limit for those and just the limit
   for the rest.
+- **`tools/port-forwards.sh` supervises each tunnel separately** (Prometheus,
+  Grafana, Tempo). It used to restart both whenever either exited, and
+  `kubectl port-forward` gives up after 60s waiting for a pod, so once lean mode
+  paused Grafana, Prometheus's healthy tunnel was torn down every ~64s and the
+  dashboard flashed errors. It now waits (`--pod-running-timeout=24h`) and uses
+  plain `kubectl` instead of `sudo`, which would have needed a password again
+  after sudo's timeout. `obs_tui.py` also keeps a panel's last data, marked
+  stale, for 60s through a brief outage.
 - Not applied via whole-manifest `kubectl apply`: `agent` (the GPU scheduler
   retargets its `LLM_HOST`/`LLM_MODEL` live, so a full apply would undo that)
   and `llama-cpp-gtx1650` (its manifest carries `--jinja` and a readiness probe
