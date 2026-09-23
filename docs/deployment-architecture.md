@@ -136,8 +136,9 @@ uses.
   `announce` + its Unix socket, and `encourage_loop`. `--enroll` mode was
   deliberately not ported; see the module docstring for why that's fine.
   It is now the primary repository/device route. `bridge_server.py` remains
-  the port-8765 fallback; the updated APK and manifest still need a live
-  Stick verification, tracked in `TODO.md`.
+  the port-8765 fallback; the updated APK is installed and the manifest is
+  applied, but a live Stick conversation through the gateway still needs
+  verifying, tracked in `TODO.md`.
 
   The speaker gate is the one pipeline stage that stayed in-process rather
   than becoming its own HTTP service: it's CPU-only (ONNX, ~24MB model) and
@@ -224,9 +225,10 @@ automated-switching design.
    and `Running` too, re-verified with the same wire-protocol test against
    the actual in-cluster pod. The Android endpoint now defaults and one-time
    migrates to `arch-ssd.<tailnet>.ts.net:30800`, and the gateway manifest
-   consumes the private profile/voiceprint through a Secret. **Still open**:
-   apply those latest deployment changes from a machine with cluster
-   credentials, install the APK, and complete the real-device
+   consumes the private profile/voiceprint through a Secret. Those deployment
+   changes are applied and the APK is installed (verified/confirmed
+   2026-09-23). **Still open**: complete the real-device
    conversation/reconnect soak.
 
-Phase 3 and 4 are unstarted; see `TODO.md` for tracking.
+Phase 3 (observability) is deployed, with dashboard polish pending; Phase 4
+(measured benchmarks) is still open; see `TODO.md` for tracking.
