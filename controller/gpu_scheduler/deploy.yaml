@@ -9,9 +9,9 @@ metadata:
 # kopf writes a last-handled-configuration annotation back onto every
 # resource it watches after each handler run, to track what it's already
 # processed. Without it, on_node_condition_change never even reaches
-# _set_agent_ollama_host -- confirmed live (2026-09-16): every node event
+# _set_agent_target -- confirmed live (2026-09-16): every node event
 # looped on `nodes "..." is forbidden ... cannot patch` until this was
-# added, and the agent Deployment's OLLAMA_HOST never budged.
+# added, and the agent Deployment's LLM_HOST (then OLLAMA_HOST) never budged.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -90,7 +90,7 @@ spec:
       # (2026-09-16) that leaving this unset lets the scheduler place the
       # controller itself on the rtx4060 node -- when that node then goes
       # down, the controller that's supposed to react to it dies at the
-      # same moment, and agent never gets failed back to ollama-gtx1650.
+      # same moment, and agent never gets failed back to llama-cpp-gtx1650.
       nodeSelector:
         gpu-tier: gtx1650
       serviceAccountName: gpu-scheduler

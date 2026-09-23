@@ -3,9 +3,13 @@
 Status: **The cluster core is live; repository/device defaults now target its
 gateway, with live device cutover verification pending.** `arch-ssd`
 (GTX 1650, native Arch): k3s live, labeled `gpu-tier=gtx1650`, with
-`ollama-gtx1650`/`stt`/`agent`/`tts` all `Running` and confirmed doing real
-CUDA inference inside their containers. `agent`'s `OLLAMA_HOST` env is
-`http://ollama-gtx1650:11434`. `tts`'s `/synth` (both TTS backends assumed a
+`llama-cpp-gtx1650`/`stt`/`agent`/`tts` all `Running` and confirmed doing real
+CUDA inference inside their containers. `agent`'s `LLM_HOST` env defaults to
+`http://llama-cpp-gtx1650:8080/v1` (the controller flips it, with `LLM_MODEL`,
+to `llama-cpp-rtx4060`/`qwen3-8b` while the laptop is up). LLM serving moved
+from Ollama to llama.cpp on 2026-09-18 (`docs/llama-cpp-migration.md`); the
+2026-09-16 bug-chain narrative below is a historical log written against the
+Ollama-era `ollama-*`/`OLLAMA_*` names, kept as-is. `tts`'s `/synth` (both TTS backends assumed a
 dev machine's conda envs -- see below) is fixed and re-verified live
 (2026-09-16): a real request now returns a real, valid synthesized wav.
 
@@ -99,7 +103,7 @@ weight as long as they're genuinely used, not present for show.
   k3s agent node.
 
 This is a real, not simulated, scheduling problem: something has to decide
-which node's Ollama instance the agent talks to, and fall back cleanly when
+which node's LLM server the agent talks to, and fall back cleanly when
 the 4060 disappears. That's what `controller/gpu_scheduler/` is for.
 
 ## Service boundary
@@ -115,10 +119,11 @@ uses.
 
 - `services/stt/` — faster-whisper over HTTP (`POST /transcribe`).
 - `services/agent/` — LLM turn-taking over HTTP (`POST /ask`,
-  `POST /ask_stream` as NDJSON). With `--llm-backend ollama` this container
-  does no GPU work itself; it's a thin client to whichever Ollama instance
-  `--host`/`$OLLAMA_HOST` points at. This is the one the GPU scheduler
-  controller retargets.
+  `POST /ask_stream` as NDJSON). This container does no GPU work itself;
+  it's a thin OpenAI-compatible client to whichever llama.cpp server
+  `$LLM_HOST` (model `$LLM_MODEL`) points at. This is the one the GPU
+  scheduler controller retargets. (The Ollama-era equivalent was
+  `--llm-backend ollama` with `$OLLAMA_HOST`/`$OLLAMA_MODEL`.)
 - `services/tts/` — chatterbox/vits over HTTP (`POST /synth`, returns
   base64 wav chunks).
 - `services/gateway/` — the M5StickS3's WebSocket peer. **Full wire-protocol
@@ -164,8 +169,8 @@ it's a real, deliberate tradeoff, not a free one.
 
 | Node | Label | Runs |
 |---|---|---|
-| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `ollama-gtx1650`, `stt`, `tts` (Kokoro CPU), `gateway`, `agent`, `gpu-scheduler` |
-| Laptop (RTX 4060) | `gpu-tier=rtx4060` | k3s agent, `ollama-rtx4060` (only while the laptop is up) |
+| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `llama-cpp-gtx1650`, `stt`, `tts` (Kokoro CPU), `gateway`, `agent`, `gpu-scheduler` |
+| Laptop (RTX 4060) | `gpu-tier=rtx4060` | k3s agent, `llama-cpp-rtx4060` (only while the laptop is up) |
 
 `agent` and `gpu-scheduler` are pinned here too (`nodeSelector`, added
 2026-09-16 after a live test caught the gap): neither does GPU work itself,
@@ -173,7 +178,7 @@ so there's no reason for the scheduler to ever place them on the
 intermittent node, and a real test proved it matters -- with no selector,
 both landed on the RTX 4060 node, and stopping that laptop's k3s-agent
 killed the controller at the exact moment it needed to fail `agent` back
-over to `ollama-gtx1650`.
+over to the GTX 1650's LLM server.
 
 `stt`/`tts`/`gateway` are pinned to the always-on node so the Stick always
 has something to talk to. Only the LLM backend the `agent` service calls
@@ -196,7 +201,7 @@ automated-switching design.
    hardware.
 2. **Cluster bring-up + Helm + ArgoCD** — **the core objective is done**:
    both nodes joined, GPU runtime chain verified end to end on both (real
-   `nvidia-smi` output from a scheduled pod, and real `qwen3:8b` inference
+   `nvidia-smi` output from a scheduled pod, and real `qwen3:8b` inference (Ollama-era; now llama.cpp)
    through `ollama-rtx4060`), every service applied and `Running` with
    confirmed GPU access, and the full `gateway` -> `agent` -> Ollama chain
    round-trips a real reply through either node, including the automatic

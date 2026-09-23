@@ -1,7 +1,8 @@
 # GPU scheduler controller
 
 The differentiated piece of this deployment track: a small custom Kubernetes
-controller that routes the `agent` service to whichever Ollama instance is
+controller that routes the `agent` service to whichever llama.cpp server
+(`llama-cpp-gtx1650` or `llama-cpp-rtx4060`) is
 actually available, rather than a human doing `kubectl set env` by hand
 every time the laptop's RTX 4060 node comes up or goes to sleep.
 
@@ -22,25 +23,32 @@ real, comparatively uncommon skill to demonstrate.
 - Watches `Node` objects cluster-wide for the `gpu-tier: rtx4060` label
   transitioning `Ready` <-> not-`Ready`.
 - On the 4060 node becoming `Ready`: patches the `agent` Deployment's pod
-  template env (`OLLAMA_HOST=http://ollama-rtx4060:11434`,
-  `OLLAMA_MODEL=qwen3:8b`) in the `aicompanion` namespace. Patching the pod
+  template env (`LLM_HOST=http://llama-cpp-rtx4060:8080/v1`,
+  `LLM_MODEL=qwen3-8b`) in the `aicompanion` namespace. Patching the pod
   template is enough to trigger a rollout on its own -- no separate restart
   call needed.
 - On the 4060 node leaving `Ready` (or being deleted, e.g. `kubectl delete
   node` after a clean shutdown): patches `agent` back to
-  `OLLAMA_HOST=http://ollama-gtx1650:11434` and
-  `OLLAMA_MODEL=qwen3.5:4b`.
+  `LLM_HOST=http://llama-cpp-gtx1650:8080/v1` and
+  `LLM_MODEL=qwen3.5-4b`.
 - Deliberately narrow scope for now: only `agent` is retargeted. `stt` and
-  `tts` stay pinned to the always-on node (see `deploy/kubernetes/tts.yaml`'s
-  comment on why chatterbox-on-4060 isn't wired in yet) -- extending the
-  controller to also manage a `tts` backend switch is follow-on work once
-  that path exists at all.
+  `tts` stay pinned to the always-on node -- extending the controller to also
+  manage a `tts` backend switch is follow-on work if a 4060-hosted TTS path
+  ever exists.
+- The serving runtime was migrated from Ollama to llama.cpp on 2026-09-18
+  (see `docs/llama-cpp-migration.md`); the controller's contract is unchanged
+  apart from the env var and service names above, which is what the
+  OpenAI-compatible seam in `agent` was for.
 
 ## Status
 
-**Deployed and verified on the live two-node cluster (2026-09-16).** Both
-Ready and NotReady transitions retargeted the agent successfully, including a
-real gateway -> agent -> cross-node `ollama-rtx4060` -> `qwen3:8b` inference.
+**Deployed and verified on the live two-node cluster (2026-09-16, against the
+Ollama-era services it was first built for).** Both Ready and NotReady
+transitions retargeted the agent successfully, including a real
+gateway -> agent -> cross-node 4060-hosted model inference. Since the
+llama.cpp migration (2026-09-18) the live `agent` is confirmed pointed at
+`llama-cpp-rtx4060` with `qwen3-8b`; a fresh 4060-down/4060-up failover
+timing measurement is still open (see `TODO.md`).
 Live testing also exposed and fixed the controller's missing node-patch RBAC,
 and the controller and agent are now pinned to the always-on GTX node so they
 remain available when the 4060 disappears. The WSL2/Tailscale networking
@@ -54,8 +62,9 @@ watch/retry/resync plumbing so the handler only states what should happen on
 a transition, not how to keep a watch loop alive.
 
 In-cluster (the intended way): `deploy.yaml` in this directory creates the
-ServiceAccount/ClusterRole/ClusterRoleBinding it needs (`get`/`list`/`watch`
-on nodes cluster-wide, `get`/`patch` on deployments in the `aicompanion` namespace)
+ServiceAccount/ClusterRole/ClusterRoleBinding it needs (`get`/`list`/`watch`/`patch`
+on nodes cluster-wide -- `patch` is for kopf's own bookkeeping annotations --
+and `get`/`patch` on the `agent` deployment in the `aicompanion` namespace)
 and runs it as a Deployment.
 
 Locally, against whatever kubeconfig context is active:
