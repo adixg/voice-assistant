@@ -67,7 +67,7 @@ flowchart TB
     gateway["<b>gateway</b><br>k3s on always-on node<br>NodePort 30800"]
     stt["<b>stt service</b><br>faster-whisper"]
     agent["<b>agent service</b><br>LLM turn-taking"]
-    tts["<b>tts service</b><br>VITS"]
+    tts["<b>tts service</b><br>Kokoro af_bella, CPU"]
     controller["<b>gpu-scheduler</b><br>selects available llama.cpp"]
     llama1650[("<b>llama.cpp</b><br>GTX 1650 / qwen3.5-4b")]
     llama4060[("<b>llama.cpp</b><br>RTX 4060 / qwen3-8b")]
@@ -155,11 +155,106 @@ the laptop node is an optional RTX 4060 worker. The GPU scheduler patches the
 agent's `LLM_HOST` and `LLM_MODEL`: the preferred route is `qwen3-8b` on the
 RTX 4060, with `qwen3.5-4b` on the GTX 1650 as the fallback. MCP remains
 available on both routes because the MCP server runs in the CPU-side agent
-container, independently of the model server. STT, VITS TTS, gateway, agent,
+container, independently of the model server. STT, Kokoro TTS, gateway, agent,
 and the core observability services are pinned to `arch-ssd`; DCGM Exporter
 still runs on both GPU nodes. The laptop can therefore disappear without
 taking down the primary route or monitoring. See
 [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md).
+
+### One turn, in each GPU mode
+
+The loop is the same in both modes; the only thing that changes is which
+llama.cpp server the `agent` calls, and therefore where the LLM step runs.
+
+**Laptop offline — GTX 1650 only (fallback).** Every hop after the phone stays
+on `arch-ssd`. STT and the 4B model share the 1650 through GPU time-slicing,
+so the LLM step is the smaller model competing for the same 4 GB card.
+
+```mermaid
+flowchart LR
+    stick["<b>M5StickS3</b><br>hold BtnA, speak"]
+    phone["<b>Android relay</b><br>BLE ↔ WebSocket"]
+
+    subgraph ssd["arch-ssd — GTX 1650, always on"]
+        direction TB
+        gw["<b>gateway</b><br>:30800<br>speaker gate"]
+        stt["<b>stt</b><br>faster-whisper small<br>GPU (time-sliced)"]
+        agent["<b>agent</b><br>CPU + MCP tools"]
+        llm[("<b>llama-cpp-gtx1650</b><br>qwen3.5-4b<br>GPU (time-sliced)")]
+        tts["<b>tts</b><br>Kokoro af_bella<br>CPU"]
+    end
+
+    stick -->|"1 mic audio (BLE)"| phone
+    phone -->|"2 WebSocket over Tailscale"| gw
+    gw -->|"3 wav"| stt
+    stt -.->|transcript| gw
+    gw -->|"4 messages"| agent
+    agent -->|"5 chat completion<br>same node"| llm
+    llm -.->|reply text| agent
+    agent -.-> gw
+    gw -->|"6 reply text"| tts
+    tts -.->|wav| gw
+    gw -->|"7 reply audio"| phone
+    phone -->|"8 BLE"| stick
+
+    classDef dev fill:#eff1f5,stroke:#7287fd,stroke-width:2px,color:#4c4f69
+    classDef svc fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
+    classDef gpu fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
+    class stick,phone dev
+    class gw,agent,tts svc
+    class stt,llm gpu
+```
+
+**Laptop Ready — RTX 4060 online (preferred).** The same services stay on
+`arch-ssd`; only step 5 moves. The `agent` calls the 8B model on the laptop,
+crossing nodes over the flannel VXLAN overlay on `tailscale0`, and the 1650 is
+left to STT alone.
+
+```mermaid
+flowchart LR
+    stick["<b>M5StickS3</b><br>hold BtnA, speak"]
+    phone["<b>Android relay</b><br>BLE ↔ WebSocket"]
+
+    subgraph ssd["arch-ssd — GTX 1650, always on"]
+        direction TB
+        gw["<b>gateway</b><br>:30800<br>speaker gate"]
+        stt["<b>stt</b><br>faster-whisper small<br>GPU"]
+        agent["<b>agent</b><br>CPU + MCP tools"]
+        tts["<b>tts</b><br>Kokoro af_bella<br>CPU"]
+    end
+
+    subgraph lap["laptop — RTX 4060, selected by gpu-scheduler when Ready"]
+        llm[("<b>llama-cpp-rtx4060</b><br>qwen3-8b<br>GPU")]
+    end
+
+    stick -->|"1 mic audio (BLE)"| phone
+    phone -->|"2 WebSocket over Tailscale"| gw
+    gw -->|"3 wav"| stt
+    stt -.->|transcript| gw
+    gw -->|"4 messages"| agent
+    agent ==>|"5 chat completion<br>cross-node, flannel over tailscale0"| llm
+    llm -.->|reply text| agent
+    agent -.-> gw
+    gw -->|"6 reply text"| tts
+    tts -.->|wav| gw
+    gw -->|"7 reply audio"| phone
+    phone -->|"8 BLE"| stick
+
+    classDef dev fill:#eff1f5,stroke:#7287fd,stroke-width:2px,color:#4c4f69
+    classDef svc fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
+    classDef gpu fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
+    class stick,phone dev
+    class gw,agent,tts svc
+    class stt,llm gpu
+```
+
+Switching modes is automatic and one-directional per event: when the laptop
+node goes `Ready`, `gpu-scheduler` patches the `agent` Deployment to
+`LLM_HOST=http://llama-cpp-rtx4060:8080/v1`, `LLM_MODEL=qwen3-8b`; when it goes
+`NotReady` or is deleted, it patches back to
+`http://llama-cpp-gtx1650:8080/v1`, `qwen3.5-4b`. Either patch rolls the
+`agent` pod, so a turn in flight during a switch can fail and should simply be
+retried. Nothing the Stick or phone talks to moves in either case.
 
 ## MCP tool use
 
