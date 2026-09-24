@@ -38,6 +38,7 @@ overhead on top (pod peaks: kitten 559 MiB, kokoro-onnx fp32 ~1.35 GiB):
 | `kokoro-onnx` int8 | ~1.0x | 0.80x (0.44x) | — | 462 MiB RSS | 09-24 |
 | `kokoro` (PyTorch) | — | OOM-killed at 3 GiB | — | 2.8 GiB+ | 09-23/24 |
 | `kokoro` (PyTorch) **on the GTX 1650** | — | **22.0x** (17.5x), load 16 s | — | 977 MiB VRAM (whole card); 2,011 MiB RSS = 1,366 anon + 518 file + 96 shm | 09-24 |
+| `kokoro-onnx` fp32 **on the GTX 1650** (sherpa-onnx `1.13.8+cuda13.cudnn9`) | — | **9.0x** (8.0x), load 1.7 s | — | 1,161 MiB VRAM (whole card); 1,247 MiB RSS = 858 anon + 292 file + 96 shm (same model on CPU in the same script: 2.2x, 607 anon) | 09-24 |
 | `vits` (Umamusume) | 1.84x | — | — | 0 MiB VRAM | 09-05 |
 | `chatterbox` Nano | 0.79x | — | **2.54x** (n=3) | 1857 MiB VRAM | 09-05 |
 | `chatterbox` Turbo | 0.43x | — | 1.75x (n=3) | 2805 MiB VRAM | 09-05 |
