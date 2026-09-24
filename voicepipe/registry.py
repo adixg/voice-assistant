@@ -54,6 +54,13 @@ class STTBackend(Protocol):
 STATUS = "status"  # transient progress, e.g. "searching the web" — display, don't keep
 DELTA = "delta"    # an incremental piece of the reply text
 FINAL = "final"    # the complete reply; emitted exactly once, last
+# The tool calls a turn made and their (trimmed) results, as a JSON list of
+# OpenAI-style chat messages, emitted just before FINAL by a backend that ran
+# tools. Callers keeping a conversation should store them ahead of the reply:
+# a history holding only reply *text* ("I dimmed the screen") teaches the model
+# that saying so is enough, and it stops calling the tool (measured 3/3 on
+# qwen3-8b, 2026-09-24). Callers that don't keep history can ignore it.
+TOOLS = "tools"
 
 
 @runtime_checkable

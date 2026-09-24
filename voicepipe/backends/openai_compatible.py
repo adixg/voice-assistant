@@ -7,7 +7,7 @@ vLLM, LM Studio, LiteLLM, or a hosted OpenAI-compatible endpoint.
 import json
 import os
 
-from ..registry import DELTA, FINAL, LLM, STATUS
+from ..registry import DELTA, FINAL, LLM, STATUS, TOOLS
 from ..text import strip_think
 
 DEFAULT_URL = "http://localhost:8080/v1"
@@ -41,6 +41,30 @@ def tool_status(name, arguments):
     elif name == "search_web" and isinstance(arguments.get("query"), str):
         text += f": {arguments['query'][:60]}"
     return text
+
+
+# A tool result kept in the conversation history is cut to this: enough for
+# the model to see what the call did, not a whole weather forecast per turn.
+HISTORY_TOOL_RESULT_CHARS = 400
+
+
+def history_tool_messages(messages):
+    """The tool-call and tool-result messages of one turn, trimmed for keeping
+    in the conversation history (see registry.TOOLS)."""
+    kept = []
+    for m in messages:
+        if m.get("role") == "tool":
+            content = str(m.get("content") or "")
+            if len(content) > HISTORY_TOOL_RESULT_CHARS:
+                content = content[:HISTORY_TOOL_RESULT_CHARS] + "...(trimmed)"
+            kept.append({"role": "tool", "tool_call_id": m.get("tool_call_id"), "content": content})
+        elif m.get("tool_calls"):
+            kept.append({"role": "assistant", "content": m.get("content") or "",
+                         "tool_calls": [{"id": c.get("id"), "type": "function",
+                                         "function": {"name": c.get("function", {}).get("name"),
+                                                      "arguments": c.get("function", {}).get("arguments") or "{}"}}
+                                        for c in m["tool_calls"]]})
+    return kept
 
 
 class OpenAICompatibleUnavailable(RuntimeError):
@@ -163,6 +187,8 @@ class OpenAICompatibleLLM:
         except Exception as e:  # noqa: BLE001 - normalize endpoint failures
             raise OpenAICompatibleUnavailable(
                 f"OpenAI-compatible chat completion failed at {self.url}: {e}") from e
+        if len(working) > len(messages):
+            yield TOOLS, json.dumps(history_tool_messages(working[len(messages):]))
         yield FINAL, strip_think(content or "")
 
     def ask_stream(self, messages, think=None):

@@ -103,6 +103,33 @@ class TestHandleUtterance:
                 {"role": "assistant", "content": "hi, how are you"},
             ]
 
+    async def test_tool_calls_are_kept_in_history_before_the_reply(self, monkeypatch):
+        """Without them the model learns to claim a change it never made."""
+        import base64
+        monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+        tool_msgs = [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function",
+             "function": {"name": "set_stick_brightness", "arguments": '{"percent": 5}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": '{"brightness_percent": 5}'}]
+
+        def handler(request):
+            if request.url.path == "/transcribe":
+                return httpx.Response(200, json={"text": "dim it to five"})
+            if request.url.path == "/ask_stream":
+                return httpx.Response(200, content="\n".join([
+                    json.dumps({"kind": "status", "text": "changing the brightness"}),
+                    json.dumps({"kind": "tools", "text": json.dumps(tool_msgs)}),
+                    json.dumps({"kind": "final", "text": "Dimmed it to 5%."})]) + "\n")
+            if request.url.path == "/synth":
+                return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"x").decode()]})
+            raise AssertionError(request.url.path)
+
+        async with make_client(handler) as client:
+            session = make_session(client=client)
+            await session.handle_utterance(FakeWebSocket(), LOUD_PCM)
+            assert session.messages[-4:] == [{"role": "user", "content": "dim it to five"}, *tool_msgs,
+                                             {"role": "assistant", "content": "Dimmed it to 5%."}]
+
     async def test_status_events_are_forwarded_before_the_reply(self):
         stream_handler = ndjson_stream_handler("done", statuses=["searching the web"])
 

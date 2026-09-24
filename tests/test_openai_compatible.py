@@ -270,7 +270,39 @@ def test_tool_loop_streams_a_status_before_each_tool_call():
 
     assert events[0] == ("status", "checking the weather in Atlanta", [])  # before the tool ran
     assert events[-1][:2] == ("final", "No umbrella needed.")
-    assert len(events) == 2
+    assert [e[0] for e in events] == ["status", "tools", "final"]
+
+
+def test_tool_turn_reports_its_calls_for_the_history():
+    """Kept in the conversation so the model sees changes were tool calls."""
+    import json as _json
+    client = Mock()
+    client.post.side_effect = [
+        _response({"choices": [{"message": {"content": None, "tool_calls": [{
+            "id": "call-1", "type": "function",
+            "function": {"name": "set_stick_brightness", "arguments": '{"percent": 5}'}}]}}]}),
+        _response({"choices": [{"message": {"content": "Dimmed it to 5%."}}]}),
+    ]
+    mcp = Mock()
+    mcp.openai_tools.return_value = [{"type": "function", "function": {"name": "set_stick_brightness"}}]
+    mcp.call.return_value = '{"brightness_percent": 5}' + " " * 1000
+    llm = OpenAICompatibleLLM(client=client, mcp_client=mcp)
+    events = dict(stream_reply(llm, [{"role": "user", "content": "dim it to five"}]))
+    kept = _json.loads(events["tools"])
+    assert kept[0]["role"] == "assistant"
+    assert kept[0]["tool_calls"][0]["function"] == {"name": "set_stick_brightness", "arguments": '{"percent": 5}'}
+    assert kept[1]["role"] == "tool" and kept[1]["tool_call_id"] == "call-1"
+    assert kept[1]["content"].startswith('{"brightness_percent": 5}') and kept[1]["content"].endswith("(trimmed)")
+    assert events["final"] == "Dimmed it to 5%."
+
+
+def test_no_tools_event_when_no_tool_ran():
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {"content": "hi"}}]})
+    mcp = Mock()
+    mcp.openai_tools.return_value = []
+    events = list(stream_reply(OpenAICompatibleLLM(client=client, mcp_client=mcp), []))
+    assert events == [("final", "hi")]
 
 
 def test_tool_status_names_the_search_and_falls_back_for_unknown_tools():

@@ -48,7 +48,7 @@ from pydantic import BaseModel, Field
 
 from voicepipe import cli, encouragement
 from voicepipe.personas import DEFAULT_PERSONA, PERSONAS
-from voicepipe.registry import FINAL, STATUS, SV
+from voicepipe.registry import FINAL, STATUS, SV, TOOLS
 from voicepipe.speaker import (
     ACCEPTED, CHECK_FAILED, ERROR_POLICIES, ERROR_REJECT, REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT,
     check_failed_line, rejection_line, too_short_line,
@@ -344,7 +344,7 @@ class GatewaySession:
         HTTP request, not an in-process blocking one, so it never holds the
         event loop and can't cause the keepalive-ping-timeout bug those exist
         to work around."""
-        reply = ""
+        reply, tool_messages = "", []
         # Same mapping bridge_server.py's _ask() uses: --think means "let the
         # backend decide" (None), and its absence means "force it off" --
         # not the other way around, since a reasoning model defaults to on.
@@ -359,11 +359,13 @@ class GatewaySession:
                 if event["kind"] == STATUS:
                     print(f"  ... {event['text']}")
                     await ws.send_text(f"status:{event['text']}")
+                elif event["kind"] == TOOLS:
+                    tool_messages = json.loads(event["text"])
                 elif event["kind"] == FINAL:
                     reply = event["text"]
                 # DELTA is ignored here, same as bridge_server.py: the Stick
                 # gets whole sentences to speak, not a live-typing effect.
-        return reply
+        return reply, tool_messages
 
     async def _turn(self, ws, pcm):
         turn_started = perf_counter()
@@ -434,13 +436,16 @@ class GatewaySession:
         self.messages.append({"role": "user", "content": text})
         try:
             stage_started = perf_counter()
-            reply = await self._ask(ws)
+            reply, tool_messages = await self._ask(ws)
             GATEWAY_STAGE_DURATION.labels("agent").observe(perf_counter() - stage_started)
         except Exception as e:  # noqa: BLE001
             self.messages.pop()  # don't leave a dangling user turn in the history
             print(f"  ! llm error: {e}")
             await ws.send_text(f"reply:(llm error: {e})")
             return
+        # The tool calls go into the history ahead of the reply (registry.TOOLS):
+        # without them the model learns that just saying "done" is enough.
+        self.messages.extend(tool_messages)
         self.messages.append({"role": "assistant", "content": reply})
         print(f"  Rina: {reply}")
 
