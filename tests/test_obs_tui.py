@@ -155,6 +155,46 @@ def test_pods_panel_flags_restarts_oom_kills_and_unready_pods():
     assert "restarts" not in stt
 
 
+def role_routes():
+    routes = {
+        "kube_pod_status_ready": [({"pod": "llama-cpp-rtx4060-677c594d54-9tdjd"}, 1),
+                                  ({"pod": "llama-cpp-gtx1650-6c95788966-kbxpd"}, 1),
+                                  ({"pod": "stt-867cc84bdc-78khd"}, 1),
+                                  ({"pod": "kube-state-metrics-b95cdcdb-nk546"}, 1)],
+        "aicompanion_agent_llm_target_info": [({"host": "http://llama-cpp-rtx4060:8080/v1", "model": "qwen3-8b"}, 1)],
+        "kube_deployment_spec_replicas": [({"deployment": "grafana"}, 0), ({"deployment": "tempo"}, 0)],
+    }
+    return routes
+
+
+def test_pods_panel_labels_the_llama_servers_serving_or_standby():
+    text = "\n".join(obs_tui.panel_pods(PLAIN, "http://p", fake_prom(role_routes())))
+    rtx = next(l for l in text.splitlines() if "llama-cpp-rtx4060" in l)
+    gtx = next(l for l in text.splitlines() if "llama-cpp-gtx1650" in l)
+    assert "serving" in rtx and "standby" not in rtx
+    assert "standby" in gtx and "serving" not in gtx
+
+
+def test_pods_panel_gives_other_pods_a_static_role():
+    text = "\n".join(obs_tui.panel_pods(PLAIN, "http://p", fake_prom(role_routes())))
+    assert "pipeline" in next(l for l in text.splitlines() if "stt-867" in l)
+    assert "support" in next(l for l in text.splitlines() if "kube-state-metrics-b95" in l)
+
+
+def test_pods_panel_lists_scaled_down_deployments():
+    lines = obs_tui.panel_pods(PLAIN, "http://p", fake_prom(role_routes()))
+    off = [l for l in lines if "scaled to 0" in l]
+    assert len(off) == 2 and any("grafana" in l for l in off) and any("tempo" in l for l in off)
+
+
+def test_pods_panel_says_llm_when_the_agent_target_is_unknown():
+    routes = role_routes()
+    del routes["aicompanion_agent_llm_target_info"]
+    text = "\n".join(obs_tui.panel_pods(PLAIN, "http://p", fake_prom(routes)))
+    assert "serving" not in text and "standby" not in text
+    assert " llm " in next(l for l in text.splitlines() if "llama-cpp-rtx4060" in l)
+
+
 # ----------------------------------------------------------------- latency
 def test_latency_panel_says_so_when_there_is_no_traffic():
     text = "\n".join(obs_tui.panel_latency(PLAIN, "http://p", "1h", fake_prom({})))

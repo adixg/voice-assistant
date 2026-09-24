@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from voicepipe import backends  # noqa: F401 - registers backends as a side effect
 from voicepipe.registry import LLM, stream_reply
-from services.metrics import install_http_metrics
+from services.metrics import install_http_metrics, set_agent_llm_target
 from services.telemetry import install_tracing
 
 app = FastAPI(title="aicompanion-agent")
@@ -89,6 +89,8 @@ def main():
     global _backend
     args = build_parser().parse_args()
     _backend = LLM.build(args.llm_backend, args)
+    if hasattr(args, "openai_compatible_url"):
+        set_agent_llm_target(args.openai_compatible_url, args.openai_compatible_model)
     uvicorn.run(app, host="0.0.0.0", port=args.host_port)
 
 

@@ -83,3 +83,17 @@ class TestAskStream:
             {"kind": "delta", "text": "partial "},
             {"kind": "final", "text": "partial reply"},
         ]
+
+
+class TestLlmTargetMetric:
+    def test_reports_the_server_the_agent_calls_and_replaces_the_old_one(self):
+        from prometheus_client import REGISTRY
+        from services.metrics import set_agent_llm_target
+
+        set_agent_llm_target("http://llama-cpp-gtx1650:8080/v1", "qwen3.5-4b")
+        set_agent_llm_target("http://llama-cpp-rtx4060:8080/v1", "qwen3-8b")
+
+        get = lambda host: REGISTRY.get_sample_value(  # noqa: E731
+            "aicompanion_agent_llm_target_info", {"host": host, "model": "qwen3-8b" if "4060" in host else "qwen3.5-4b"})
+        assert get("http://llama-cpp-rtx4060:8080/v1") == 1
+        assert get("http://llama-cpp-gtx1650:8080/v1") is None

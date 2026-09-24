@@ -20,27 +20,46 @@ real, comparatively uncommon skill to demonstrate.
 
 ## Design
 
-- Watches `Node` objects cluster-wide for the `gpu-tier: rtx4060` label
-  transitioning `Ready` <-> not-`Ready`.
-- On the 4060 node becoming `Ready`: patches the `agent` Deployment's pod
+Level-triggered rather than event-per-transition: `decide()` (a pure function,
+unit-tested without a cluster) takes a snapshot of the whole picture -- is the
+4060 node `Ready` *and* `llama-cpp-rtx4060` `Available`, how long has that been
+true, which server `agent` points at, whether the standby is running, whether
+it is pinned -- and returns the next steps. Node events for the 4060 trigger it
+immediately, and a 10-second timer on the always-on node's object re-runs it,
+so a missed event, a controller restart, or the 4060's model server dying while
+its node stays `Ready` all heal on their own. Nothing is kept in memory; the
+"how long has it been up" clock is the Kubernetes condition's own
+`lastTransitionTime`.
+
+- **4060 up** (node Ready and its server Available): patch `agent`'s pod
   template env (`LLM_HOST=http://llama-cpp-rtx4060:8080/v1`,
-  `LLM_MODEL=qwen3-8b`) in the `aicompanion` namespace. Patching the pod
-  template is enough to trigger a rollout on its own -- no separate restart
-  call needed.
-- On the 4060 node leaving `Ready` (or being deleted, e.g. `kubectl delete
-  node` after a clean shutdown): patches `agent` back to
-  `LLM_HOST=http://llama-cpp-gtx1650:8080/v1` and
-  `LLM_MODEL=qwen3.5-4b`.
-- Deliberately narrow scope for now: only `agent` is retargeted. `stt` and
-  `tts` stay pinned to the always-on node -- extending the controller to also
-  manage a `tts` backend switch is follow-on work if a 4060-hosted TTS path
-  ever exists.
+  `LLM_MODEL=qwen3-8b`) -- patching the template is itself what triggers the
+  rollout. Only after that rollout has finished **and** the 4060 has been up for
+  60s (`SCALE_DOWN_AFTER_SECONDS`) is `llama-cpp-gtx1650` scaled to 0, freeing
+  its ~1 GiB of RAM and 3.4 GiB of VRAM on the home server. The 60s debounce is
+  what stops a laptop that keeps sleeping and waking from making the 1650
+  reload its model each time.
+- **4060 lost** (node NotReady or deleted, or its server down): scale the
+  standby to 1 immediately, and point `agent` back at it
+  (`LLM_HOST=http://llama-cpp-gtx1650:8080/v1`, `LLM_MODEL=qwen3.5-4b`) only
+  once it reports ready, so `agent` never targets a server that isn't there.
+  From zero this costs a model load, during which turns fail; a warm standby
+  fails over as soon as the node is seen down.
+- **Manual override**: annotate the standby `aicompanion/keep-warm=true`
+  (`tools/standby.sh warm`; `auto` removes it). The controller then starts it if
+  needed and never scales it down, trading its RAM/VRAM for instant failover.
+- `llama-cpp-gtx1650.yaml` deliberately has no `replicas:` -- this controller
+  owns the field, and a manifest value would be re-applied over it.
+- Deliberately narrow scope: only `agent` is retargeted. `stt` and `tts` stay
+  pinned to the always-on node.
 - The serving runtime was migrated from Ollama to llama.cpp on 2026-09-18
-  (see `docs/llama-cpp-migration.md`); the controller's contract is unchanged
-  apart from the env var and service names above, which is what the
-  OpenAI-compatible seam in `agent` was for.
+  (see `docs/llama-cpp-migration.md`).
 
 ## Status
+
+**Standby autoscaling (2026-09-24) is written and unit-tested but not yet deployed or
+exercised on the live cluster** -- the measured failover time from scale-zero is
+still to be recorded here.
 
 **Deployed and verified on the live two-node cluster (2026-09-16, against the
 Ollama-era services it was first built for).** Both Ready and NotReady
@@ -64,7 +83,7 @@ a transition, not how to keep a watch loop alive.
 In-cluster (the intended way): `deploy.yaml` in this directory creates the
 ServiceAccount/ClusterRole/ClusterRoleBinding it needs (`get`/`list`/`watch`/`patch`
 on nodes cluster-wide -- `patch` is for kopf's own bookkeeping annotations --
-and `get`/`patch` on the `agent` deployment in the `aicompanion` namespace)
+and, in the `aicompanion` namespace, `get` on `agent`/`llama-cpp-gtx1650`/`llama-cpp-rtx4060` and `patch` on `agent` and `llama-cpp-gtx1650` only)
 and runs it as a Deployment.
 
 Locally, against whatever kubeconfig context is active:

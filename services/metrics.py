@@ -21,6 +21,20 @@ GATEWAY_TURNS = Counter("aicompanion_gateway_turns_total", "Gateway turns comple
 GATEWAY_TURN_DURATION = Histogram("aicompanion_gateway_turn_duration_seconds", "Gateway full turn duration")
 GATEWAY_STAGE_DURATION = Histogram("aicompanion_gateway_stage_duration_seconds", "Gateway downstream stage duration", ("stage",))
 
+# Which LLM server the agent is actually calling. The gpu_scheduler controller
+# retargets the agent between llama.cpp servers, and kube-state-metrics can't
+# see a container's env, so the agent reports it itself; tools/obs_tui.py uses
+# it to label the llama pods "serving" or "standby".
+AGENT_LLM_TARGET = Gauge("aicompanion_agent_llm_target_info",
+                         "1 for the LLM server URL and model the agent is configured to call",
+                         ("host", "model"))
+
+
+def set_agent_llm_target(host: str, model: str) -> None:
+    AGENT_LLM_TARGET.clear()
+    AGENT_LLM_TARGET.labels(host, model).set(1)
+
+
 # Speaker-verification gate. Scores are cosine similarities; the buckets are
 # dense around the usual 0.6 threshold because the useful question is how close
 # to the line accepted turns land (an owner scoring 0.61 against 0.6 is one bad

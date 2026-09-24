@@ -45,7 +45,9 @@ roleRef:
   name: gpu-scheduler-nodes
   apiGroup: rbac.authorization.k8s.io
 ---
-# Namespaced: only needs to patch the one Deployment it routes.
+# Namespaced and limited to the three Deployments it looks at: it reads all of
+# them to decide, patches `agent` to retarget it, and patches the standby
+# (llama-cpp-gtx1650) to scale it to zero or back.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -54,8 +56,12 @@ metadata:
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    resourceNames: ["agent"]
-    verbs: ["get", "patch"]
+    resourceNames: ["agent", "llama-cpp-gtx1650", "llama-cpp-rtx4060"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["agent", "llama-cpp-gtx1650"]
+    verbs: ["patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

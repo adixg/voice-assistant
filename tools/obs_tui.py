@@ -274,6 +274,39 @@ def panel_gpu(style, base, get_json=fetch_json, history=None):
     return lines
 
 
+# What each workload is for, so the pods panel can say why something is (or
+# isn't) running. The llama servers are the exception: which one is "serving"
+# is decided at runtime by the gpu_scheduler controller, and the agent reports
+# the server it is calling as aicompanion_agent_llm_target_info.
+ROLES = {
+    "gateway": "pipeline", "stt": "pipeline", "tts": "pipeline", "agent": "pipeline",
+    "gpu-scheduler": "control",
+    "prometheus": "support", "kube-state-metrics": "support", "dcgm-exporter": "support",
+    "searxng": "support",
+    "grafana": "observ.", "tempo": "observ.",
+}
+
+
+def workload_name(pod):
+    """A pod's Deployment/DaemonSet name: the pod name minus its generated suffix."""
+    known = [n for n in ROLES if pod.startswith(n + "-")]
+    if known:
+        return max(known, key=len)
+    return pod.rsplit("-", 2)[0] if pod.startswith("llama-cpp-") else pod
+
+
+def role_of(pod, serving_hosts):
+    name = workload_name(pod)
+    if name.startswith("llama-cpp-"):
+        if not serving_hosts:
+            return "llm"
+        return "serving" if any(f"//{name}:" in h for h in serving_hosts) else "standby"
+    return ROLES.get(name, "")
+
+
+ROLE_COLOURS = {"serving": "g", "standby": "y"}
+
+
 def panel_pods(style, base, get_json=fetch_json, history=None):
     lines = heading(style, "pods", "(kube-state-metrics; RSS only exists for the Python services)")
     ready = {m["pod"]: v for m, v in prom(base, 'kube_pod_status_ready{condition="true"}', get_json)}
@@ -284,6 +317,9 @@ def panel_pods(style, base, get_json=fetch_json, history=None):
     limits = {m["pod"]: v for m, v in prom(
         base, 'sum by (pod) (kube_pod_container_resource_limits{resource="memory"})', get_json)}
     rss = {m["service"]: v for m, v in prom(base, "process_resident_memory_bytes", get_json)}
+    serving_hosts = [m["host"] for m, v in prom(base, "aicompanion_agent_llm_target_info == 1", get_json)]
+    scaled_down = sorted(m["deployment"] for m, v in prom(
+        base, "kube_deployment_spec_replicas == 0", get_json))
     rss_hist = {}
     if history:
         rss_hist = graph_data(lambda: {m["service"]: v for m, v in prom_range(
@@ -308,7 +344,11 @@ def panel_pods(style, base, get_json=fetch_json, history=None):
         if limit and rss_hist.get(service):
             # Scaled 0..limit, so a line near the top means "close to being killed".
             trend = "  " + spark(style, rss_hist[service], hi=limit) if len(rss_hist[service]) >= 2 else ""
-        lines.append(f"  {state} {pod[:36]:36} {mem}{trend}{flag}")
+        role = role_of(pod, serving_hosts)
+        role_cell = style(ROLE_COLOURS.get(role, "d"), f"{role:8}")
+        lines.append(f"  {state} {role_cell} {pod[:36]:36} {mem}{trend}{flag}")
+    for name in scaled_down:
+        lines.append(style("d", f"  off    {'scaled 0':8} {name[:36]:36} scaled to 0 replicas"))
     return lines
 
 

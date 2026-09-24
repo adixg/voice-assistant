@@ -1,4 +1,5 @@
-# Always-on CUDA llama-server, pinned to the home server's GTX 1650. It
+# CUDA llama-server, pinned to the home server's GTX 1650 -- the standby that
+# runs while the RTX 4060 is down (and always, if pinned warm). It
 # downloads and caches Qwen3.5 4B Q4_K_M (~2.7GB) on this node; that leaves
 # practical room for its KV cache inside the card's 4GB budget.
 apiVersion: apps/v1
@@ -7,7 +8,10 @@ metadata:
   name: llama-cpp-gtx1650
   namespace: aicompanion
 spec:
-  replicas: 1
+  # No `replicas:` on purpose: controller/gpu_scheduler owns it. It scales this
+  # standby to 0 while the RTX 4060 is serving and back to 1 when the 4060 is
+  # lost (a manifest value would be re-applied over that). Pin it running with
+  # tools/standby.sh warm.
   strategy:
     type: Recreate  # only one GPU on this node; never run two model pods at once
   selector:

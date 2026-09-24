@@ -223,6 +223,9 @@ stick remains the real fix.
 - **`tools/obs_tui.py`** is a terminal dashboard that replaces opening Grafana
   in a browser day to day: host RAM/swap/memory-pressure (from `/proc`), GPU
   util/VRAM/temp/power, per-pod readiness/restarts/OOM kills/memory vs limit,
+  a role per pod (`pipeline`/`support`/..., and for the llama servers `serving`
+  vs `standby`, taken from the agent's `aicompanion_agent_llm_target_info`
+  metric) plus a dim row for each deployment scaled to 0,
   the speaker-verification gate (state, accepted / rejected / too-short /
   unchecked counts, average scores, how many acceptances sit within 0.1 of the
   threshold, last score; `--speaker-window`, default 24h), and gateway turn +
