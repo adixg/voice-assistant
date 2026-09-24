@@ -1,0 +1,44 @@
+{
+  "label": "arch-ssd GTX 1650",
+  "metadata": {
+    "timestamp_utc": "2026-09-24T20:54:38.636503+00:00",
+    "host": "arch-ssd",
+    "device": "gpu",
+    "cpu": "Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz",
+    "cpus": 8,
+    "warmups": 3,
+    "repetitions": 10,
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "git_commit": "566b6eb",
+    "failures": [],
+    "memory_note": "rss_peak_mib is the engine process's own peak RSS (VmHWM), plus any worker processes it started; not a pod's cgroup total"
+  },
+  "summary": [
+    {
+      "label": "Kokoro PyTorch GPU",
+      "backend": "kokoro",
+      "options": {
+        "kokoro_voice": "af_bella",
+        "kokoro_language": "a",
+        "kokoro_device": "cuda"
+      },
+      "n": 50,
+      "load_s": 16.3,
+      "rss_peak_mib": 2076.3,
+      "x_realtime": 22.01,
+      "s_per_10s_speech": 0.454,
+      "x_realtime_p50": 21.437,
+      "x_realtime_min": 17.484,
+      "synth_s_p50": 0.21225,
+      "synth_s_p95": 0.35304,
+      "synth_s_max": 0.3622,
+      "audio_s_total": 243.25
+    }
+  ]
+}

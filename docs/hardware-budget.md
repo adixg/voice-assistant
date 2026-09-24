@@ -37,6 +37,7 @@ overhead on top (pod peaks: kitten 559 MiB, kokoro-onnx fp32 ~1.35 GiB):
 | `kitten` mini | ~2.2x | 1.49x (1.25x) | — | 539 MiB RSS | 09-24 |
 | `kokoro-onnx` int8 | ~1.0x | 0.80x (0.44x) | — | 462 MiB RSS | 09-24 |
 | `kokoro` (PyTorch) | — | OOM-killed at 3 GiB | — | 2.8 GiB+ | 09-23/24 |
+| `kokoro` (PyTorch) **on the GTX 1650** | — | **22.0x** (17.5x), load 16 s | — | 977 MiB VRAM (whole card); 2,011 MiB RSS = 1,366 anon + 518 file + 96 shm | 09-24 |
 | `vits` (Umamusume) | 1.84x | — | — | 0 MiB VRAM | 09-05 |
 | `chatterbox` Nano | 0.79x | — | **2.54x** (n=3) | 1857 MiB VRAM | 09-05 |
 | `chatterbox` Turbo | 0.43x | — | 1.75x (n=3) | 2805 MiB VRAM | 09-05 |
@@ -57,6 +58,11 @@ stage here synthesizes the whole reply; the gateway speaks sentence by
 sentence, so the first sound on the Stick comes much sooner than these totals.
 The moonshine-vs-parakeet turn difference is within the LLM's own variation
 (2.23 vs 2.56 s p50); STT alone, moonshine is faster.
+
+The GTX 1650 Kokoro row is n=50 from a one-off pod with the tts-kokoro image
+(torch 2.14 cu130), the 1650 otherwise idle (LLM standby scaled to 0), kept in
+`benchmarks/runs/tts_engines/20260924T205438Z-arch-ssd-gtx-1650.json`. The card
+sat at 34% mean utilisation. RAM, not VRAM, is its cost on this 8 GB machine.
 
 Missing GPU numbers need the 4060 free of `llama-cpp-rtx4060` (it holds
 ~7.9 of 8 GiB), and the sherpa-onnx rows need its CUDA wheel.
