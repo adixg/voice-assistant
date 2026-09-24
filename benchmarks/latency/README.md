@@ -25,6 +25,10 @@ claim token/sec because the agent's NDJSON API does not report token usage.
 
 ## Full voice turns
 
+For a quick per-stage breakdown of example sentences across backends, use
+`benchmarks/pipeline/bench_turn.py` (see `benchmarks/pipeline/README.md`).
+The protocol below is for a publishable, real-device comparison.
+
 For 20 prerecorded utterances plus 20 real-device turns, record these
 timestamps in one row per turn: mic/WAV end, STT complete, first agent delta,
 agent final reply, TTS complete, and first audio frame delivered to Android.
