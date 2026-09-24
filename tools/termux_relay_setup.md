@@ -1,3 +1,8 @@
+> **Obsolete (the pre-2026-09-16 Wi-Fi firmware).** The Stick now talks BLE to
+> the Android companion app, which relays to the cluster gateway on NodePort
+> 30800 (see `deploy/kubernetes/README.md`, "Primary device path"). The current
+> firmware has no Wi-Fi, so it can't reach this relay. Kept for history only.
+
 # Termux relay: using the M5Stick when it's not on the laptop's network
 
 Lets the Stick reach `bridge_server.py` while it (and your phone, providing

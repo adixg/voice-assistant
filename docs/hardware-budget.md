@@ -99,15 +99,17 @@ below. Trust those over any by-difference figure: an earlier reading put
 Turbo at 3250 MiB by subtraction, but measured alone from a clean baseline it
 is **2805 MiB**.
 
-**Chatterbox is the largest single consumer** — Turbo costs ~4x what whisper
-does. It, not the LLM and not STT, is what makes the GPU tight.
+**When Chatterbox was the TTS (until 2026-09-16) it was the largest single
+consumer** — Turbo costs ~4x what whisper does. It, not the LLM and not STT,
+was what made the GPU tight. No TTS uses the GPU today.
 
-### The LLM is already spilling to CPU
+### The LLM was spilling to CPU (Ollama, 2026-09-05)
 
 `GET /api/ps` while `rina` was loaded reported `size: 5971 MB` but
 `size_vram: 3711 MB` — only ~62% of the model is on the GPU, the rest runs on
-the CPU. `context_length` was 4096. So today's setup is already past the
-card, and the LLM is the thing paying for it.
+the CPU. `context_length` was 4096. So the setup then was already past the
+card, and the LLM was paying for it. (llama.cpp now offloads all layers,
+`--n-gpu-layers 99`.)
 
 Moving TTS off the GPU frees 3250 MiB and leaves **~7503 MiB** for the LLM,
 which is enough for an 8B Q4_K_M (5971 MB) to sit fully resident with ~1.5 GB

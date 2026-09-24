@@ -19,7 +19,10 @@ python benchmarks/latency/benchmark_streaming.py --kind openai \
 
 The first command measures the routed service path; the second isolates a
 llama.cpp server. Run each against both GPU nodes, and record cold-start runs
-separately from warm runs. The harness reports TTFT and total duration in
+separately from warm runs. While the 4060 serves, the controller keeps
+`llama-cpp-gtx1650` at 0 replicas: `tools/standby.sh warm` before measuring it
+(then `auto`), and don't count its ~61 s load as a cold-start sample unless
+that's what you mean to measure. The harness reports TTFT and total duration in
 milliseconds, as well as output characters/sec. It intentionally does not
 claim token/sec because the agent's NDJSON API does not report token usage.
 

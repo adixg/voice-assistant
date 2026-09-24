@@ -9,13 +9,20 @@ STT, TTS, firmware, and the wire protocol do not change.
 | GTX 1650 | `llama-cpp-gtx1650:8080` | `TheStageAI/Qwen3.5-4B-GGUF` / `Qwen3.5-4B-M-TS-Q4_K_M.gguf` | `qwen3.5-4b` | `/var/lib/aicompanion/llama-cpp-gtx1650` |
 | RTX 4060 | `llama-cpp-rtx4060:8080` | `Qwen/Qwen3-8B-GGUF` / `Qwen3-8B-Q4_K_M.gguf` | `qwen3-8b` | `/var/lib/aicompanion/llama-cpp-rtx4060` |
 
-Both use all GPU layers and a 4096-token context. The first startup downloads
+Both use all GPU layers; the 1650 uses a 4096-token context and the 4060 a
+40960-token one. The gpu-scheduler keeps `llama-cpp-gtx1650` scaled to 0 while
+the 4060 serves (`tools/standby.sh warm` pins it). The first startup downloads
 about 2.7 GB on the 1650 and 5 GB on the 4060. `/health` intentionally returns
 503 until model loading completes; the Deployment readiness probe therefore
 withholds the Service endpoint during that interval. The laptop cache is native
 Linux storage inside the D:-hosted WSL VHD, never DrvFS.
 
 ## Cutover
+
+**Done 2026-09-18; kept for reference.** Don't re-apply `agent.yaml` wholesale
+on the live cluster (it would undo the controller's `LLM_HOST`/`LLM_MODEL`
+patch), and note that `llama-cpp-gtx1650` is normally at 0 replicas, so the
+health check below needs `tools/standby.sh warm` first.
 
 Run from the machine with the live kubeconfig. Old and new servers cannot
 coexist: each requires the node's only GPU.

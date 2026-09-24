@@ -171,8 +171,9 @@ The loop is the same in both modes; the only thing that changes is which
 llama.cpp server the `agent` calls, and therefore where the LLM step runs.
 
 **Laptop offline — GTX 1650 only (fallback).** Every hop after the phone stays
-on `arch-ssd`. STT and the 4B model share the 1650 through GPU time-slicing,
-so the LLM step is the smaller model competing for the same 4 GB card.
+on `arch-ssd`. STT and TTS run on CPU, so the 4B model has the 1650 to
+itself; when the laptop drops, that model is first cold-started from zero
+(about 61 s) unless `tools/standby.sh warm` pinned it.
 
 ```mermaid
 flowchart LR
@@ -205,14 +206,14 @@ flowchart LR
     classDef svc fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
     classDef gpu fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
     class stick,phone dev
-    class gw,agent,tts svc
-    class stt,llm gpu
+    class gw,stt,agent,tts svc
+    class llm gpu
 ```
 
 **Laptop Ready — RTX 4060 online (preferred).** The same services stay on
 `arch-ssd`; only step 5 moves. The `agent` calls the 8B model on the laptop,
-crossing nodes over the flannel VXLAN overlay on `tailscale0`, and the 1650 is
-left to STT alone.
+crossing nodes over the flannel VXLAN overlay on `tailscale0`, and after 60 s
+the controller scales `llama-cpp-gtx1650` to zero, leaving the 1650 idle.
 
 ```mermaid
 flowchart LR
@@ -248,8 +249,8 @@ flowchart LR
     classDef svc fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
     classDef gpu fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
     class stick,phone dev
-    class gw,agent,tts svc
-    class stt,llm gpu
+    class gw,stt,agent,tts svc
+    class llm gpu
 ```
 
 Switching modes is automatic. `gpu-scheduler` re-evaluates every 10 seconds and
@@ -275,10 +276,9 @@ Each patch to `agent` rolls its pod, so a turn in flight during a switch can fai
 Nothing the Stick or phone talks to moves in either case.
 
 Reply audio is spoken a sentence at a time: the gateway synthesizes the next
-sentence while it sends the previous one's audio. The Stick firmware has been
-changed to start playing as audio arrives (instead of after the whole reply), but
-that change is compiled and **not yet flashed to the device** (see `TODO.md`), so
-until it is the Stick still waits for the full reply.
+sentence while it sends the previous one's audio, and the Stick starts playing
+once 1.5 s of audio has arrived instead of after the whole reply (verified on
+the device 2026-09-24).
 
 ## Observability
 
@@ -409,7 +409,9 @@ memory/about-me.md      hand-written facts about you, appended to the system
                          told them again (--profile / --no-profile)
 
 android_companion/      the Android app that bridges the Stick's BLE
-                         connection to bridge_server.py's WebSocket —
+                         connection to the k3s gateway's WebSocket (or
+                         bridge_server.py as a fallback), and sends the Stick
+                         volume/brightness settings and OTA firmware updates —
                          RelayService.kt (foreground service, BLE central +
                          OkHttp WebSocket client), BleEnvelopeCodec.kt (the
                          Kotlin side of ble_envelope.h's byte-envelope
@@ -438,9 +440,10 @@ tools/
                          still works standalone
 
 firmware/
-  m5stick_bridge/        the real push-to-talk firmware — talks to
-                         bridge_server.py over BLE via android_companion/
-                         (ble_envelope.h / ble_transport.h; no Wi-Fi)
+  m5stick_bridge/        the real push-to-talk firmware — talks to the k3s
+                         gateway (or bridge_server.py) over BLE via
+                         android_companion/ (ble_envelope.h / ble_transport.h;
+                         no Wi-Fi; two-slot partition table for OTA updates)
   m5stick_echo_test/     mic -> speaker loopback, on-device only, no Wi-Fi at
                          all — the fastest way to sanity-check the hardware
                          (mic, codec, speaker, volume) in isolation
@@ -573,7 +576,7 @@ python bridge_server.py --encourage --encourage-interval 30 45
 ```
 
 TTS audio is run through ffmpeg's `speechnorm` before it reaches the Stick —
-the speaker is already at full volume, but the synthesizer leaves several dB
+the speaker defaults to full volume (adjustable from the app), but the synthesizer leaves several dB
 of headroom unused (a measured reply went from -4.5 dB peak to -0.4 dB).
 `--no-normalize` sends it raw.
 

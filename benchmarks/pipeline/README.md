@@ -10,7 +10,7 @@ input audio (untimed, it stands in for you talking), then times:
 
 | column | what it is |
 | --- | --- |
-| `stt s` | speech-to-text on that audio (`stt` service, faster-whisper) |
+| `stt s` | speech-to-text on that audio (the deployed `stt` service; Moonshine since 2026-09-24) |
 | `1st tok` | time until the LLM produced its first token (reasoning or answer) |
 | `llm s` | time until the LLM's full reply finished |
 | `tts s` | text-to-speech of the whole reply |
@@ -46,7 +46,10 @@ From inside a pod the service names resolve directly; drop `--cluster-ssh`.
 
 Default targets: the live `agent` route (whatever the GPU scheduler currently
 points it at), plus both llama.cpp servers called directly with thinking off,
-each spoken by the deployed Kokoro `tts`. Override with repeatable flags:
+each spoken by the deployed `tts` (Kitten nano since 2026-09-24; the target
+is still labelled `kokoro`). While the 4060 serves, `llama-cpp-gtx1650` is at 0
+replicas: run `tools/standby.sh warm` first (about 61 s to Ready) and
+`tools/standby.sh auto` afterwards, or that row fails. Override with repeatable flags:
 
 ```bash
 --llm NAME=URL[,model=M][,kind=openai|agent][,think=off|on|default]

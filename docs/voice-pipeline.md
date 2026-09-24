@@ -51,19 +51,22 @@ rather than once at boot. **That one turned out to be a no-op** — see
 `docs/firmware-notes.md` for the source-level proof. It is flashed and
 harmless, but it is not what fixed anything.
 
-The live voiceprint has 10 samples covering both states (1-5 captured before
-any playback, 6-10 after), self-consistency 0.765-0.895. Because
+The live voiceprint has 33 samples: the original 10 covering both states (1-5
+captured before any playback, 6-10 after, self-consistency 0.765-0.895) plus 23
+real Stick clips added 2026-09-24 with `tools/voiceprint_add.py`. Because
 `Voiceprint.score` is best-of, covering both conditions works without
 discarding the earlier samples.
 
 ### The threshold is not calibrated for a real voice
 
-`DEFAULT_THRESHOLD = 0.5` is a starting point. In the controlled synthetic run
+`voicepipe/speaker.py`'s generic `DEFAULT_THRESHOLD = 0.5` is a starting point;
+the WeSpeaker backend overrides it with its own measured `default_threshold = 0.6`. In the controlled synthetic run
 a *different* speaker scored 0.511 and would have been let in.
 
 Measured against real voices on this hardware: **owner 0.765-0.895, a
-different person 0.069-0.075** — a wide gap. The bridge is therefore run with
-`--speaker-threshold 0.6`, which leaves room for a tired or more distant voice
+different person 0.069-0.075** — a wide gap. The bridge was therefore run with
+`--speaker-threshold 0.6` (the cluster gateway runs 0.5 since 2026-09-24: real
+Stick clips scored 0.54-0.66 against the original enrollment), which leaves room for a tired or more distant voice
 while still rejecting a stranger by a large margin. Re-check with
 `tools/speaker_check.py` if the mic, room or firmware changes; every utterance
 logs its score.
@@ -89,7 +92,8 @@ information isn't there yet, and no threshold separates anyone below ~2s.
 
 Running with `allow` as of 2026-09-07, at the owner's request.
 
-Also running with `--encourage --encourage-interval 28 32` (see below) — a
+The bridge was also run with `--encourage --encourage-interval 28 32` (see
+below; the cluster gateway currently runs without `--encourage`) — a
 half-hour cadence, jittered rather than exactly 30 so it doesn't land on the
 clock.
 
@@ -210,8 +214,9 @@ to the system prompt under a header telling the model to use it silently.
 
 Everything inside HTML comments is stripped, which is how the shipped template
 costs nothing until it is filled in — the unfilled file contributes 27 chars.
-This matters: the profile is spent on *every* turn, and the local model has
-roughly 6K tokens total, so `load_profile()` warns above 4000 chars.
+This matters: the profile is spent on *every* turn, and the 1650's model has a
+4096-token context (the 4060's has 40960), so `load_profile()` warns above 4000
+chars.
 
 This is the static half of memory. The other halves — things she learns and
 writes back, and searchable notes — need the agent loop and do not exist yet

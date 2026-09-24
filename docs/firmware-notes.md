@@ -212,13 +212,14 @@ it; BtnA hold still talks.**
   exactly the conventional digital-clock look this is meant not to have. The
   small text reuses M5GFX's built-in **`Font0`**, already a 5x7 bitmap font, so
   no font dependency was added.
-- Time is `configTzTime()` with **`EST5EDT,M3.2.0/2,M11.1.0/2`** — the DST
-  rules live in the TZ string, so nothing in the code knows today's date. NTP
-  starts in `connectNetwork()`, not `setup()`, because it needs an association
-  first.
-- **Sync is detected by checking the year, not Wi-Fi** (`clockHasTime()` wants
-  `tm_year > 2023-1900`). Once the RTC is set the ESP32 carries the clock on
-  its own, so the hotspot can come and go without the display going blank.
+- The time zone is **`EST5EDT,M3.2.0/2,M11.1.0/2`** (`CLOCK_TZ`), set once in
+  `BleTransport::begin()` — the DST rules live in the TZ string, so nothing in
+  the code knows today's date. Since the BLE migration there is no NTP: the
+  time comes from the phone's `TIME_SYNC` frames (`settimeofday()`), which the
+  relay re-sends every 5 minutes while connected.
+- **Sync is detected by checking the year, not the link** (`clockHasTime()`
+  wants `tm_year > 2023-1900`). Once the clock is set the ESP32 carries it on
+  its own, so the BLE link can come and go without the display going blank.
   Before the first sync it shows dashes on the same grid, so the layout does
   not jump when the sync lands.
 
@@ -232,16 +233,16 @@ own clock. What that means, precisely:
 
 | situation | does the time survive? |
 | --- | :---: |
-| Wi-Fi drops while powered | **yes** — the system clock free-runs |
+| BLE link drops while powered | **yes** — the system clock free-runs |
 | power off, flat battery, reflash, hard reset | **no** — starts unset |
 
-After a cold boot the face shows four dashes until NTP lands; there is no chip
+After a cold boot the face shows four dashes until the first `TIME_SYNC`; there is no chip
 to restore from, and adding one would mean hardware, not code.
 
 Drift is the ESP32's RTC slow clock, so the clock is only as good as its last
-sync. That mostly does not matter because `configTzTime()` starts the ESP-IDF
-SNTP client, which **re-polls on its own** — whenever the hotspot has upstream
-internet again the clock corrects itself with no code involved.
+sync. That mostly does not matter because the relay **re-sends `TIME_SYNC`
+every 5 minutes** while connected, which corrects drift. (Before the BLE
+migration this was `configTzTime()` and the ESP-IDF SNTP client.)
 
 ### BtnA had to stop starting the recording on the press itself
 
@@ -403,7 +404,7 @@ dark. The app warns above volume 191, M5Stack's battery brownout guidance.
 How to update: on the machine with `include/secrets.h`, `pio run` in
 `firmware/m5stick_bridge`, copy `.pio/build/m5stick-s3/firmware.bin` to the phone,
 then in the app: Start (connected), **Update Stick firmware...**, pick the file.
-About a minute at the measured BLE rate (not yet timed on the device).
+About 30 s for the ~2.27 MB image (~75 KB/s, measured on the device 2026-09-24).
 
 **Status: verified on the device, 2026-09-24.** Serial log + app screen:
 
@@ -423,6 +424,3 @@ About a minute at the measured BLE rate (not yet timed on the device).
 
 Then a clean `a36b55d` went back on over OTA, and volume/brightness were reset
 to 255/39.
-First test after the USB flash: the version shows in the app, both sliders take
-effect and survive a reboot, then an OTA of a rebuilt image (version changes),
-then an OTA of a deliberately wrong-secret image to see the rollback.

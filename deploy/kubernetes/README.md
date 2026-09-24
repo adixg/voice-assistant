@@ -41,16 +41,18 @@ file is just the how-to-apply.
 
 ## Getting the images
 
-`.github/workflows/ci.yml`'s `docker-build` job pushes all six images to
-`ghcr.io/adixg/<image>:latest` on every push to `main` (build-only, no push,
-on PRs). That's the only place these images get built and hosted -- nothing
+`.github/workflows/ci.yml` builds and pushes only the images a push to `main`
+touches (of eight: stt, tts, tts-vits, tts-kokoro, agent, gateway,
+gpu-scheduler, gpu-exporter) to `ghcr.io/adixg/<image>:latest`; PRs build
+without pushing. That's the only place these images get built and hosted -- nothing
 builds them on the home server itself.
 
 GHCR images pushed via the workflow's default `GITHUB_TOKEN` are **private**
 by default, even though this repo is public. Two ways to let the cluster
 pull them, pick one before `kubectl apply`:
 
-- **Make the packages public** (simplest): after
+- **Make the packages public** (what this cluster does: all eight are public;
+  simplest): after
   the first push, on GitHub go to each package under
   github.com/adixg?tab=packages → Package settings → Change visibility →
   Public. One-time, per image.
@@ -63,8 +65,9 @@ pull them, pick one before `kubectl apply`:
     -n aicompanion
   ```
   then add `imagePullSecrets: [{name: ghcr-pull}]` under each Deployment's
-  `spec.template.spec` in `agent.yaml`/`gateway.yaml`/`stt.yaml`/`tts.yaml`
-  (not committed by default, since referencing a pull secret that doesn't
+  `spec.template.spec` in `agent.yaml`/`gateway.yaml`/`stt.yaml`/`tts.yaml`,
+  `controller/gpu_scheduler/deploy.yaml` and the `gpu-exporter` DaemonSet in
+  `observability/kubernetes-metrics.yaml` (not committed by default, since referencing a pull secret that doesn't
   exist yet blocks the pull entirely, even for an otherwise-public image).
 
 ## Apply
@@ -95,7 +98,17 @@ kubectl apply -f tts.yaml
 kubectl apply -f searxng.yaml
 kubectl apply -f agent.yaml
 kubectl apply -f gateway.yaml
+kubectl apply -f ../../controller/gpu_scheduler/deploy.yaml   # agent routing + standby replicas
+kubectl apply -f ../../observability/kubernetes-metrics.yaml  # kube-state-metrics + gpu-exporter
+kubectl apply -f ../../observability/prometheus/prometheus.yaml
+kubectl apply -f ../../observability/tracing.yaml
+kubectl apply -f ../../observability/grafana/grafana.yaml
+kubectl apply -f ../../observability/grafana/dashboard.yaml
 ```
+
+On the *live* cluster, don't re-apply `agent.yaml` wholesale: the controller
+patches its `LLM_HOST`/`LLM_MODEL`, and the manifest's defaults would undo that
+until the next reconcile.
 
 `llama-cpp-gtx1650.yaml` deliberately has no `replicas:` field: on a fresh install it
 starts at one replica, then `controller/gpu_scheduler` owns it and scales it to zero
@@ -133,11 +146,15 @@ port `8765` in the app, and tap Start; no firmware change is needed.
 since that node is guaranteed to be up. The deployed
 `controller/gpu_scheduler/` controller switches both `LLM_HOST` and
 `LLM_MODEL` to the RTX 4060 while that node is Ready, and back to the GTX
-1650 when it is not. Both transitions and real cross-node inference were
-verified on the live cluster; see that directory's README.
+1650 when it is not. It also scales `llama-cpp-gtx1650` to 0 once the 4060
+has served for 60 s, and back to 1 (about 61 s cold start) when the 4060 is
+lost; `tools/standby.sh warm` pins it running. Both transitions and real
+cross-node inference were verified on the live cluster; see that directory's
+README.
 
 `stt` and `tts` are pinned to the GTX 1650 node (`nodeSelector: gpu-tier:
 gtx1650`) so they're always reachable regardless of whether the laptop is
-up. `tts` runs Kokoro-82M with the `af_bella` voice on CPU, leaving the GPU
-available for Whisper and the selected LLM. The original VITS backend,
+up. `tts` runs KittenTTS nano (voice Bella, speed 1.6) and `stt` runs
+Moonshine, both on CPU via sherpa-onnx; `tools/switch-backend.sh` switches
+either (Kokoro, Whisper, Parakeet...). The original VITS backend,
 Chatterbox, and ElevenLabs remain selectable in local/service configurations.

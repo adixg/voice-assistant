@@ -1,6 +1,7 @@
 # Points at llama-cpp-gtx1650 by default (the always-up node); this is the
-# Deployment controller/gpu_scheduler/ patches LLM_HOST on and rolls
-# restart when the rtx4060 node becomes Ready, per that directory's README.
+# Deployment controller/gpu_scheduler/ patches LLM_HOST/LLM_MODEL on (the
+# template patch itself triggers the rollout) while the rtx4060 node is Ready
+# and llama-cpp-rtx4060 is Available, per that directory's README.
 # CPU-only container -- see services/agent/Dockerfile's comment for why.
 #
 # nodeSelector pins the pod itself to the always-up node too, same as

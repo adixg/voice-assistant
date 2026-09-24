@@ -10,7 +10,7 @@
 # it -- without time-slicing the device plugin treats that as one exclusive
 # claim and the second pod sits Pending ("Insufficient nvidia.com/gpu")
 # forever, confirmed against the live cluster. replicas: 2 matches exactly
-# those two pods (tts runs Kokoro on CPU and doesn't request a GPU at
+# those two pods (tts runs on CPU, currently Kitten nano, and doesn't request a GPU at
 # all). Time-slicing only serializes CUDA scheduling -- it does not
 # partition VRAM -- but that's the same sharing bridge_server.py's single
 # process already does between STT/LLM/TTS on this card today, so it's not

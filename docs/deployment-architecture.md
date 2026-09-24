@@ -1,10 +1,11 @@
 # Home-server deployment architecture (k3s across two GPU nodes)
 
-Status: **The cluster core is live; repository/device defaults now target its
-gateway, with live device cutover verification pending.** `arch-ssd`
-(GTX 1650, native Arch): k3s live, labeled `gpu-tier=gtx1650`, with
-`llama-cpp-gtx1650`/`stt`/`agent`/`tts` all `Running` and confirmed doing real
-CUDA inference inside their containers. `agent`'s `LLM_HOST` env defaults to
+Status: **The cluster core is live and the Stick talks to it through the
+gateway; the hours-long BLE soak is still pending.** `arch-ssd`
+(GTX 1650, native Arch): k3s live, labeled `gpu-tier=gtx1650`, running
+`llama-cpp-gtx1650` (CUDA; scaled to 0 by the gpu-scheduler while the 4060
+serves), `stt` (Moonshine, CPU), `tts` (Kitten, CPU) and `agent`. At bring-up
+(2026-09-16) all four were confirmed doing real CUDA inference. `agent`'s `LLM_HOST` env defaults to
 `http://llama-cpp-gtx1650:8080/v1` (the controller flips it, with `LLM_MODEL`,
 to `llama-cpp-rtx4060`/`qwen3-8b` while the laptop is up). LLM serving moved
 from Ollama to llama.cpp on 2026-09-18 (`docs/llama-cpp-migration.md`); the
@@ -46,9 +47,8 @@ request successfully (the registry's expected bare-URL 404 made BusyBox
 `wget` return nonzero). `gateway`
 is **applied and `Running`** too, confirmed with the same live wire-protocol
 test. The repository's Android endpoint now points at its stable NodePort
-route; applying the updated gateway manifest/Secret and a real Stick
-conversation are still required before calling the runtime cutover
-hardware-verified.
+route; the gateway manifest/Secret are applied (2026-09-23) and real Stick
+conversations run through it (2026-09-24).
 
 **GPU runtime chain, verified end to end on `arch-ssd`:**
 `nvidia-container-toolkit` (installed via pacman) → k3s auto-detects
@@ -59,8 +59,9 @@ was chosen over hand-editing k3s's generated containerd config) →
 `deploy/kubernetes/nvidia-device-plugin.yaml` (upstream `k8s-device-plugin`
 v0.20.0 + a time-slicing `ConfigMap`, `replicas: 2`) makes `nvidia.com/gpu`
 allocatable. The **time-slicing is required, not optional**: this node has
-exactly one physical GPU, and both `ollama-gtx1650` and `stt` request
-`nvidia.com/gpu: 1` — without slicing, the second pod sits `Pending`
+exactly one physical GPU, and when this was set up both the LLM pod
+(`ollama-gtx1650`, now `llama-cpp-gtx1650`) and `stt` (then faster-whisper)
+requested `nvidia.com/gpu: 1` — without slicing, the second pod sits `Pending`
 ("Insufficient nvidia.com/gpu") forever, which is what actually happened
 before the `ConfigMap` was added. Slicing only serializes CUDA scheduling,
 it doesn't partition VRAM — the same sharing `bridge_server.py`'s single
@@ -125,8 +126,9 @@ uses.
   `$LLM_HOST` (model `$LLM_MODEL`) points at. This is the one the GPU
   scheduler controller retargets. (The Ollama-era equivalent was
   `--llm-backend ollama` with `$OLLAMA_HOST`/`$OLLAMA_MODEL`.)
-- `services/tts/` — chatterbox/vits over HTTP (`POST /synth`, returns
-  base64 wav chunks).
+- `services/tts/` — any TTS backend over HTTP (`POST /synth`, returns
+  base64 wav chunks); Kitten nano (sherpa-onnx, CPU, voice Bella, speed 1.6)
+  since 2026-09-24.
 - `services/gateway/` — the M5StickS3's WebSocket peer. **Full wire-protocol
   parity with `bridge_server.py` as of 2026-09-16** — see its own updated
   docstring. It speaks the real `start`/`stop`/`reset` +
@@ -137,9 +139,9 @@ uses.
   `announce` + its Unix socket, and `encourage_loop`. `--enroll` mode was
   deliberately not ported; see the module docstring for why that's fine.
   It is now the primary repository/device route. `bridge_server.py` remains
-  the port-8765 fallback; the updated APK is installed and the manifest is
-  applied, but a live Stick conversation through the gateway still needs
-  verifying, tracked in `TODO.md`.
+  the port-8765 fallback; the APK is installed, the manifest applied, and
+  live Stick conversations run through the gateway (2026-09-24). The BLE soak
+  is tracked in `TODO.md`.
 
   The speaker gate is the one pipeline stage that stayed in-process rather
   than becoming its own HTTP service: it's CPU-only (ONNX, ~24MB model) and
@@ -149,8 +151,10 @@ uses.
 **Known cost of this split**: every hop above is now a network call instead
 of an in-process function call, on a pipeline where response latency is
 literally what the user experiences. `bridge_server.py`'s existing measured
-latency numbers (`docs/hardware-budget.md`) are the baseline; nothing has
-been measured for the split version yet (`benchmarks/latency/`, Phase 4).
+latency numbers (`docs/hardware-budget.md`) are the baseline. Whole-turn
+numbers for the split version on the live cluster are in
+`docs/hardware-budget.md` (`benchmarks/runs/pipeline/`, n=50); a direct
+split-versus-monolith comparison (`benchmarks/latency/`) is still unmeasured.
 Splitting was still the right call given the goals above, but
 it's a real, deliberate tradeoff, not a free one.
 
@@ -162,12 +166,12 @@ everything running: ~340MB available and 1.5GB in swap, and two pods had
 already been killed for it (`llama-cpp-gtx1650` OOM-killed once, `tts`
 restarted 5 times) before any of the guardrails below existed.
 
-`tts` (Kokoro on CPU) is by far the largest pod and is bigger than it first
-looked: 1.6Gi right after start, 2.2Gi after one reply-sized synth, 2.8Gi after
+`tts` was PyTorch Kokoro on CPU until 2026-09-24, then by far the largest pod
+and bigger than it first looked: 1.6Gi right after start, 2.2Gi after one reply-sized synth, 2.8Gi after
 a ~1000-character one, and it does not shrink afterwards (measured through its
-own `process_resident_memory_bytes`). Its limit is 3Gi, and a first cut of
-1792Mi, sized from an idle reading, OOM-killed it mid-reply. Reducing this is
-the most valuable remaining RAM lever.
+own `process_resident_memory_bytes`). Its limit was 3Gi, and a first cut of
+1792Mi, sized from an idle reading, OOM-killed it mid-reply. Reducing it was
+the most valuable RAM lever, and it has been pulled:
 
 **Done 2026-09-24:** `tts` now runs KittenTTS nano via sherpa-onnx, with a
 peak of 559Mi and a 768Mi limit (`kokoro-onnx`, the same af_bella voice, settles
@@ -181,9 +185,9 @@ is what actually causes OOM kills.
 
 | Pod | Real use | Peak | Limit | Notes |
 |---|---|---|---|---|
-| `tts` | 1.2-1.9 GiB in normal turns | 2.8 GiB (1000-char stress) | 3 GiB | OOM-killed at 1792Mi |
-| `llama-cpp-gtx1650` | 0.6 GiB after load, **1.06 GiB after a long generation, never shrinks** | 2.0 GiB at load (1.76 GiB is GGUF page cache) | 3 GiB | OOM-killed at 2Gi mid-request; a standby while the agent uses the laptop's LLM |
-| `stt` | ~0.4 GiB | 1.0 GiB (page cache) | 1 GiB | 0.27s of memory stall in 17h, so the limit is not what makes it slow |
+| `tts` (Kitten nano) | — | ~560 MiB | 768Mi (set by `tools/switch-backend.sh`) | PyTorch Kokoro, before 2026-09-24: 1.2-2.8 GiB, 3Gi limit, OOM-killed at 1792Mi |
+| `llama-cpp-gtx1650` | 0.6 GiB after load, **1.06 GiB after a long generation, never shrinks** | 2.0 GiB at load (1.76 GiB is GGUF page cache) | 3 GiB | OOM-killed at 2Gi mid-request; scaled to 0 by the gpu-scheduler while the 4060 serves (60 s debounce, 61 s cold start, `tools/standby.sh warm` keeps it up) |
+| `stt` (Moonshine) | — | 571 MiB | 1 GiB | faster-whisper, before 2026-09-24: ~0.4 GiB, 1.0 GiB peak (page cache) |
 | `gpu-exporter` | 37 MiB | — | 128Mi | replaced `dcgm-exporter` (~0.42 GiB, limit 512Mi) on 2026-09-24 |
 | `gateway` / `prometheus` / `searxng` / `gpu-scheduler` / `agent` / `kube-state-metrics` | 47-243 MiB | 47-243 MiB | 128-512Mi | comfortable |
 
@@ -192,12 +196,13 @@ load *and* a long generation/synthesis, and read anon separately from cache.
 `tests/test_deployment_manifests.py` keeps a `MEASURED_PEAK_MIB` table so a
 limit cannot be lowered to or below a measured peak again.
 
-What this says about the machine: real peaks of the voice pipeline (`tts` up to
-~2.8 GiB, LLM ~1.06 GiB anon, `stt` ~0.4 GiB) plus k3s (~0.7 GiB), the small
-pods (~1 GiB) and the desktop do not fit 7.6 GiB together in the worst case, so
-it leans on swap. The standby `llama-cpp-gtx1650` costs ~0.7-1 GiB of RAM (and
-3.4 GiB of VRAM) while the agent points at the laptop; since 2026-09-24 the
-gpu_scheduler scales it to 0 while the 4060 is up (61s cold start on failover).
+What this says about the machine: before 2026-09-24 the voice pipeline's real
+peaks (`tts` up to ~2.8 GiB, LLM ~1.06 GiB anon, `stt` ~0.4 GiB) plus k3s
+(~0.7 GiB), the small pods (~1 GiB) and the desktop did not fit 7.6 GiB
+together in the worst case, so it leaned on swap. Now `tts` (~0.56 GiB) and
+`stt` (~0.57 GiB) are small, `gpu-exporter` is 37 MiB instead of ~0.42 GiB, and
+the standby `llama-cpp-gtx1650` (~0.7-1 GiB RAM, 3.4 GiB VRAM) only runs while
+the laptop is down or it's pinned warm (61 s cold start on failover).
 Swap: zram (3.8 GiB, zstd, measured 3.3:1, priority 100) plus a 4 GiB disk
 `/swapfile` at priority 10 as a last resort before the OOM killer (added
 2026-09-24, in `/etc/fstab`). Growing zram to `ram` is pending (`TODO.md`). The
@@ -260,9 +265,9 @@ second RAM stick remains the real fix.
   stale, for 60s through a brief outage.
 - Not applied via whole-manifest `kubectl apply`: `agent` (the GPU scheduler
   retargets its `LLM_HOST`/`LLM_MODEL` live, so a full apply would undo that)
-  and `llama-cpp-gtx1650` (its manifest carries `--jinja` and a readiness probe
-  that were never applied live). Their limits were patched onto the live
-  objects with `kubectl set resources` instead.
+  was patched with `kubectl set resources` instead. (`llama-cpp-gtx1650` was
+  too, until its full manifest, with `--jinja` and the readiness probe the
+  scheduler's ordering relies on, was applied on 2026-09-24.)
 
 ## Why k3s, not plain docker-compose or full upstream k8s
 
@@ -304,7 +309,7 @@ automated-switching design.
    `deploy/kubernetes/*.yaml`, `controller/gpu_scheduler/` design + skeleton
    code, unit tests for all of it (`tests/test_services_*.py`,
    `tests/test_gpu_scheduler_controller.py`), and `.github/workflows/ci.yml`
-   (runs the pytest suite, builds all five Docker images, applies every
+   (runs the pytest suite, builds the Docker images a change affects, applies every
    manifest to a throwaway `kind` cluster for real server-side schema
    validation, compile-checks the firmware). CI validates the manifests are
    *well-formed*, which is not the same as Phase 2 below — a generic
@@ -315,7 +320,7 @@ automated-switching design.
    both nodes joined, GPU runtime chain verified end to end on both (real
    `nvidia-smi` output from a scheduled pod, and real `qwen3:8b` inference (Ollama-era; now llama.cpp)
    through `ollama-rtx4060`), every service applied and `Running` with
-   confirmed GPU access, and the full `gateway` -> `agent` -> Ollama chain
+   confirmed GPU access, and the full `gateway` -> `agent` -> LLM chain (then Ollama)
    round-trips a real reply through either node, including the automatic
    node-up/node-down switch (see status section above for the full bug
    chain this took). Still open: chart into `deploy/helm/`, wire
@@ -338,8 +343,9 @@ automated-switching design.
    migrates to `arch-ssd.<tailnet>.ts.net:30800`, and the gateway manifest
    consumes the private profile/voiceprint through a Secret. Those deployment
    changes are applied and the APK is installed (verified/confirmed
-   2026-09-23). **Still open**: complete the real-device
-   conversation/reconnect soak.
+   2026-09-23), and real Stick conversations run through the gateway
+   (2026-09-24). **Still open**: reboot/deep-sleep reconnect and the hours-long
+   BLE soak.
 
 Phase 3 (observability) is deployed, with dashboard polish pending; Phase 4
 (measured benchmarks) is still open; see `TODO.md` for tracking.
