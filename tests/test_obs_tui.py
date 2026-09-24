@@ -351,3 +351,133 @@ def test_the_search_is_bounded_to_the_requested_window():
 
 def test_window_seconds():
     assert [obs_tui.window_seconds(w) for w in ("30s", "15m", "2h", "1d")] == [30, 900, 7200, 86400]
+
+
+# ------------------------------------------------------------------ graphs
+def with_history(instant, ranges):
+    """get_json that answers query_range with matrices (by needle) and everything
+    else with the instant routes."""
+    plain = fake_prom(instant)
+
+    def get_json(url):
+        if "query_range" not in url:
+            return plain(url)
+        expr = parse_qs(urlparse(url).query)["query"][0]
+        for needle, series in ranges.items():
+            if needle in expr:
+                return {"status": "success", "data": {"resultType": "matrix", "result": [
+                    {"metric": labels, "values": [[i, str(v)] for i, v in enumerate(vals)]}
+                    for labels, vals in series]}}
+        return {"status": "success", "data": {"resultType": "matrix", "result": []}}
+    return get_json
+
+
+def test_spark_scales_between_lo_and_hi_and_is_the_requested_width():
+    line = obs_tui.spark(PLAIN, [0, 25, 50, 75, 100], width=5, lo=0, hi=100)
+    assert len(line) == 5 and line[0] == "▁" and line[-1] == "█" and list(line) == sorted(line)
+
+
+def test_a_quiet_series_on_a_fixed_scale_stays_low_instead_of_filling_the_row():
+    line = obs_tui.spark(PLAIN, [1, 2, 1, 2, 1, 2], width=6, lo=0, hi=100)
+    assert set(line) <= {"▁", "▂"}
+
+
+def test_spark_needs_at_least_two_points_and_handles_a_flat_series():
+    assert obs_tui.spark(PLAIN, [5.0]) == "" and obs_tui.spark(PLAIN, []) == ""
+    assert obs_tui.spark(PLAIN, [0, 0, 0], width=3) == "▁▁▁"        # nothing to scale
+
+
+def test_resample_shrinks_long_series_by_averaging_and_leaves_short_ones_alone():
+    assert obs_tui.resample([1, 2, 3], 5) == [1, 2, 3]
+    out = obs_tui.resample(list(range(100)), 10)
+    assert len(out) == 10 and out == sorted(out) and out[0] < out[-1]
+
+
+def test_prom_range_asks_for_a_range_and_drops_nan():
+    seen = []
+
+    def get_json(url):
+        seen.append(parse_qs(urlparse(url).query))
+        return {"status": "success", "data": {"result": [
+            {"metric": {"a": "1"}, "values": [[0, "1"], [1, "NaN"], [2, "3"]]}]}}
+    ((labels, values),) = obs_tui.prom_range("http://p", "up", 900, get_json, now=lambda: 5000.0)
+    assert values == [1.0, 3.0] and labels == {"a": "1"}
+    q = seen[0]
+    assert float(q["end"][0]) - float(q["start"][0]) == 900 and int(q["step"][0]) == 15
+
+
+def gpu_instant():
+    gtx = {"hostname": "arch-ssd", "modelName": "GTX 1650", "gpu": "0"}
+    return {"GPU_UTIL": [(gtx, 10)], "FB_USED": [(gtx, 2000)], "FB_FREE": [(gtx, 1500)],
+            "FB_RESERVED": [(gtx, 500)], "GPU_TEMP": [(gtx, 44)], "POWER": [(gtx, 7)]}
+
+
+def test_gpu_panel_draws_history_from_prometheus_next_to_each_bar():
+    gtx = {"hostname": "arch-ssd", "modelName": "GTX 1650", "gpu": "0"}
+    ranges = {"GPU_UTIL": [(gtx, [0, 0, 10, 50, 90])], "DCGM_FI_DEV_FB_USED) /": [(gtx, [40, 45, 50, 50, 50])]}
+    text = "\n".join(obs_tui.panel_gpu(PLAIN, "http://p", with_history(gpu_instant(), ranges), history=900))
+    util = next(l for l in text.splitlines() if "util" in l)
+    vram = next(l for l in text.splitlines() if "vram" in l)
+    assert "peak 90%" in util and "█" in util.split("%")[1]
+    assert "peak 50%" in vram and "2,000 / 4,000 MiB" in vram
+
+
+def test_a_failing_history_query_drops_the_graph_but_keeps_the_panel():
+    def broken_range(url):
+        if "query_range" in url:
+            raise obs_tui.PromError("range query timed out")
+        return fake_prom(gpu_instant())(url)
+    text = "\n".join(obs_tui.panel_gpu(PLAIN, "http://p", broken_range, history=900))
+    assert "GTX 1650" in text and "util" in text and "peak" not in text
+
+
+def test_pods_memory_trend_is_scaled_to_the_limit():
+    ranges = {"process_resident_memory_bytes": [({"service": "stt"}, [256 * 2**20, 512 * 2**20, 1024 * 2**20])]}
+    lines = obs_tui.panel_pods(PLAIN, "http://p", with_history(pod_routes(), ranges), history=900)
+    stt = next(l for l in lines if "stt-abc" in l)
+    # 256, 512 and 1024Mi on a 0..1024Mi scale: a quarter, half and the very top
+    assert stt.rstrip().endswith("▂▄█")
+
+
+def test_no_graphs_flag_makes_no_range_queries_and_draws_no_sparklines():
+    urls = []
+
+    def spy(url):
+        urls.append(url)
+        return fake_prom(gpu_instant())(url)
+    args = parse("--only", "gpu", "--no-graphs")
+    text = "\n".join(obs_tui.build_frame(args, PLAIN, spy))
+    assert not any("query_range" in u for u in urls) and "peak" not in text
+
+
+def test_graphs_are_on_by_default_and_use_the_history_window():
+    args = parse("--only", "gpu", "--history", "30m")
+    assert args.graphs is True and obs_tui.window_seconds(args.history) == 1800
+    queries = []
+
+    def spy(url):
+        queries.append(parse_qs(urlparse(url).query))
+        return with_history(gpu_instant(), {})(url)
+    obs_tui.build_frame(args, PLAIN, spy)
+    ranged = [q for q in queries if "step" in q]
+    assert ranged and all(int(float(q["end"][0]) - float(q["start"][0])) == 1800 for q in ranged)
+
+
+def test_memory_graph_builds_up_from_live_samples_and_needs_two():
+    args = parse("--only", "memory")
+    trail = obs_tui.make_trail(args)
+    first = "\n".join(obs_tui.build_frame(args, PLAIN, down, trail=trail, **MEM))
+    assert "peak" not in first                                            # one sample is not a graph
+    second = "\n".join(obs_tui.build_frame(args, PLAIN, down, trail=trail, **MEM))
+    assert "peak 75%" in second and len(trail["ram"]) == 2
+
+
+def test_memory_trail_is_bounded_by_history_over_interval():
+    args = parse("--history", "5m", "--interval", "5")
+    assert obs_tui.make_trail(args)["ram"].maxlen == 60
+    assert obs_tui.make_trail(parse("--history", "1d", "--interval", "1"))["ram"].maxlen == 720   # capped
+
+
+def test_history_must_be_a_valid_window():
+    with pytest.raises(SystemExit):
+        parse("--history", "soon")

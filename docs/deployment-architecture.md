@@ -192,7 +192,10 @@ the most valuable remaining RAM lever.
   in a browser day to day: host RAM/swap/memory-pressure (from `/proc`), GPU
   util/VRAM/temp/power, per-pod readiness/restarts/OOM kills/memory vs limit,
   and gateway turn + per-stage + per-route latency, each toggled with
-  `--NAME`/`--no-NAME` or `--only a,b`. Standard library only; one full frame
+  `--NAME`/`--no-NAME` or `--only a,b`, with sparkline trend graphs beside the
+  bars (`--history 15m`, `--no-graphs`): GPU util/VRAM and service memory from
+  Prometheus history, host RAM/swap from live samples. Latency has none, since
+  turns are too sparse for a trend. Standard library only; one full frame
   measured 26MiB peak RSS, versus ~500MB for Firefox plus the Grafana pod. It
   reads Prometheus (so lean-mode `on` or lighter, not `deep`); traces in Tempo
   are not shown by default: `--traces` adds a panel of the last few Stick

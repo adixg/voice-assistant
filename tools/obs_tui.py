@@ -5,6 +5,8 @@
     python tools/obs_tui.py --no-latency       # turn any panel off
     python tools/obs_tui.py --only gpu,memory  # or list exactly the ones you want
     python tools/obs_tui.py --once             # print one frame and exit
+    python tools/obs_tui.py --history 2h       # graphs look back 2h (default 15m)
+    python tools/obs_tui.py --no-graphs        # bars only
 
 Panels (each has --NAME / --no-NAME, all on by default):
     memory   this machine's RAM, swap and kernel memory pressure (/proc, no
@@ -15,6 +17,12 @@ Panels (each has --NAME / --no-NAME, all on by default):
     traces   the last few real Stick turns from Tempo, split into stt / agent
              (LLM) / tts. Off by default, because Tempo is normally paused:
              run `tools/lean-mode.sh traces` first, then `--traces`.
+
+Graphs are one-line sparklines next to the bars (▁▂▃▄▅▆▇█): GPU util and VRAM,
+and the Python services' memory against their limits, come from Prometheus
+history; the host RAM/swap/stall graphs are built from live samples, so they
+start empty and fill as it runs. Latency has no graph, because turns are too
+sparse for a trend to mean anything (use --window instead).
 
 Everything but `memory` and `traces` reads Prometheus. tools/port-forwards.sh exposes it on
 localhost:9090; point --prometheus (or $PROMETHEUS_URL) elsewhere if needed.
@@ -28,6 +36,7 @@ import re
 import socket
 import sys
 import time
+from collections import deque
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -73,6 +82,62 @@ def prom(base, expr, get_json=fetch_json):
         if value == value:  # drops NaN, which histogram_quantile returns for no data
             out.append((item["metric"], value))
     return out
+
+
+def prom_range(base, expr, seconds, get_json=fetch_json, now=time.time):
+    """Range query -> list of (labels, [floats]) oldest first, NaN samples dropped."""
+    end = now()
+    query = urlencode({"query": expr, "start": end - seconds, "end": end, "step": max(15, seconds // 60)})
+    payload = get_json(f"{base.rstrip('/')}/api/v1/query_range?{query}")
+    if payload.get("status") != "success":
+        raise PromError(str(payload.get("error", "query failed")))
+    out = []
+    for item in payload["data"]["result"]:
+        values = [float(v) for _, v in item["values"]]
+        out.append((item["metric"], [v for v in values if v == v]))
+    return out
+
+
+def graph_data(fn):
+    """A graph is a nicety: if its history query fails or comes back in an
+    unexpected shape, the panel keeps its live numbers and just drops the graph."""
+    try:
+        return fn()
+    except (PromError, KeyError, ValueError, TypeError):
+        return {}
+
+
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+def resample(values, width):
+    """Average `values` down to at most `width` points, keeping the trend."""
+    if len(values) <= width:
+        return list(values)
+    n = len(values)
+    out = []
+    for i in range(width):
+        chunk = values[i * n // width: max(i * n // width + 1, (i + 1) * n // width)]
+        out.append(sum(chunk) / len(chunk))
+    return out
+
+
+def spark(style, values, width=24, lo=0.0, hi=None, code="c"):
+    """One-line graph of `values`; '' when there is too little history to draw.
+
+    Percentages pass lo=0, hi=100 so a quiet GPU looks quiet instead of being
+    stretched to fill the row; other series autoscale (hi=None)."""
+    points = resample(values, width)
+    if len(points) < 2:
+        return ""
+    top = max(points) if hi is None else hi
+    if top <= lo:
+        return style(code, SPARK[0] * len(points))
+    return style(code, "".join(SPARK[min(7, max(0, int((v - lo) / (top - lo) * 7.999)))] for v in points))
+
+
+def peak(values, unit="%"):
+    return f"peak {max(values):.0f}{unit}" if len(values) >= 2 else ""
 
 
 # ------------------------------------------------------------------ styling
@@ -125,7 +190,15 @@ def read_pressure(path="/proc/pressure/memory"):
     return None
 
 
-def panel_memory(style, meminfo=read_meminfo, pressure=read_pressure):
+def make_trail(args):
+    """Rolling live samples for the memory panel. Prometheus has no host-RAM
+    series here, so this graph is built from what the dashboard itself sees and
+    starts empty each run."""
+    n = max(12, min(720, int(window_seconds(args.history) / args.interval)))
+    return {k: deque(maxlen=n) for k in ("ram", "swap", "stall")}
+
+
+def panel_memory(style, meminfo=read_meminfo, pressure=read_pressure, trail=None):
     lines = heading(style, "memory", f"({socket.gethostname()}, from /proc)")
     try:
         m = meminfo()
@@ -133,22 +206,42 @@ def panel_memory(style, meminfo=read_meminfo, pressure=read_pressure):
         return lines + [style("r", f"  cannot read /proc/meminfo: {exc}")]
     used = m["MemTotal"] - m["MemAvailable"]
     ram = 100 * used / m["MemTotal"]
-    lines.append(f"  RAM   {bar(style, ram)} {style.level(ram, f'{ram:3.0f}%')}  "
-                 f"{mib(used)} / {mib(m['MemTotal'])}  ({mib(m['MemAvailable'])} available)")
-    if m.get("SwapTotal"):
-        swap_used = m["SwapTotal"] - m["SwapFree"]
-        swap = 100 * swap_used / m["SwapTotal"]
-        lines.append(f"  swap  {bar(style, swap)} {style.level(swap, f'{swap:3.0f}%')}  "
-                     f"{mib(swap_used)} / {mib(m['SwapTotal'])}")
+    swap = 100 * (m["SwapTotal"] - m["SwapFree"]) / m["SwapTotal"] if m.get("SwapTotal") else None
     psi = pressure()
+    if trail is not None:
+        trail["ram"].append(ram)
+        if swap is not None:
+            trail["swap"].append(swap)
+        if psi is not None:
+            trail["stall"].append(min(psi * 5, 100))
+
+    def graph(key, hi=100.0):
+        values = list(trail[key]) if trail is not None else []
+        return ("  " + spark(style, values, hi=hi) + style("d", f" {peak(values)}")) if len(values) >= 2 else ""
+
+    lines.append(f"  RAM   {bar(style, ram)} {style.level(ram, f'{ram:3.0f}%')}  "
+                 f"{mib(used)} / {mib(m['MemTotal'])}  ({mib(m['MemAvailable'])} available){graph('ram')}")
+    if swap is not None:
+        swap_used = m["SwapTotal"] - m["SwapFree"]
+        lines.append(f"  swap  {bar(style, swap)} {style.level(swap, f'{swap:3.0f}%')}  "
+                     f"{mib(swap_used)} / {mib(m['SwapTotal'])}{graph('swap')}")
     if psi is not None:
         # >10% means processes are regularly stalled on memory, i.e. thrashing.
         lines.append(f"  stall {bar(style, min(psi * 5, 100))} "
-                     f"{style.level(psi * 5, f'{psi:4.1f}%')}  time spent waiting on memory (10s)")
+                     f"{style.level(psi * 5, f'{psi:4.1f}%')}  time spent waiting on memory (10s){graph('stall')}")
     return lines
 
 
-def panel_gpu(style, base, get_json=fetch_json):
+def gpu_history(base, seconds, get_json):
+    by = "by (hostname, modelName, gpu)"
+    key = lambda m: (m.get("hostname"), m.get("modelName"), m.get("gpu"))  # noqa: E731
+    used, free, reserved = (f"max {by} (DCGM_FI_DEV_FB_{n})" for n in ("USED", "FREE", "RESERVED"))
+    util = {key(m): v for m, v in prom_range(base, f"max {by} (DCGM_FI_DEV_GPU_UTIL)", seconds, get_json)}
+    vram = {key(m): v for m, v in prom_range(base, f"100 * {used} / ({used} + {free} + {reserved})", seconds, get_json)}
+    return util, vram
+
+
+def panel_gpu(style, base, get_json=fetch_json, history=None):
     lines = heading(style, "gpu", "(DCGM)")
     # The 1650 is exported once per time-sliced slot, so collapse duplicates.
     by = "by (hostname, modelName, gpu)"
@@ -159,19 +252,25 @@ def panel_gpu(style, base, get_json=fetch_json):
     reserved, temp, power = q("DCGM_FI_DEV_FB_RESERVED"), q("DCGM_FI_DEV_GPU_TEMP"), q("DCGM_FI_DEV_POWER_USAGE")
     if not util:
         return lines + [style("y", "  no DCGM samples (dcgm-exporter paused by lean-mode deep?)")]
+    util_hist, vram_hist = graph_data(lambda: gpu_history(base, history, get_json)) or ({}, {}) if history else ({}, {})
+
+    def graph(values):
+        values = values or []
+        return ("  " + spark(style, values, hi=100.0) + style("d", f" {peak(values)}")) if len(values) >= 2 else ""
     for key in sorted(util, key=lambda k: str(k[0])):
         host, model, _ = key
         total = used.get(key, 0) + free.get(key, 0) + reserved.get(key, 0)
         vram = 100 * used.get(key, 0) / total if total else 0.0
         lines.append(f"  {style('c', host or '?')}  {model}")
-        lines.append(f"    util  {bar(style, util[key])} {style.level(util[key], f'{util[key]:3.0f}%')}")
-        lines.append(f"    vram  {bar(style, vram)} {style.level(vram, f'{vram:3.0f}%')}  "
+        lines.append(f"    util  {bar(style, util[key])} {style.level(util[key], f'{util[key]:3.0f}%')}"
+                     f"{graph(util_hist.get(key))}")
+        lines.append(f"    vram  {bar(style, vram)} {style.level(vram, f'{vram:3.0f}%')}{graph(vram_hist.get(key))}  "
                      f"{used.get(key, 0):,.0f} / {total:,.0f} MiB"
                      f"   {temp.get(key, 0):.0f}°C  {power.get(key, 0):.0f}W")
     return lines
 
 
-def panel_pods(style, base, get_json=fetch_json):
+def panel_pods(style, base, get_json=fetch_json, history=None):
     lines = heading(style, "pods", "(kube-state-metrics; RSS only exists for the Python services)")
     ready = {m["pod"]: v for m, v in prom(base, 'kube_pod_status_ready{condition="true"}', get_json)}
     restarts = {m["pod"]: v for m, v in prom(
@@ -181,6 +280,10 @@ def panel_pods(style, base, get_json=fetch_json):
     limits = {m["pod"]: v for m, v in prom(
         base, 'sum by (pod) (kube_pod_container_resource_limits{resource="memory"})', get_json)}
     rss = {m["service"]: v for m, v in prom(base, "process_resident_memory_bytes", get_json)}
+    rss_hist = {}
+    if history:
+        rss_hist = graph_data(lambda: {m["service"]: v for m, v in prom_range(
+            base, "process_resident_memory_bytes", history, get_json)})
     if not ready:
         return lines + [style("y", "  no pod data from kube-state-metrics")]
     for pod in sorted(ready):
@@ -197,7 +300,11 @@ def panel_pods(style, base, get_json=fetch_json):
         n = int(restarts.get(pod, 0))
         flag = style("r", f"  restarts={n} OOMKilled") if pod in oom else (
             style("y", f"  restarts={n}") if n else "")
-        lines.append(f"  {state} {pod[:36]:36} {mem}{flag}")
+        trend = ""
+        if limit and rss_hist.get(service):
+            # Scaled 0..limit, so a line near the top means "close to being killed".
+            trend = "  " + spark(style, rss_hist[service], hi=limit) if len(rss_hist[service]) >= 2 else ""
+        lines.append(f"  {state} {pod[:36]:36} {mem}{trend}{flag}")
     return lines
 
 
@@ -320,16 +427,17 @@ def panel_traces(style, base, window, count, get_json=fetch_json, now=time.time)
 
 
 # ---------------------------------------------------------------- assembly
-def build_frame(args, style, get_json=fetch_json, cache=None, **overrides):
+def build_frame(args, style, get_json=fetch_json, cache=None, trail=None, **overrides):
     """Every panel is isolated: one failing (Prometheus down) can't blank the rest.
 
     `cache` (a dict the caller keeps between frames) holds each panel's last good
     lines so a brief outage shows them, marked stale, instead of an error."""
     base = args.prometheus
+    history = window_seconds(args.history) if args.graphs else None
     makers = {
-        "memory": lambda: panel_memory(style, **overrides.get("memory", {})),
-        "gpu": lambda: panel_gpu(style, base, get_json),
-        "pods": lambda: panel_pods(style, base, get_json),
+        "memory": lambda: panel_memory(style, trail=trail if args.graphs else None, **overrides.get("memory", {})),
+        "gpu": lambda: panel_gpu(style, base, get_json, history=history),
+        "pods": lambda: panel_pods(style, base, get_json, history=history),
         "latency": lambda: panel_latency(style, base, args.window, get_json),
         "traces": lambda: panel_traces(style, args.tempo, args.window, args.turns, get_json),
     }
@@ -368,6 +476,9 @@ def parse_args(argv=None):
                     help="Tempo URL for the traces panel (env TEMPO_URL)")
     ap.add_argument("--turns", type=int, default=5, help="how many recent turns the traces panel shows")
     ap.add_argument("--interval", type=float, default=5.0, help="seconds between refreshes")
+    ap.add_argument("--graphs", action=argparse.BooleanOptionalAction, default=True,
+                    help="trend graphs next to the bars (default: on)")
+    ap.add_argument("--history", default="15m", help="how far back the graphs go, e.g. 5m, 15m, 2h (default: 15m)")
     ap.add_argument("--window", default="1h", help="latency window, e.g. 15m, 1h, 1d (default: 1h)")
     ap.add_argument("--once", action="store_true", help="print one frame and exit")
     ap.add_argument("--no-color", action="store_true")
@@ -379,8 +490,9 @@ def parse_args(argv=None):
             ap.error(f"--only: unknown panel(s) {', '.join(sorted(unknown))}; choose from {', '.join(PANELS)}")
         for name in PANELS:
             setattr(args, name, name in wanted)
-    if not WINDOW_RE.match(args.window):
-        ap.error("--window must look like 30s, 15m, 1h or 1d")
+    for flag in ("window", "history"):
+        if not WINDOW_RE.match(getattr(args, flag)):
+            ap.error(f"--{flag} must look like 30s, 15m, 1h or 1d")
     if args.interval <= 0:
         ap.error("--interval must be positive")
     if not any(getattr(args, n) for n in PANELS):
@@ -395,11 +507,11 @@ def main(argv=None):
     if not interactive:
         print("\n".join(build_frame(args, style)))
         return 0
-    cache = {}
+    cache, trail = {}, make_trail(args)
     try:
         sys.stdout.write("\033[?25l\033[2J")  # hide cursor, clear once
         while True:
-            frame = build_frame(args, style, cache=cache)
+            frame = build_frame(args, style, cache=cache, trail=trail)
             sys.stdout.write("\033[H" + "\033[K\n".join(frame) + "\033[K\n\033[J")
             sys.stdout.flush()
             time.sleep(args.interval)
