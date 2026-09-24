@@ -252,40 +252,33 @@ flowchart LR
     class stt,llm gpu
 ```
 
-Switching modes is automatic and one-directional per event: when the laptop
-node goes `Ready`, `gpu-scheduler` patches the `agent` Deployment to
-`LLM_HOST=http://llama-cpp-rtx4060:8080/v1`, `LLM_MODEL=qwen3-8b`; when it goes
-`NotReady` or is deleted, it patches back to
-`http://llama-cpp-gtx1650:8080/v1`, `qwen3.5-4b`. Either patch rolls the
-`agent` pod, so a turn in flight during a switch can fail and should simply be
-retried. Nothing the Stick or phone talks to moves in either case.
+Switching modes is automatic. `gpu-scheduler` re-evaluates every 10 seconds and
+on every 4060 node event, from the whole picture rather than one transition: the
+4060 counts as up only when its node is `Ready` **and** `llama-cpp-rtx4060` is
+serving. Then:
 
-## MCP tool use
+- **4060 up**: it patches `agent` to `LLM_HOST=http://llama-cpp-rtx4060:8080/v1`,
+  `LLM_MODEL=qwen3-8b`, and once that rollout has finished **and the 4060 has been
+  up for 60 seconds** it scales `llama-cpp-gtx1650` to zero, freeing about 1 GiB
+  of RAM and 3.4 GiB of VRAM on the home server. The 60 s debounce keeps a
+  laptop that sleeps and wakes from making the 1650 reload its model every time.
+- **4060 lost** (`NotReady`, deleted, or its server down): it scales the 1650
+  standby back up first, and only points `agent` at
+  `http://llama-cpp-gtx1650:8080/v1`, `qwen3.5-4b` once the standby reports
+  ready, so `agent` never targets a server that isn't there. From zero that is a
+  model load (about 50 s, 61 s measured end to end) on top of the time k3s takes to
+  notice the node is gone; a turn during that window fails and should be retried.
+- **Pinned warm**: `tools/standby.sh warm` keeps the standby running for an
+  instant failover at the cost of its RAM/VRAM; `auto` hands it back.
 
-The deployed agent runs a read-only MCP server from
-`tools/companion_control_mcp.py`. The Qwen3-compatible agent discovers its
-tools over stdio and executes tool calls in the agent container. Available
-tools are:
+Each patch to `agent` rolls its pod, so a turn in flight during a switch can fail.
+Nothing the Stick or phone talks to moves in either case.
 
-- `get_service_health` — Prometheus scrape health, pod readiness, and restarts
-- `get_gpu_status` — DCGM GPU and VRAM utilization
-- `get_agent_status` — the agent service health and configured backend
-
-The server has no shell, filesystem, Kubernetes, or device-write capability.
-Hermes is optional and is not part of the normal M5Stick path. See
-[`docs/companion-control-mcp.md`](docs/companion-control-mcp.md) for the
-in-cluster configuration and local smoke tests. The model-facing live smoke
-test checks that Qwen actually returns tool-backed GPU/VRAM and service-health
-answers (rather than merely checking the MCP JSON-RPC transport):
-
-```bash
-python tools/smoke_mcp.py \
-  --agent-url http://agent:8002 \
-  --prometheus-url http://prometheus:9090 \
-  --label qwen-route
-```
-
-Run it from an in-cluster pod or use reachable port-forwards for those URLs.
+Reply audio is spoken a sentence at a time: the gateway synthesizes the next
+sentence while it sends the previous one's audio. The Stick firmware has been
+changed to start playing as audio arrives (instead of after the whole reply), but
+that change is compiled and **not yet flashed to the device** (see `TODO.md`), so
+until it is the Stick still waits for the full reply.
 
 ## Observability
 
@@ -312,6 +305,16 @@ kubectl -n aicompanion port-forward svc/grafana 3000:3000
 
 The provisioned dashboard path is
 `/d/aicompanion/ai-companion-service-performance`.
+
+For day-to-day use there is a terminal dashboard, `tools/obs_tui.py` (standard
+library only, no browser): host RAM/swap/pressure, GPU util and VRAM, pods with a
+role each (`pipeline`, `support`, and `serving` vs `standby` for the llama
+servers) plus the deployments scaled to zero, the speaker-verification gate,
+per-stage latency and, opt-in, Tempo traces, each panel toggled by a
+flag (`--only`, `--no-NAME`, `--history`). It reads Prometheus and Tempo through
+`tools/port-forwards.sh`. `tools/lean-mode.sh` pauses the optional pods
+(Grafana, Tempo, then metrics, then web search) when RAM on `arch-ssd` is tight;
+`off` brings everything back.
 
 ## TTS backends
 
@@ -398,6 +401,11 @@ android_companion/      the Android app that bridges the Stick's BLE
                          docs/ble-migration.md.
 
 tools/
+  obs_tui.py            terminal observability dashboard (see Observability)
+  port-forwards.sh      supervised kubectl tunnels to Prometheus/Grafana/Tempo
+  lean-mode.sh          pause/resume optional pods to save RAM on arch-ssd
+  standby.sh            pin the 1650 standby LLM server warm, or let the
+                         controller scale it (auto)
   echo_server.py        same WebSocket protocol as bridge_server.py, but skips
                          STT/LLM/TTS entirely — mic audio goes straight
                          back to the speaker. Use this to tell a network/
@@ -457,7 +465,8 @@ voicepipe/mcp_stdio.py          stdio MCP client used by the agent tool loop
 deploy/kubernetes/      k3s manifests for the home-server (GTX 1650) +
                          laptop (RTX 4060) cluster
 controller/gpu_scheduler/  custom controller that retargets the agent
-                         service to whichever GPU node is up
+                         service to whichever GPU node is up, and scales the
+                         1650's standby LLM server to zero while the 4060 serves
 observability/           Prometheus, Grafana, Tempo, OpenTelemetry, kube-state-
                          metrics, and DCGM Exporter manifests
 benchmarks/              benchmark scripts and comparison notes
@@ -478,8 +487,8 @@ Covers the pure and mockable logic: the backend registry and its CLI plumbing,
 script), `bridge_server.py`'s wire protocol with STT/LLM/TTS and the
 WebSocket mocked out, the `services/*/app.py` HTTP wrappers (FastAPI's test
 client against a fake backend, same seam as above), and
-`controller/gpu_scheduler/controller.py`'s routing logic (a recording fake
-in place of the Kubernetes client), MCP transport/tool loops, observability
+`controller/gpu_scheduler/controller.py`'s routing and standby-scaling
+decisions (a pure function, plus a recording fake in place of the Kubernetes client), MCP transport/tool loops, observability
 queries, and Kubernetes manifest contracts — no GPU, model, cluster, or network
 needed, runs in a few seconds. Run it after any change to `voicepipe/`,
 `bridge_server.py`, `services/`, or `controller/`.

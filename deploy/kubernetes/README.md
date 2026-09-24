@@ -97,6 +97,11 @@ kubectl apply -f agent.yaml
 kubectl apply -f gateway.yaml
 ```
 
+`llama-cpp-gtx1650.yaml` deliberately has no `replicas:` field: on a fresh install it
+starts at one replica, then `controller/gpu_scheduler` owns it and scales it to zero
+while the 4060 serves (`tools/standby.sh warm` pins it). Deploy the controller
+(`controller/gpu_scheduler/deploy.yaml`) as well, or the standby just stays running.
+
 `searxng.yaml` provides the cluster-internal, API-key-free web search service
 used by the agent's `search_web` MCP tool. It is not exposed through a
 NodePort; only the agent can reach it at `http://searxng:8080`.
