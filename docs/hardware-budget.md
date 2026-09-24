@@ -11,27 +11,52 @@ each number. Two machines: the **laptop** (20 CPU threads, RTX 4060) and
 **arch-ssd** (i5-10300H, 8 threads, AVX2 without VNNI, GTX 1650). "—" means
 never measured. Switch the live one with `tools/switch-backend.sh`.
 
-STT, seconds to transcribe one 2-4 s utterance:
+STT, seconds to transcribe one utterance. The arch-ssd column is **n=50**
+(p50 / p95, the live `stt` pod, `benchmarks/sentences.txt` spoken by Kitten,
+3 warm-ups), kept in `benchmarks/runs/pipeline/20260924T20*.json`; the other
+columns are small samples (2-4 clips):
 
-| backend | CPU, laptop | CPU, arch-ssd | GPU | measured |
+| backend | CPU, laptop | arch-ssd, n=50 | GPU | measured |
 | --- | ---: | ---: | --- | --- |
-| `faster-whisper` small | 1.30 s | — | 0.33 s on the 4060 (685 MiB); 3.31 s on the 1650, time-sliced with the LLM | 09-05, 09-24 |
-| `parakeet` 0.6B int8 | 0.19-0.37 s | **0.23 s** | — (needs sherpa-onnx's CUDA build) | 09-24 |
-| `moonshine` base (deployed) | 0.12-0.17 s | **0.18 s** | — (same) | 09-24 |
+| `faster-whisper` small | 1.30 s | 3.13 / 3.58 s on the GTX 1650 (time-sliced with the LLM) | 0.33 s on the 4060 (685 MiB) | 09-05, 09-24 |
+| `parakeet` 0.6B int8 | 0.19-0.37 s | **0.35 / 0.69 s** CPU | — (needs sherpa-onnx's CUDA build) | 09-24 |
+| `moonshine` base (deployed) | 0.12-0.17 s | **0.19 / 0.36 s** CPU | — (same) | 09-24 |
 
-TTS, as a multiple of realtime (2x = 10 s of speech made in 5 s):
+TTS, as a multiple of realtime (2x = 10 s of speech made in 5 s). The arch-ssd
+column is **n=50** per engine (`benchmarks/tts_engines/bench_tts_engines.py`,
+3 warm-ups + 10 x 5 sentences, each engine alone in its own process in the tts
+image), kept in `benchmarks/runs/tts_engines/20260924T193819Z-arch-ssd-cpu.json`;
+memory there is the engine process's peak RSS. The running service adds
+overhead on top (pod peaks: kitten 559 MiB, kokoro-onnx fp32 ~1.35 GiB):
 
-| backend | CPU, laptop | CPU, arch-ssd | GPU (4060) | memory | measured |
+| backend | CPU, laptop | arch-ssd, n=50 (slowest call) | GPU (4060) | memory | measured |
 | --- | ---: | ---: | ---: | --- | --- |
-| `kitten` nano int8 (deployed) | — | **3.1x** | — | 559 MiB pod peak | 09-24 |
-| `kitten` mini | ~2.2x | 1.4x | — | ~535 MB RSS | 09-24 |
-| `kokoro-onnx` fp32 | — | **2.2x** | — | ~1.35 GiB pod peak | 09-24 |
-| `kokoro-onnx` int8 | ~1.0x | 0.9x | — | ~580 MB RSS | 09-24 |
+| `kitten` nano int8, speed 1.6 (deployed) | — | **3.35x** (2.97x) | — | 251 MiB RSS | 09-24 |
+| `kitten` nano int8, speed 1.0 | — | 3.20x (2.92x) | — | 348 MiB RSS | 09-24 |
+| `kokoro-onnx` fp32 | — | **2.11x** (1.36x) | — | 650 MiB RSS | 09-24 |
+| `kitten` mini | ~2.2x | 1.49x (1.25x) | — | 539 MiB RSS | 09-24 |
+| `kokoro-onnx` int8 | ~1.0x | 0.80x (0.44x) | — | 462 MiB RSS | 09-24 |
 | `kokoro` (PyTorch) | — | OOM-killed at 3 GiB | — | 2.8 GiB+ | 09-23/24 |
 | `vits` (Umamusume) | 1.84x | — | — | 0 MiB VRAM | 09-05 |
-| `chatterbox` Nano | 0.79x | — | **2.54x** | 1857 MiB VRAM | 09-05 |
-| `chatterbox` Turbo | 0.43x | — | 1.75x | 2805 MiB VRAM | 09-05 |
+| `chatterbox` Nano | 0.79x | — | **2.54x** (n=3) | 1857 MiB VRAM | 09-05 |
+| `chatterbox` Turbo | 0.43x | — | 1.75x (n=3) | 2805 MiB VRAM | 09-05 |
 | `elevenlabs` | cloud | | | | not measured |
+
+A whole turn on the live cluster (agent route on the 4060, STT + LLM + TTS of
+the full reply, n=50 each, `benchmarks/runs/pipeline/`):
+
+| stt + tts | turn p50 | turn p95 |
+| --- | ---: | ---: |
+| parakeet + kitten 1.6 | 6.57 s | 32.1 s |
+| **moonshine + kitten 1.6 (deployed)** | **6.83 s** | 30.8 s |
+| moonshine + kokoro-onnx | 7.34 s | 41.5 s |
+| faster-whisper (1650) + kitten 1.6 | 9.36 s | 35.7 s |
+
+The p95 is the long replies (the LLM talks for 30+ s of audio), and the TTS
+stage here synthesizes the whole reply; the gateway speaks sentence by
+sentence, so the first sound on the Stick comes much sooner than these totals.
+The moonshine-vs-parakeet turn difference is within the LLM's own variation
+(2.23 vs 2.56 s p50); STT alone, moonshine is faster.
 
 Missing GPU numbers need the 4060 free of `llama-cpp-rtx4060` (it holds
 ~7.9 of 8 GiB), and the sherpa-onnx rows need its CUDA wheel.

@@ -1,0 +1,93 @@
+{
+  "label": "moonshine + kitten 1.6 (live)",
+  "metadata": {
+    "timestamp_utc": "2026-09-24T20:03:08.167164+00:00",
+    "llms": [
+      {
+        "name": "agent",
+        "url": "http://10.43.225.250:8002",
+        "kind": "agent",
+        "model": "local-model",
+        "think": "off",
+        "extra": {}
+      }
+    ],
+    "tts": [
+      [
+        "voice",
+        "http://10.43.58.69:8003"
+      ]
+    ],
+    "stt": "http://10.43.217.121:8001",
+    "repetitions": 10,
+    "warmups": 3,
+    "system": null,
+    "stt_backend": {
+      "name": "moonshine",
+      "options": {
+        "moonshine_model": "sherpa-onnx-moonshine-base-en-quantized-2026-02-27",
+        "moonshine_threads": 4
+      }
+    },
+    "tts_backends": {
+      "voice": {
+        "name": "kitten",
+        "options": {
+          "kitten_voice": "Bella",
+          "kitten_model": "kitten-nano-en-v0_8-int8",
+          "kitten_speed": 1.6,
+          "kitten_threads": 4
+        }
+      }
+    },
+    "git_commit": "a36b55d",
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "records": 50
+  },
+  "summary": [
+    {
+      "llm": "agent",
+      "tts": "voice",
+      "stt_backend": "moonshine",
+      "tts_backend": "kitten",
+      "ok": 50,
+      "n": 50,
+      "stt_ms_p50": 191.3,
+      "stt_ms_p95": 363.71000000000004,
+      "stt_ms_mean": 212.954,
+      "stt_ms_min": 78.0,
+      "stt_ms_max": 394.9,
+      "llm_ms_p50": 2233.1,
+      "llm_ms_p95": 11250.19,
+      "llm_ms_mean": 4436.714,
+      "llm_ms_min": 1303.2,
+      "llm_ms_max": 11890.4,
+      "tts_ms_p50": 4426.55,
+      "tts_ms_p95": 19150.789999999997,
+      "tts_ms_mean": 8000.748,
+      "tts_ms_min": 2533.9,
+      "tts_ms_max": 19448.5,
+      "turn_ms_p50": 6831.8,
+      "turn_ms_p95": 30839.64,
+      "turn_ms_mean": 12650.416,
+      "turn_ms_min": 4090.6,
+      "turn_ms_max": 31573.6,
+      "tts_x_realtime_p50": 3.274,
+      "tts_x_realtime_p95": 3.4954,
+      "tts_x_realtime_mean": 3.112,
+      "tts_x_realtime_min": 1.303,
+      "tts_x_realtime_max": 3.559,
+      "audio_s_p50": 12.055,
+      "audio_s_p95": 62.84675,
+      "audio_s_mean": 25.069,
+      "audio_s_min": 5.841,
+      "audio_s_max": 67.299
+    }
+  ]
+}

@@ -52,7 +52,7 @@ SERIES = {"cpu": "CPU on the home server (process RAM)",
 
 W, H = 780, 470
 LEFT, RIGHT, TOP, BOTTOM = 76, 730, 100, 398
-X_MAX, Y_MAX = 3000, 12
+X_MAX, Y_MAX = 3000, 15
 
 
 def sx(mib):

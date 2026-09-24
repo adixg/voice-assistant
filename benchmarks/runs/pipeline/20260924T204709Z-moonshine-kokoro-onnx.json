@@ -1,0 +1,93 @@
+{
+  "label": "moonshine + kokoro-onnx",
+  "metadata": {
+    "timestamp_utc": "2026-09-24T20:47:09.462226+00:00",
+    "llms": [
+      {
+        "name": "agent",
+        "url": "http://10.43.225.250:8002",
+        "kind": "agent",
+        "model": "local-model",
+        "think": "off",
+        "extra": {}
+      }
+    ],
+    "tts": [
+      [
+        "voice",
+        "http://10.43.58.69:8003"
+      ]
+    ],
+    "stt": "http://10.43.217.121:8001",
+    "repetitions": 10,
+    "warmups": 3,
+    "system": null,
+    "stt_backend": {
+      "name": "moonshine",
+      "options": {
+        "moonshine_model": "sherpa-onnx-moonshine-base-en-quantized-2026-02-27",
+        "moonshine_threads": 4
+      }
+    },
+    "tts_backends": {
+      "voice": {
+        "name": "kokoro-onnx",
+        "options": {
+          "kokoro_onnx_voice": "af_bella",
+          "kokoro_onnx_model": "kokoro-multi-lang-v1_0",
+          "kokoro_onnx_speed": 1.0,
+          "kokoro_onnx_threads": 4
+        }
+      }
+    },
+    "git_commit": "a36b55d",
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "records": 50
+  },
+  "summary": [
+    {
+      "llm": "agent",
+      "tts": "voice",
+      "stt_backend": "moonshine",
+      "tts_backend": "kokoro-onnx",
+      "ok": 50,
+      "n": 50,
+      "stt_ms_p50": 176.25,
+      "stt_ms_p95": 352.33,
+      "stt_ms_mean": 193.11,
+      "stt_ms_min": 77.3,
+      "stt_ms_max": 354.6,
+      "llm_ms_p50": 2352.95,
+      "llm_ms_p95": 15215.529999999999,
+      "llm_ms_mean": 5439.43,
+      "llm_ms_min": 1746.7,
+      "llm_ms_max": 20403.5,
+      "tts_ms_p50": 4832.75,
+      "tts_ms_p95": 26789.559999999994,
+      "tts_ms_mean": 10113.824,
+      "tts_ms_min": 3116.1,
+      "tts_ms_max": 32424.9,
+      "turn_ms_p50": 7339.2,
+      "turn_ms_p95": 41498.505,
+      "turn_ms_mean": 15746.364,
+      "turn_ms_min": 5064.8,
+      "turn_ms_max": 53045.2,
+      "tts_x_realtime_p50": 2.356,
+      "tts_x_realtime_p95": 2.4673000000000003,
+      "tts_x_realtime_mean": 2.327,
+      "tts_x_realtime_min": 2.037,
+      "tts_x_realtime_max": 2.496,
+      "audio_s_p50": 10.986,
+      "audio_s_p95": 64.53714999999998,
+      "audio_s_mean": 23.842,
+      "audio_s_min": 7.678,
+      "audio_s_max": 80.132
+    }
+  ]
+}

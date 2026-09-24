@@ -320,17 +320,18 @@ flag (`--only`, `--no-NAME`, `--history`). It reads Prometheus and Tempo through
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/charts/tts-speed-vs-memory-dark.svg">
-  <img src="assets/charts/tts-speed-vs-memory-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against memory used. Kitten nano (live): 3.2 s, 330 MiB. Kokoro-ONNX fp32: 4.5 s, 700 MiB. Kitten mini: 7.0 s, 535 MiB. Kokoro-ONNX int8: 11.5 s, 581 MiB. All four on the home server's CPU. Chatterbox Nano: 3.9 s, 1857 MiB VRAM, and Chatterbox Turbo: 5.7 s, 2805 MiB VRAM, on the RTX 4060." width="760">
+  <img src="assets/charts/tts-speed-vs-memory-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against memory used, 50 samples each on the home server CPU: Kitten nano at 1.6x speed (live) 3.0 s and 251 MiB; Kokoro-ONNX fp32 4.7 s and 650 MiB; Kitten mini 6.7 s and 539 MiB; Kokoro-ONNX int8 12.5 s and 462 MiB. On the RTX 4060 GPU, 3 samples each: Chatterbox Nano 3.9 s and 1857 MiB VRAM; Chatterbox Turbo 5.7 s and 2805 MiB VRAM." width="760">
 </picture>
 
-Lower is faster, further left is lighter. Time is at normal speaking speed
-(the live Kitten runs at `--kitten-speed 1.6`, which makes less audio per
-sentence, so it's quicker still). Memory is process RAM for the CPU engines and
-VRAM for the GPU ones. Not plotted, for lack of one of the two numbers: VITS
+Lower is faster, further left is lighter; each label shows its sample count.
+CPU points are 50 samples each on the home server
+(`benchmarks/runs/tts_engines/`); memory is the engine process's peak RAM for
+those and VRAM for the GPU ones, whose 3-sample numbers date from 2026-09-05. Not plotted, for lack of one of the two numbers: VITS
 (1.8x realtime on the laptop CPU, RAM not measured), Chatterbox on CPU
 (0.4-0.8x realtime), PyTorch Kokoro (OOM-killed at 3 GiB before finishing a
 run) and ElevenLabs (cloud). Every number and its source is in
-`docs/hardware-budget.md`; regenerate with `python benchmarks/plot_tts_tradeoff.py`.
+`docs/hardware-budget.md`; regenerate with `python benchmarks/plot_tts_tradeoff.py`
+(it reads the kept runs; see `benchmarks/README.md`).
 
 The deployed TTS backend is KittenTTS nano (voice `Bella`) on CPU via
 sherpa-onnx: 3.1x realtime at ~560 MiB on the home server. `kokoro-onnx` is the

@@ -1,0 +1,129 @@
+{
+  "label": "arch-ssd CPU",
+  "metadata": {
+    "timestamp_utc": "2026-09-24T19:38:19.398376+00:00",
+    "host": "arch-ssd",
+    "device": "cpu",
+    "cpu": "Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz",
+    "cpus": 8,
+    "warmups": 3,
+    "repetitions": 10,
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "git_commit": "78e358e",
+    "failures": [],
+    "memory_note": "rss_peak_mib is the engine process's own peak RSS (VmHWM), plus any worker processes it started; not a pod's cgroup total"
+  },
+  "summary": [
+    {
+      "label": "Kitten nano",
+      "backend": "kitten",
+      "options": {
+        "kitten_voice": "Bella",
+        "kitten_model": "kitten-nano-en-v0_8-int8",
+        "kitten_speed": 1.0,
+        "kitten_threads": 4
+      },
+      "n": 50,
+      "load_s": 0.59,
+      "rss_peak_mib": 348.3,
+      "x_realtime": 3.204,
+      "s_per_10s_speech": 3.121,
+      "x_realtime_p50": 3.217,
+      "x_realtime_min": 2.924,
+      "synth_s_p50": 1.79925,
+      "synth_s_p95": 3.8811999999999998,
+      "synth_s_max": 3.9546,
+      "audio_s_total": 339.77
+    },
+    {
+      "label": "Kitten nano 1.6x (live)",
+      "backend": "kitten",
+      "options": {
+        "kitten_voice": "Bella",
+        "kitten_model": "kitten-nano-en-v0_8-int8",
+        "kitten_speed": 1.6,
+        "kitten_threads": 4
+      },
+      "n": 50,
+      "load_s": 0.58,
+      "rss_peak_mib": 251.0,
+      "x_realtime": 3.351,
+      "s_per_10s_speech": 2.984,
+      "x_realtime_p50": 3.31,
+      "x_realtime_min": 2.967,
+      "synth_s_p50": 1.1787,
+      "synth_s_p95": 2.41872,
+      "synth_s_max": 2.4721,
+      "audio_s_total": 227.09
+    },
+    {
+      "label": "Kitten mini",
+      "backend": "kitten",
+      "options": {
+        "kitten_voice": "Bella",
+        "kitten_model": "kitten-mini-en-v0_8",
+        "kitten_speed": 1.0,
+        "kitten_threads": 4
+      },
+      "n": 50,
+      "load_s": 0.67,
+      "rss_peak_mib": 539.2,
+      "x_realtime": 1.489,
+      "s_per_10s_speech": 6.718,
+      "x_realtime_p50": 1.5,
+      "x_realtime_min": 1.249,
+      "synth_s_p50": 3.8001,
+      "synth_s_p95": 7.07495,
+      "synth_s_max": 7.3821,
+      "audio_s_total": 309.12
+    },
+    {
+      "label": "Kokoro-ONNX fp32",
+      "backend": "kokoro-onnx",
+      "options": {
+        "kokoro_onnx_voice": "af_bella",
+        "kokoro_onnx_model": "kokoro-multi-lang-v1_0",
+        "kokoro_onnx_speed": 1.0,
+        "kokoro_onnx_threads": 4
+      },
+      "n": 50,
+      "load_s": 1.62,
+      "rss_peak_mib": 650.1,
+      "x_realtime": 2.112,
+      "s_per_10s_speech": 4.735,
+      "x_realtime_p50": 2.214,
+      "x_realtime_min": 1.361,
+      "synth_s_p50": 1.55405,
+      "synth_s_p95": 2.93938,
+      "synth_s_max": 3.5375,
+      "audio_s_total": 182.8
+    },
+    {
+      "label": "Kokoro-ONNX int8",
+      "backend": "kokoro-onnx",
+      "options": {
+        "kokoro_onnx_voice": "af_bella",
+        "kokoro_onnx_model": "kokoro-int8-multi-lang-v1_0",
+        "kokoro_onnx_speed": 1.0,
+        "kokoro_onnx_threads": 4
+      },
+      "n": 50,
+      "load_s": 1.42,
+      "rss_peak_mib": 462.4,
+      "x_realtime": 0.798,
+      "s_per_10s_speech": 12.531,
+      "x_realtime_p50": 0.812,
+      "x_realtime_min": 0.44,
+      "synth_s_p50": 4.30375,
+      "synth_s_p95": 7.67829,
+      "synth_s_max": 7.9727,
+      "audio_s_total": 181.9
+    }
+  ]
+}
