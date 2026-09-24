@@ -277,6 +277,21 @@ instead of 300 ms. Same reply afterwards: **arrived in 9.2 s (~69 KB/s, 2.1x
 playback), zero underruns, playback started 1.8 s after the text, and it
 finished at 21.4 s.** App `versionName` 1.1.
 
+**Reconnect delay fixed (2026-09-24).** Every reconnect used to fail one to
+three times before working (Stick serial: `pairing complete: bonded=0
+encrypted=0`, then `disconnected, reason=19`), costing 8-35 s. Phone logcat
+showed the bonded phone starting encryption on connect and the link then dying
+by `HCI_ERR_CONNECTION_TOUT` ~7 s later; on the Stick, reason 19 is NimBLE's
+`BLE_HS_ETIMEOUT_HCI`. `onConnect` was firing PHY, data-length and
+connection-parameter updates at the same moment encryption started, and the
+controller stalled. `onConnect` now does no link tuning;
+`onAuthenticationComplete` requests only the connection interval once the link
+is encrypted (the phone requests the 2M PHY itself and Android negotiates data
+length). Four resets in a row: zero failed attempts, connected ~5 s after
+advertising (that 5 s is the phone noticing the old link's 4 s supervision
+timeout and rescanning), handshake done within a second. Reply audio is
+unaffected: ~71 KB/s.
+
 ## Phase 3 — byte-envelope codec, in progress (2026-09-16)
 
 Codec + two-characteristic split written and build-checked on both sides

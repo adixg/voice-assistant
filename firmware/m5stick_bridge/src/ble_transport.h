@@ -136,14 +136,13 @@ class ServerCB : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *server, NimBLEConnInfo &info) override {
     gConnHandle = info.getConnHandle();
     Serial.printf("[ble] connected, handle=%u\n", gConnHandle);
-
-    // Tuning, applied once per connection -- carried over from Phase 2/3.
-    // Interval units are 1.25ms (BLE spec), timeout units are 10ms:
-    // 6*1.25=7.5ms min, 12*1.25=15ms max, 400*10ms=4s supervision timeout.
-    server->updatePhy(gConnHandle, BLE_GAP_LE_PHY_2M, BLE_GAP_LE_PHY_2M, 0);
-    server->setDataLen(gConnHandle, 251);  // max LL payload octets
-    server->updateConnParams(gConnHandle, 6, 12, 0, 400);
-
+    // No link tuning here. A bonded phone starts encryption the instant it
+    // connects, and firing PHY + data-length + connection-parameter updates
+    // on top of that stalled the controller: NimBLE reported an HCI timeout
+    // (reason=19), dropped the link, and the phone only noticed ~7 s later by
+    // supervision timeout -- one to three wasted attempts, 8-35 s, on every
+    // reconnect (phone logcat + serial, 2026-09-24). Tuning now waits for
+    // onAuthenticationComplete() below.
     bleAuthed = false;  // every new connection must AUTH again, bonded or not
     bleConnected = true;
   }
@@ -161,6 +160,13 @@ class ServerCB : public NimBLEServerCallbacks {
   void onAuthenticationComplete(NimBLEConnInfo &info) override {
     Serial.printf("[ble] pairing complete: bonded=%d encrypted=%d authenticated=%d\n",
                   info.isBonded(), info.isEncrypted(), info.isAuthenticated());
+    if (!info.isEncrypted()) return;
+    // Link tuning, once security is settled (see onConnect). Only the
+    // connection interval is requested: the phone asks for the 2M PHY itself
+    // (RelayService's setPreferredPhy) and Android negotiates data length on
+    // its own. Interval units are 1.25 ms, timeout units 10 ms: 7.5-15 ms
+    // interval, 4 s supervision timeout -- carried over from Phase 2/3.
+    NimBLEDevice::getServer()->updateConnParams(info.getConnHandle(), 6, 12, 0, 400);
   }
 };
 
