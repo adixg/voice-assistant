@@ -34,7 +34,8 @@ or `elevenlabs`) — see "Swapping backends" below.
 
 Still tracked in `TODO.md`: wake word activation, an IMU wrist-raise gesture
 wake, haptic feedback, voice isolation, and a BLE soak test (hours-long
-connection, reconnect after Bluetooth toggle/reboot/deep-sleep).
+connection, reconnect after reboot/deep-sleep; Start → Stop → Start and
+Bluetooth-toggle reconnects are already verified on the device).
 
 ### On-device screens
 

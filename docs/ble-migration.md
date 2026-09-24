@@ -496,6 +496,8 @@ WebSocket state on Stop so a rapid Start → Stop → Start cannot revive a
 half-stopped service. Its saved endpoint is one-time migrated to the k3s
 gateway at `arch-ssd.<tailnet>.ts.net:30800`, now the repository's primary
 path. As of 2026-09-23 the updated APK (`versionName` 1.0) is installed on
-the phone and the gateway manifest/Secret are applied and live. **Still
-remaining**: verify a real k3s-backed Stick conversation, and run the
-hours-long/Bluetooth-toggle/reboot/deep-sleep soak tests. See `TODO.md`.
+the phone and the gateway manifest/Secret are applied and live. The same day,
+Start → Stop → Start and a Bluetooth toggle both reconnected correctly on the
+real device (owner-verified). **Still remaining**: verify a real k3s-backed
+Stick conversation, reboot/deep-sleep reconnect, and the hours-long soak. See
+`TODO.md`.
