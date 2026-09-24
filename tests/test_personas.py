@@ -101,3 +101,9 @@ class TestCompose:
 
     def test_neither_yields_an_empty_prompt(self):
         assert compose("", None) == ""
+
+
+def test_partner_never_promises_a_lookup_it_does_not_make():
+    """She said "Let me see..." about the weather and never checked (2026-09-24)."""
+    from voicepipe.personas import PARTNER
+    assert "later" in PARTNER and "tool" in PARTNER
