@@ -40,8 +40,8 @@ Bluetooth-toggle reconnects are already verified on the device).
 ### On-device screens
 
 The Stick cycles between Rina's animated face, a clock, and a pomodoro timer
-with BtnA. The repository includes the source sprite and representative
-240×135 previews of the three screens:
+with BtnA. The repository includes the source sprite and real M5StickS3
+captures of the three screens:
 
 <table>
   <tr>
@@ -51,8 +51,8 @@ with BtnA. The repository includes the source sprite and representative
   </tr>
   <tr>
     <td><img src="assets/sprites/idle.png" alt="Rina-chan pixel-art face" width="240"></td>
-    <td><img src="assets/screens/clock.svg" alt="Catppuccin digital clock screen" width="240"></td>
-    <td><img src="assets/screens/pomodoro.svg" alt="50-minute pomodoro focus timer" width="240"></td>
+    <td><img src="assets/screens/clock-real.jpg" alt="M5StickS3 digital clock screen" width="240"></td>
+    <td><img src="assets/screens/pomodoro-real.jpg" alt="M5StickS3 50-minute pomodoro focus timer" width="240"></td>
   </tr>
 </table>
 

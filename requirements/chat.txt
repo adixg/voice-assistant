@@ -10,6 +10,7 @@ faster-whisper==1.2.1        # pulls ctranslate2, tokenizers, onnxruntime (VAD),
 ollama==0.6.2                # pulls httpx, pydantic
 PySide6==6.11.2              # the speech orb; pulls shiboken6
 websockets==15.0.1           # bridge_server.py talks to the M5StickS3 over this
+sherpa-onnx==1.13.8          # parakeet/moonshine STT, kokoro-onnx/kitten TTS (voicepipe/backends/sherpa_*.py)
 kaldi-native-fbank==1.20.2   # voicepipe/backends/wespeaker.py's speaker-verification gate;
                               # onnxruntime above already covers its other dependency
 

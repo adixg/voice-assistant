@@ -2,6 +2,13 @@
 # (requirements/chatterbox.txt or requirements/uma-tts.txt, both at the repo
 # root) are installed separately by the Dockerfile via a build arg, so this
 # one image can be built for either backend without duplicating those files.
+#
+# sherpa-onnx is here rather than in a backend file so that every TTS image can
+# also run the kokoro-onnx and kitten backends (voicepipe/backends/sherpa_tts.py):
+# switching to them is then a change of args, not of image. It is CPU-only and
+# small; numpy is its one runtime need beyond the wheel.
+sherpa-onnx==1.13.8
+numpy
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1

@@ -34,13 +34,26 @@ spec:
             requests: {memory: 1536Mi}
             limits: {memory: 3Gi}
           args: ["--tts-backend", "kokoro", "--kokoro-voice", "af_bella", "--kokoro-language", "a", "--kokoro-device", "cpu"]
+          # Switch backend with tools/switch-backend.sh (tts: kokoro,
+          # kokoro-onnx, kitten); it patches these args and the memory limit
+          # together, since kokoro-onnx and kitten need a fraction of this one.
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
+            - {name: SHERPA_MODELS_DIR, value: /models/sherpa-onnx}
           ports:
             - {containerPort: 8003, name: metrics}
+          volumeMounts:
+            - {name: sherpa-models, mountPath: /models/sherpa-onnx}
           readinessProbe:
             httpGet: {path: /health, port: 8003}
             initialDelaySeconds: 10
+      volumes:
+        # kokoro-onnx/kitten models (voicepipe/backends/_sherpa.py) download
+        # here on first use; shared with the stt pod, same node.
+        - name: sherpa-models
+          hostPath:
+            path: /var/lib/aicompanion/sherpa-onnx
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
