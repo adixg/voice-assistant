@@ -153,7 +153,13 @@ static bool playbackStarted = false;
 static bool replyEnded = false;       // FRAME_END seen: no more audio is coming
 static bool replyAborted = false;     // interrupted, or the user started talking
 static uint32_t lastAudioMs = 0;
-static const size_t PLAY_PREBUFFER_BYTES = 9600;       // 0.3s at 16kHz PCM16
+// BLE delivers roughly 50 KB/s against 32 KB/s of playback, only ~1.5x, and the
+// phone relay adds jitter, so a small cushion stutters. Start with 1.5s buffered,
+// and after the speaker runs dry mid-reply wait for 1s more before resuming
+// instead of playing each scrap that trickles in (that sounds like stuttering).
+static const size_t PLAY_PREBUFFER_BYTES = 48000;      // 1.5s at 16kHz PCM16
+static const size_t PLAY_REBUFFER_BYTES = 32000;       // 1.0s
+static const size_t PLAY_MIN_QUEUE_BYTES = 8000;       // 0.25s: don't queue crumbs
 static const uint32_t UNDERRUN_GIVEUP_MS = 10000;      // reply stalled mid-stream
 
 static float rms16(const int16_t *data, size_t n) {
@@ -904,8 +910,15 @@ void setup() {
     M5.Speaker.setVolume(255);
   }
 
-  replyCap = 200 * 1024;
+  // A whole reply must fit: once playback starts the buffer can't move (the
+  // speaker reads it in place), so it can't be grown mid-reply. 2 MB is ~65s of
+  // audio, from the 8 MB of PSRAM.
+  replyCap = 2 * 1024 * 1024;
   replyBuf = (uint8_t *)ps_malloc(replyCap);
+  if (!replyBuf) {  // fall back to a smaller buffer rather than crash on the first reply
+    replyCap = 256 * 1024;
+    replyBuf = (uint8_t *)ps_malloc(replyCap);
+  }
 
   connectNetwork();
 }
@@ -930,7 +943,9 @@ static void pumpPlayback() {
     speakStartMs = millis();
     uiState = UI_SPEAKING;
   }
-  if (pending >= 2 && M5.Speaker.isPlaying(0) < 2) {
+  size_t slots = M5.Speaker.isPlaying(0);  // 0 idle, 1 playing, 2 playing + next queued
+  if (slots == 0 && !replyEnded && pending < PLAY_REBUFFER_BYTES) return;  // ran dry: refill first
+  if (slots < 2 && pending >= 2 && (pending >= PLAY_MIN_QUEUE_BYTES || replyEnded)) {
     size_t n = pending & ~(size_t)1;
     M5.Speaker.playRaw((const int16_t *)(replyBuf + queuedOff), n / 2, SAMPLE_RATE, false, 1, 0, false);
     queuedOff += n;
