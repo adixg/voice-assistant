@@ -136,3 +136,46 @@ def test_lean_mode_never_touches_the_voice_pipeline():
         for line in script.splitlines():
             if line.startswith(("UI=", "METRICS=", "SEARCH=")):
                 assert name not in line.replace("kube-state-metrics", "")
+
+
+# Highest memory each pod was actually measured to use (MiB, from the cgroup's
+# memory.peak, 2026-09-23/24, ANON where it is known). A limit at or below one
+# of these has already OOM-killed the pod once: tts at 1792Mi (idle reading
+# ~1.1Gi, real synthesis peak 2.8Gi), tempo at 384Mi (WAL replay on start), and
+# llama-cpp-gtx1650 at 2Gi (reclaimable GGUF cache plus 1.06Gi of anon). Add to
+# this table when a pod is measured; never lower a limit below its row.
+MEASURED_PEAK_MIB = {
+    "tts": 2801,
+    "tempo": 384,
+    "llama-cpp-gtx1650": 2057,
+}
+
+
+def test_no_memory_limit_is_at_or_below_a_measured_peak():
+    def mib(quantity):
+        quantity = str(quantity)
+        for suffix, factor in (("Gi", 1024), ("Mi", 1)):
+            if quantity.endswith(suffix):
+                return float(quantity[:-2]) * factor
+        raise AssertionError(f"unrecognised memory quantity {quantity!r}")
+
+    checked = set()
+    for path, doc in arch_ssd_workloads():
+        name = doc["metadata"]["name"]
+        if name not in MEASURED_PEAK_MIB:
+            continue
+        limit = mib(doc["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]["memory"])
+        assert limit > MEASURED_PEAK_MIB[name], (
+            f"{name}: limit {limit:.0f}Mi is not above its measured peak {MEASURED_PEAK_MIB[name]}Mi")
+        checked.add(name)
+    assert checked == set(MEASURED_PEAK_MIB)     # every row is actually enforced
+
+
+def test_a_pods_request_never_exceeds_its_limit():
+    for path, doc in arch_ssd_workloads():
+        for container in doc["spec"]["template"]["spec"]["containers"]:
+            res = container.get("resources", {})
+            request, limit = res.get("requests", {}).get("memory"), res.get("limits", {}).get("memory")
+            if request and limit:
+                to_mib = lambda q: float(str(q)[:-2]) * (1024 if str(q).endswith("Gi") else 1)  # noqa: E731
+                assert to_mib(request) <= to_mib(limit), (path, doc["metadata"]["name"])

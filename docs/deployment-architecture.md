@@ -168,6 +168,32 @@ own `process_resident_memory_bytes`). Its limit is 3Gi, and a first cut of
 1792Mi, sized from an idle reading, OOM-killed it mid-reply. Reducing this is
 the most valuable remaining RAM lever.
 
+**Measured per-pod memory (2026-09-24, arch-ssd).** Read from each container's
+cgroup (`memory.peak`, `memory.stat`, sampled once a second where noted); the
+"peak" column includes reclaimable page cache, "real" is anonymous memory, which
+is what actually causes OOM kills.
+
+| Pod | Real use | Peak | Limit | Notes |
+|---|---|---|---|---|
+| `tts` | 1.2-1.9 GiB in normal turns | 2.8 GiB (1000-char stress) | 3 GiB | OOM-killed at 1792Mi |
+| `llama-cpp-gtx1650` | 0.6 GiB after load, **1.06 GiB after a long generation, never shrinks** | 2.0 GiB at load (1.76 GiB is GGUF page cache) | 3 GiB | OOM-killed at 2Gi mid-request; a standby while the agent uses the laptop's LLM |
+| `stt` | ~0.4 GiB | 1.0 GiB (page cache) | 1 GiB | 0.27s of memory stall in 17h, so the limit is not what makes it slow |
+| `dcgm-exporter` | ~0.42 GiB | 0.44 GiB | 512Mi | closest small pod to its limit |
+| `gateway` / `prometheus` / `searxng` / `gpu-scheduler` / `agent` / `kube-state-metrics` | 47-243 MiB | 47-243 MiB | 128-512Mi | comfortable |
+
+Both OOM kills came from sizing a limit off an idle reading. Measure through
+load *and* a long generation/synthesis, and read anon separately from cache.
+`tests/test_deployment_manifests.py` keeps a `MEASURED_PEAK_MIB` table so a
+limit cannot be lowered to or below a measured peak again.
+
+What this says about the machine: real peaks of the voice pipeline (`tts` up to
+~2.8 GiB, LLM ~1.06 GiB anon, `stt` ~0.4 GiB) plus k3s (~0.7 GiB), the small
+pods (~1 GiB) and the desktop do not fit 7.6 GiB together in the worst case, so
+it leans on swap. The standby `llama-cpp-gtx1650` costs ~0.7-1 GiB of RAM (and
+3.4 GiB of VRAM) while the agent points at the laptop; scaling it to 0 while the
+4060 is up would recover that at the price of a slower failover. The second RAM
+stick remains the real fix.
+
 - **Every workload here has a memory limit and a priority class**
   (`tests/test_deployment_manifests.py` enforces it). `voice-critical`
   (llama-cpp, stt, tts, agent, gateway, gpu-scheduler) outranks the default;

@@ -52,14 +52,19 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
-          # Measured ~720-785Mi (2026-09-23) with all layers offloaded to the
-          # GPU. The limit is generous because the cgroup also counts the GGUF's
-          # page cache while it loads; that part is reclaimable, but a tight
-          # limit would make the load crawl.
+          # Measured 2026-09-24 sampling the cgroup once a second through model
+          # load and four generations (short, medium, long-context, a 900-token
+          # story): total peaks ~2.0Gi at load, but ~1.76Gi of that is the GGUF in
+          # page cache, which is reclaimable. The real (anon) memory is ~0.6Gi
+          # after load and rises to ~1.06Gi after a long generation, and does not
+          # shrink again. A first cut of 2Gi, sized from an idle reading, left the
+          # kernel no room to reclaim that cache while anon grew, and OOM-killed
+          # the pod mid-request. The request is the anon high-water mark, so the
+          # OOM killer ranks this pod behind bigger over-budget ones.
           resources:
-            requests: {memory: 768Mi}
+            requests: {memory: 1Gi}
             limits:
-              memory: 2Gi
+              memory: 3Gi
               nvidia.com/gpu: 1
           volumeMounts:
             - name: model-cache
