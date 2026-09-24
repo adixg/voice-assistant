@@ -298,7 +298,13 @@ class MainActivity : AppCompatActivity() {
         // M5Stack advises staying under 191 on battery: louder can brown out the Stick.
         val warn = if (volumeBar.progress > 191) "  (over 191: may reboot on battery)" else ""
         volumeLabel.text = "Volume ${volumeBar.progress}/255$warn"
-        brightnessLabel.text = "Brightness ${brightnessBar.progress}/255"
+        // 0 turns the Stick's screen off to save battery (it looks dead on
+        // purpose); tapping either button shows it for 10 s.
+        brightnessLabel.text = if (brightnessBar.progress == 0) {
+            "Brightness: screen off (tap a button on the Stick to peek for 10 s)"
+        } else {
+            "Brightness ${brightnessBar.progress}/255"
+        }
     }
 
     private fun showOta(message: String, percent: Int) {

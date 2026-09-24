@@ -16,8 +16,8 @@ android {
         // (Galaxy A36, Android 16 / SDK 36).
         minSdk = 31
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     buildTypes {

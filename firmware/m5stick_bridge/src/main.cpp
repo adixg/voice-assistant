@@ -1047,7 +1047,18 @@ void loop() {
     if (uiState == transientState) uiState = UI_IDLE;  // else something else (e.g. a dropped
   }                                                     // connection) already moved us on
 
-  if (currentScreen == SCREEN_POMODORO) {
+  // Screen off (brightness 0, see stick_settings.h): a BtnB tap only wakes it.
+  // The pomodoro branch below acts on single/double clicks that are reported
+  // a moment after the release, so B is ignored briefly after a wake too.
+  static uint32_t swallowBtnBUntil = 0;
+  if (StickSettings::screenOff() && M5.BtnB.wasClicked() && StickSettings::peek()) {
+    swallowBtnBUntil = millis() + 800;
+  }
+  bool btnBLive = (int32_t)(millis() - swallowBtnBUntil) >= 0;
+
+  if (!btnBLive) {
+    // swallowed: this tap woke the screen
+  } else if (currentScreen == SCREEN_POMODORO) {
     // No conversation in view to reset here, so BtnB gets screen-local
     // meanings instead: single click start/pauses, double click resets.
     // wasSingleClicked()/wasDoubleClicked() rather than wasClicked() — the
@@ -1103,7 +1114,9 @@ void loop() {
       setStatus("listening...");
     }
     if (M5.BtnA.wasReleased()) {
-      if (btnAArmed && recState == REC_IDLE) {  // let go before the hold — a tap
+      // let go before the hold — a tap. With the screen off, the tap only
+      // wakes it (peek); a hold still talks without lighting the screen.
+      if (btnAArmed && recState == REC_IDLE && !StickSettings::peek()) {
         currentScreen = (AltScreen)((currentScreen + 1) % SCREEN_COUNT);
         switch (currentScreen) {
           case SCREEN_RINA:     lastDraw = 0; break;  // repaint over the alt screen
@@ -1175,6 +1188,12 @@ void loop() {
   // (or to Rina, or the clock) mid-session shows the right remaining time.
   screenAmbientTick();
   pomodoroTick();
+  if (StickSettings::takeRepaint()) {  // the screen just came back on
+    lastDraw = 0;
+    clockFaceInvalidate();
+    pomodoroFaceInvalidate();
+  }
+  if (!StickSettings::screenVisible()) return;  // screen off: draw nothing
   switch (currentScreen) {
     case SCREEN_CLOCK:    clockFaceTick(); break;
     case SCREEN_POMODORO: pomodoroFaceTick(); break;
