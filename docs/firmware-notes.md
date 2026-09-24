@@ -354,3 +354,53 @@ double-click (pomodoro reset) behavior unchanged — those are unrelated
 features that only shared the word "double-click" with the power button in
 conversation, not in code. Flash usage actually dropped slightly (84.1% ->
 82.3%) from the removal.
+
+
+## Settings and firmware updates over BLE (2026-09-24)
+
+**Volume and brightness are live settings now**, no rebuild. `stick_settings.h`:
+the companion app's sliders send a `SETTINGS` frame (`0x0B`, `[1][volume][brightness]`);
+the Stick applies it in `loop()` (never in the NimBLE callback, which would race
+the display/speaker), saves it in NVS (namespace `stick`), and reports back the
+applied values plus its firmware version (`FW_VERSION`, from `git describe` at
+build time) after every change and whenever the link comes up. Defaults are the
+old hardcoded 255 volume / 38 brightness; brightness never goes below 8 (a black
+screen looks like a dead Stick). The app warns above volume 191, M5Stack's
+battery brownout guidance.
+
+**Firmware updates over BLE**, `ota_update.h` + `RelayService.startOta()`:
+
+- The partition table is `default_8MB.csv`: two 3.2 MB app slots. It keeps
+  `nvs`/`otadata`/`app0` at the same offsets as the old `huge_app.csv`, so bonds
+  and settings survive. **Switching to it needs one last USB flash**; after that,
+  updates go over Bluetooth. The image is ~2.27 MB (68% of a slot).
+- Frames: `OTA_BEGIN 0x0C` `[u32 size][32-char MD5 hex]`, `OTA_DATA 0x0D`
+  `[u32 offset][bytes]` (2 KB chunks, written without response), `OTA_END 0x0E`,
+  and the Stick's `OTA_STATUS 0x0F` `[code][u32 value][text]` (READY, PROGRESS
+  every 8 KB written, DONE, ERROR). The phone keeps at most 24 KB unacknowledged;
+  the Stick stages into a 64 KB PSRAM stream buffer and writes flash from
+  `loop()`, so the staging buffer can't overflow and flash writes never block
+  the BLE task. Only accepted after AUTH (the shared secret is the gate; images
+  are not signed).
+- The new image goes into the idle slot and is checked (size, MD5, ESP image
+  header by `Update`) before it becomes the boot slot; a failed or interrupted
+  transfer leaves the running firmware untouched.
+- **Rollback**: the framework's bootloader has `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`.
+  `verifyRollbackLater()` returns true so Arduino doesn't mark the new image good
+  at boot; it is marked good only when a phone passes AUTH on it. A crash before
+  that, or no AUTH within 10 minutes, rolls back to the previous firmware. This
+  covers the main way an update could brick the link: an image built with a
+  different `secrets.h` than the app. (It also means an update installed with the
+  app closed for 10 minutes rolls back; just update again.)
+- While an update runs the relay closes the gateway WebSocket (no conversation)
+  and the Stick shows a progress screen.
+
+How to update: on the machine with `include/secrets.h`, `pio run` in
+`firmware/m5stick_bridge`, copy `.pio/build/m5stick-s3/firmware.bin` to the phone,
+then in the app: Start (connected), **Update Stick firmware...**, pick the file.
+About a minute at the measured BLE rate (not yet timed on the device).
+
+**Status: compiles (firmware locally, the app in CI); not yet run on the device.**
+First test after the USB flash: the version shows in the app, both sliders take
+effect and survive a reboot, then an OTA of a rebuilt image (version changes),
+then an OTA of a deliberately wrong-secret image to see the rollback.

@@ -69,6 +69,15 @@ enum FrameType : uint8_t {
   FRAME_END         = 0x08,
   FRAME_TIME_SYNC   = 0x09,
   FRAME_AUTH        = 0x0A,
+  // Added 2026-09-24 (stick_settings.h / ota_update.h). SETTINGS goes both
+  // ways: the phone sends new values, the Stick reports what it applied (and
+  // its firmware version) after AUTH and after every change. The OTA_* frames
+  // carry a firmware update from the phone; OTA_STATUS is the Stick's answer.
+  FRAME_SETTINGS    = 0x0B,
+  FRAME_OTA_BEGIN   = 0x0C,
+  FRAME_OTA_DATA    = 0x0D,
+  FRAME_OTA_END     = 0x0E,
+  FRAME_OTA_STATUS  = 0x0F,
 };
 
 constexpr uint8_t CONT = 0xFF;  // continuation marker -- never a real logical frame type

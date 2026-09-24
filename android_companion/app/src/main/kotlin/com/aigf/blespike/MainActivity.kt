@@ -21,10 +21,15 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.view.ViewCompat
@@ -43,6 +48,43 @@ class MainActivity : AppCompatActivity() {
     private lateinit var portInput: EditText
     private lateinit var secretInput: EditText
     private lateinit var startStopButton: Button
+    private lateinit var firmwareText: TextView
+    private lateinit var volumeLabel: TextView
+    private lateinit var brightnessLabel: TextView
+    private lateinit var volumeBar: SeekBar
+    private lateinit var brightnessBar: SeekBar
+    private lateinit var otaProgress: ProgressBar
+
+    // Picks a firmware.bin (built with `pio run` on the machine that has
+    // secrets.h, then copied to the phone) and flashes it over BLE.
+    private val pickFirmware = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val bytes = try {
+            contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        } catch (e: Exception) {
+            log("Could not read the file: ${e.message}")
+            null
+        } ?: return@registerForActivityResult
+        val service = relay
+        if (service == null) {
+            log("Start the relay and connect to the Stick first")
+            return@registerForActivityResult
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Update the Stick?")
+            .setMessage(
+                "Flash ${bytes.size / 1024} KB to the Stick over Bluetooth. It takes about a minute; " +
+                    "keep the phone near the Stick. If it fails, the Stick keeps its current firmware.\n\n" +
+                    "The image must be built with the same shared secret as this app, or the Stick " +
+                    "rolls back to its current firmware after 10 minutes without a connection."
+            )
+            .setPositiveButton("Update") { _, _ ->
+                val why = service.startOta(bytes)
+                if (why != null) log("Can't update: $why")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
     private val handler = Handler(Looper.getMainLooper())
 
     private var relay: RelayService? = null
@@ -52,6 +94,9 @@ class MainActivity : AppCompatActivity() {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             relay = (binder as RelayService.LocalBinder).service()
             relay?.logListener = { line -> log(line) }
+            relay?.settingsListener = { info -> showStickInfo(info) }
+            relay?.otaListener = { message, percent -> showOta(message, percent) }
+            relay?.stickInfo?.let { showStickInfo(it) }
             running = true
             updateButtons()
         }
@@ -95,6 +140,30 @@ class MainActivity : AppCompatActivity() {
         portInput = findViewById(R.id.portInput)
         secretInput = findViewById(R.id.secretInput)
         startStopButton = findViewById(R.id.startStopButton)
+        firmwareText = findViewById(R.id.firmwareText)
+        volumeLabel = findViewById(R.id.volumeLabel)
+        brightnessLabel = findViewById(R.id.brightnessLabel)
+        volumeBar = findViewById(R.id.volumeBar)
+        brightnessBar = findViewById(R.id.brightnessBar)
+        otaProgress = findViewById(R.id.otaProgress)
+        volumeBar.isEnabled = false
+        brightnessBar.isEnabled = false
+
+        val settingsChanged = object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) = updateSettingLabels()
+            override fun onStartTrackingTouch(bar: SeekBar) {}
+            // Sent on release, not on every step: each one is a BLE write.
+            override fun onStopTrackingTouch(bar: SeekBar) {
+                if (relay?.sendSettings(volumeBar.progress, brightnessBar.progress) != true) {
+                    log("Stick not connected -- setting not sent")
+                }
+            }
+        }
+        volumeBar.setOnSeekBarChangeListener(settingsChanged)
+        brightnessBar.setOnSeekBarChangeListener(settingsChanged)
+        findViewById<Button>(R.id.otaButton).setOnClickListener {
+            if (relay?.otaActive == true) log("An update is already running") else pickFirmware.launch(arrayOf("*/*"))
+        }
 
         hostInput.setText(prefs.bridgeHost)
         portInput.setText(prefs.bridgePort.toString())
@@ -135,6 +204,8 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         relay?.logListener = null
+        relay?.settingsListener = null
+        relay?.otaListener = null
         if (isBound) {
             unbindService(connection)
             isBound = false
@@ -172,6 +243,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopRelay() {
         relay?.logListener = null
+        relay?.settingsListener = null
+        relay?.otaListener = null
         relay?.stopRelay()
         // stopSelf() cannot destroy a started service while this Activity is
         // still bound to it. Drop the binding as part of Stop so onDestroy()
@@ -208,6 +281,37 @@ class MainActivity : AppCompatActivity() {
         startActivity(
             Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
         )
+    }
+
+    private fun showStickInfo(info: RelayService.StickInfo) {
+        handler.post {
+            firmwareText.text = "Stick firmware: ${info.firmware}"
+            volumeBar.progress = info.volume
+            brightnessBar.progress = info.brightness
+            volumeBar.isEnabled = true
+            brightnessBar.isEnabled = true
+            updateSettingLabels()
+        }
+    }
+
+    private fun updateSettingLabels() {
+        // M5Stack advises staying under 191 on battery: louder can brown out the Stick.
+        val warn = if (volumeBar.progress > 191) "  (over 191: may reboot on battery)" else ""
+        volumeLabel.text = "Volume ${volumeBar.progress}/255$warn"
+        brightnessLabel.text = "Brightness ${brightnessBar.progress}/255"
+    }
+
+    private fun showOta(message: String, percent: Int) {
+        handler.post {
+            val running = percent in 0..99
+            otaProgress.visibility = if (running) View.VISIBLE else View.GONE
+            if (percent >= 0) otaProgress.progress = percent
+            // A screen timeout mid-transfer is harmless (the service does the
+            // work) but keeping it on makes progress visible without unlocking.
+            if (running) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            firmwareText.text = "Update: $message"
+        }
     }
 
     private fun updateButtons() {

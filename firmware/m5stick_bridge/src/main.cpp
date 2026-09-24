@@ -762,9 +762,21 @@ static void maybeCheckBattery() {
 // WebSocket-to-BLE translation (android_companion/.../RelayService.kt)
 // instead of a WebSocket frame directly -- so this logic is otherwise
 // unchanged from before.
+// Defined after ble_transport.h below, since both reply over BLE.
+static void onSettingsFrame(const uint8_t *payload, size_t len);
+static void onOtaFrame(uint8_t type, const uint8_t *payload, size_t len);
+
 void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
   using namespace BleEnvelope;
   switch (type) {
+    case FRAME_SETTINGS:
+      onSettingsFrame(payload, len);
+      break;
+    case FRAME_OTA_BEGIN:
+    case FRAME_OTA_DATA:
+    case FRAME_OTA_END:
+      onOtaFrame(type, payload, len);
+      break;
     case FRAME_HEARD:
       captionText = String((const char *)payload, len);
       setStatus("heard", captionText);
@@ -825,6 +837,36 @@ void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
 }
 
 #include "ble_transport.h"
+#include "stick_settings.h"
+#include "ota_update.h"
+
+static void onSettingsFrame(const uint8_t *payload, size_t len) { StickSettings::onFrame(payload, len); }
+static void onOtaFrame(uint8_t type, const uint8_t *payload, size_t len) { OtaUpdate::onFrame(type, payload, len); }
+
+// Replaces every other screen while an update is being received: the Stick
+// can't be used mid-update anyway, and this shows it hasn't hung.
+static void drawOtaScreen() {
+  static uint32_t lastDraw = 0;
+  if (millis() - lastDraw < 200) return;
+  lastDraw = millis();
+  int w = canvas.width(), h = canvas.height();
+  canvas.fillScreen(COL_BASE);
+  canvas.setTextColor(COL_TEXT, COL_BASE);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextSize(2);
+  bool finished = OtaUpdate::state == OtaUpdate::FINISHED;
+  canvas.drawString(finished ? "Restarting..." : "Updating", w / 2, h / 2 - 28);
+  int pct = OtaUpdate::percent();
+  canvas.drawString(String(pct) + "%", w / 2, h / 2 + 2);
+  int barW = w - 40, barH = 10, x = 20, y = h / 2 + 26;
+  canvas.drawRect(x, y, barW, barH, COL_SUBTEXT);
+  canvas.fillRect(x + 2, y + 2, (barW - 4) * pct / 100, barH - 4, finished ? COL_GREEN : COL_SAPPHIRE);
+  canvas.setTextSize(1);
+  canvas.setTextColor(COL_SUBTEXT, COL_BASE);
+  canvas.drawString("keep the phone nearby", w / 2, h - 12);
+  canvas.pushSprite(0, 0);
+  canvas.setTextDatum(top_left);  // the other screens assume the defaults
+}
 
 // BLE-era replacement for every old WiFi.status()==WL_CONNECTED check --
 // forward-declared near `canvas` above so clock_face.h/pomodoro_face.h can
@@ -885,11 +927,10 @@ void setup() {
     }
   }
   M5.Display.setRotation(1);
-  // The panel is a real backlit LCD (Panel_ST7789, PWM backlight on GPIO 38 --
-  // verified in M5GFX's board config, not an OLED), so the backlight is a
-  // genuine, non-trivial draw on battery -- M5GFX defaults it near max.
-  // 0-255 range; 15% (38/255) keeps it readable while reducing battery draw.
-  M5.Display.setBrightness(38);
+  // Brightness (and volume) come from StickSettings::load() below: saved in
+  // NVS and changed from the phone app, 38/255 and 255 by default. The panel is
+  // a real backlit LCD (Panel_ST7789, PWM backlight on GPIO 38), so the
+  // backlight is a genuine draw on battery.
   // 16-bit to match sprites.h's RGB565 data exactly — 8-bit here was
   // forcing every pushImage() to downconvert 65536 colors to ~256,
   // mangling the pixel art. Costs ~65KB more canvas RAM (240x135x2),
@@ -911,13 +952,13 @@ void setup() {
     spk_cfg.sample_rate = SAMPLE_RATE;
     spk_cfg.stereo = false;
     M5.Speaker.config(spk_cfg);
-    // Full volume, per request. M5Stack's own hardware notice for this board
-    // says to stay below 75% (191/255) on battery (no USB) to avoid an
-    // excessive-draw brownout reboot — this Stick does run on battery away
-    // from the laptop, so that risk is real, not just theoretical. Drop back
-    // to 190 if reboots start happening during loud playback on battery.
-    M5.Speaker.setVolume(255);
   }
+  // Volume and brightness, from NVS (defaults 255 and 38). M5Stack's own
+  // hardware notice says to stay below 75% volume (191/255) on battery to
+  // avoid an excessive-draw brownout reboot; lower it from the app if reboots
+  // start happening during loud playback on battery.
+  StickSettings::load();
+  OtaUpdate::begin();
 
   // A whole reply must fit: once playback starts the buffer can't move (the
   // speaker reads it in place), so it can't be grown mid-reply. 2 MB is ~65s of
@@ -985,6 +1026,21 @@ void loop() {
     if (uiState == UI_CONNECTING) uiState = UI_IDLE;
   }
   bleWasReady = bleReadyNow;
+
+  StickSettings::tick(bleReadyNow);
+  OtaUpdate::tick(bleReadyNow);
+  static bool otaWasActive = false;
+  if (OtaUpdate::active()) {
+    otaWasActive = true;
+    drawOtaScreen();
+    return;
+  }
+  if (otaWasActive) {  // an update failed: repaint whichever screen was up
+    otaWasActive = false;
+    lastDraw = 0;
+    clockFaceInvalidate();
+    pomodoroFaceInvalidate();
+  }
 
   if (transientUntil && millis() > transientUntil) {
     transientUntil = 0;

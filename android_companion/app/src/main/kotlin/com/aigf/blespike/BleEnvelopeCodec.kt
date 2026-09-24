@@ -1,6 +1,6 @@
 package com.aigf.blespike
 
-// Kotlin mirror of firmware/m5stick_ble_flash_spike/src/ble_envelope.h --
+// Kotlin mirror of firmware/m5stick_bridge/src/ble_envelope.h --
 // that header is the one source of truth for the wire format and every
 // constant below; keep this in exact lockstep with it, not just "close
 // enough." See that file's own header comment for the full design
@@ -18,6 +18,13 @@ object FrameType {
     const val END: Byte = 0x08
     const val TIME_SYNC: Byte = 0x09
     const val AUTH: Byte = 0x0A
+    // Settings (both directions) and firmware updates over BLE: see
+    // firmware/m5stick_bridge/src/stick_settings.h and ota_update.h.
+    const val SETTINGS: Byte = 0x0B
+    const val OTA_BEGIN: Byte = 0x0C
+    const val OTA_DATA: Byte = 0x0D
+    const val OTA_END: Byte = 0x0E
+    const val OTA_STATUS: Byte = 0x0F
 }
 
 private const val CONT: Byte = 0xFF.toByte()

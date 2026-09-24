@@ -64,6 +64,54 @@
         android:layout_height="wrap_content"
         android:text="Exempt from battery optimization" />
 
+    <!-- Stick settings and firmware update (RelayService.sendSettings/startOta) -->
+    <TextView
+        android:id="@+id/firmwareText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="12dp"
+        android:text="Stick: not connected" />
+
+    <TextView
+        android:id="@+id/volumeLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="8dp"
+        android:text="Volume" />
+
+    <SeekBar
+        android:id="@+id/volumeBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="255" />
+
+    <TextView
+        android:id="@+id/brightnessLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="8dp"
+        android:text="Brightness" />
+
+    <SeekBar
+        android:id="@+id/brightnessBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="255" />
+
+    <Button
+        android:id="@+id/otaButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Update Stick firmware…" />
+
+    <ProgressBar
+        android:id="@+id/otaProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="100"
+        android:visibility="gone" />
+
     <ScrollView
         android:id="@+id/logScroll"
         android:layout_width="match_parent"

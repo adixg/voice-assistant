@@ -61,6 +61,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
@@ -88,7 +89,37 @@ class RelayService : Service() {
         private const val BLE_SCAN_TIMEOUT_MS = 20_000L
         private const val BLE_HANDSHAKE_TIMEOUT_MS = 20_000L
         private const val BLE_BOND_TIMEOUT_MS = 45_000L
+
+        // Firmware update over BLE (firmware/.../ota_update.h). The Stick stages
+        // up to 64 KB before writing it to flash; keeping at most OTA_WINDOW
+        // unacknowledged bytes in flight means that buffer can never overflow.
+        private const val OTA_CHUNK = 2048
+        private const val OTA_WINDOW = 24 * 1024
+        private const val OTA_STALL_TIMEOUT_MS = 20_000L
+        // Two 3.2 MB app slots (default_8MB.csv); ESP32 images start with 0xE9.
+        private const val OTA_MAX_IMAGE = 0x330000
+        private const val ESP_IMAGE_MAGIC: Byte = 0xE9.toByte()
+        private const val OTA_READY = 1
+        private const val OTA_PROGRESS = 2
+        private const val OTA_DONE = 3
+        private const val OTA_ERROR = 4
     }
+
+    /** What the Stick last reported (SETTINGS frame): null until it has. */
+    data class StickInfo(val volume: Int, val brightness: Int, val firmware: String)
+
+    var stickInfo: StickInfo? = null
+        private set
+    var settingsListener: ((StickInfo) -> Unit)? = null
+    /** Firmware update progress: a message, and 0-100 (or -1 when it ended badly). */
+    var otaListener: ((String, Int) -> Unit)? = null
+
+    private var otaImage: ByteArray? = null
+    private var otaSent = 0
+    private var otaAcked = 0
+    private var otaEndSent = false
+    val otaActive: Boolean get() = otaImage != null
+    private val otaStall = Runnable { failOta("no progress for ${OTA_STALL_TIMEOUT_MS / 1000}s") }
 
     inner class LocalBinder : Binder() {
         fun service(): RelayService = this@RelayService
@@ -153,6 +184,8 @@ class RelayService : Service() {
             FrameType.STOP -> { log("stop"); sendWsText("stop") }
             FrameType.RESET -> { log("reset"); sendWsText("reset") }
             FrameType.AUDIO_CHUNK -> sendWsBinary(payload)
+            FrameType.SETTINGS -> onStickSettings(payload)
+            FrameType.OTA_STATUS -> onOtaStatus(payload)
             else -> log("unexpected TX frame type=0x%02X len=%d".format(type, payload.size))
         }
     }
@@ -207,7 +240,9 @@ class RelayService : Service() {
 
     private fun connectWs() {
         handler.removeCallbacks(wsReconnect)
-        if (!running || !bleReady || ws != null) return
+        // No conversation during a firmware update: reply audio would share the
+        // link with the image, and the Stick ignores both buttons meanwhile.
+        if (!running || !bleReady || ws != null || otaActive) return
         val host = prefs.bridgeHost
         if (host.isBlank()) {
             log("No bridge host configured -- open the app and set one")
@@ -267,7 +302,7 @@ class RelayService : Service() {
         // control, text) stays acknowledged. Android still calls
         // onCharacteristicWrite once a no-response packet is handed to the
         // controller, so the one-write-at-a-time queue keeps its flow control.
-        val writeType = if (type == FrameType.AUDIO_CHUNK) {
+        val writeType = if (type == FrameType.AUDIO_CHUNK || type == FrameType.OTA_DATA) {
             BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         } else {
             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
@@ -326,6 +361,110 @@ class RelayService : Service() {
         sendTimeSync()
         connectWs()
         timeSyncTick.run()
+    }
+
+    // ------------------------------------------------------ settings + OTA
+    private fun onStickSettings(payload: ByteArray) {
+        if (payload.size < 3 || payload[0].toInt() != 1) {
+            log("malformed SETTINGS frame (${payload.size} bytes)")
+            return
+        }
+        val info = StickInfo(
+            volume = payload[1].toInt() and 0xFF,
+            brightness = payload[2].toInt() and 0xFF,
+            firmware = String(payload, 3, payload.size - 3, Charsets.UTF_8)
+        )
+        stickInfo = info
+        log("Stick: firmware ${info.firmware}, volume ${info.volume}, brightness ${info.brightness}")
+        settingsListener?.invoke(info)
+    }
+
+    /** Send new volume/brightness (0-255 each). False when the Stick isn't connected. */
+    fun sendSettings(volume: Int, brightness: Int): Boolean {
+        if (!bleReady) return false
+        enqueueFrame(
+            FrameType.SETTINGS,
+            byteArrayOf(1, volume.coerceIn(0, 255).toByte(), brightness.coerceIn(0, 255).toByte())
+        )
+        return true
+    }
+
+    /** Start flashing [image] (a firmware.bin) to the Stick. Returns why not, or null. */
+    fun startOta(image: ByteArray): String? {
+        if (!bleReady) return "the Stick isn't connected"
+        if (otaActive) return "an update is already running"
+        if (image.isEmpty() || image[0] != ESP_IMAGE_MAGIC) return "that isn't an ESP32 firmware image (firmware.bin)"
+        if (image.size > OTA_MAX_IMAGE) return "image is ${image.size} bytes, over the ${OTA_MAX_IMAGE}-byte slot"
+        val md5 = MessageDigest.getInstance("MD5").digest(image).joinToString("") { "%02x".format(it) }
+        otaImage = image
+        otaSent = 0
+        otaAcked = 0
+        otaEndSent = false
+        disconnectWs("firmware update")
+        val begin = ByteBuffer.allocate(4 + 32).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(image.size).put(md5.toByteArray(Charsets.US_ASCII)).array()
+        enqueueFrame(FrameType.OTA_BEGIN, begin)
+        armOtaStall()
+        otaReport("sending ${image.size / 1024} KB, md5 $md5", 0)
+        return null
+    }
+
+    private fun onOtaStatus(payload: ByteArray) {
+        if (payload.size < 5) return
+        val code = payload[0].toInt()
+        val value = ByteBuffer.wrap(payload, 1, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        val message = String(payload, 5, payload.size - 5, Charsets.UTF_8)
+        val image = otaImage ?: return
+        when (code) {
+            OTA_READY -> { armOtaStall(); pumpOta() }
+            OTA_PROGRESS -> {
+                otaAcked = value
+                armOtaStall()
+                otaReport("written ${value / 1024} of ${image.size / 1024} KB", (100L * value / image.size).toInt())
+                pumpOta()
+            }
+            OTA_DONE -> {
+                handler.removeCallbacks(otaStall)
+                otaImage = null
+                otaReport("update installed; the Stick is restarting into it", 100)
+                // The Stick reboots now; the normal reconnect path brings the
+                // link back, and its SETTINGS report shows the new version.
+            }
+            OTA_ERROR -> failOta("the Stick refused it: $message")
+        }
+    }
+
+    private fun pumpOta() {
+        val image = otaImage ?: return
+        while (otaSent < image.size && otaSent - otaAcked < OTA_WINDOW) {
+            val n = minOf(OTA_CHUNK, image.size - otaSent)
+            val frame = ByteBuffer.allocate(4 + n).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(otaSent).put(image, otaSent, n).array()
+            enqueueFrame(FrameType.OTA_DATA, frame)
+            otaSent += n
+        }
+        if (otaSent == image.size && !otaEndSent) {
+            otaEndSent = true
+            enqueueFrame(FrameType.OTA_END, ByteArray(0))
+        }
+    }
+
+    private fun armOtaStall() {
+        handler.removeCallbacks(otaStall)
+        handler.postDelayed(otaStall, OTA_STALL_TIMEOUT_MS)
+    }
+
+    private fun failOta(reason: String) {
+        if (!otaActive) return
+        handler.removeCallbacks(otaStall)
+        otaImage = null
+        otaReport("update failed: $reason. The Stick keeps its current firmware.", -1)
+        connectWs()
+    }
+
+    private fun otaReport(message: String, percent: Int) {
+        log("OTA: $message")
+        handler.post { otaListener?.invoke(message, percent) }
     }
 
     private fun sendTimeSync() {
@@ -425,6 +564,7 @@ class RelayService : Service() {
             return
         }
         log(reason)
+        if (otaActive) failOta("link lost ($reason)")
         stopScan()
         cancelHandshakeTimeout()
         handler.removeCallbacks(timeSyncTick)
@@ -653,6 +793,7 @@ class RelayService : Service() {
      * could revive the old service with its stale GATT client still attached.
      */
     private fun shutdownRelay() {
+        if (otaActive) failOta("relay stopped")
         running = false
         stopScan()
         handler.removeCallbacksAndMessages(null)

@@ -218,3 +218,23 @@ jobs:
       - name: pio run (compile only, no device attached)
         working-directory: firmware/m5stick_bridge
         run: pio run -e m5stick-s3
+
+  android:
+    name: build android companion app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The runner image ships an Android SDK with licenses accepted; AGP
+      # fetches the compileSdk platform it needs on first use.
+      - name: assembleDebug (compile check; the phone installs its own build)
+        working-directory: android_companion
+        run: ./gradlew --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-companion-debug-apk
+          path: android_companion/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
