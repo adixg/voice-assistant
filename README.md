@@ -472,6 +472,7 @@ services/               bridge_server.py split into HTTP services along
                          (see docs/deployment-architecture.md)
   gateway/                 the Stick's protocol-compatible WebSocket peer
   stt/, agent/, tts/       thin FastAPI wrappers, one per registry entry
+  gpu_exporter/            NVML -> Prometheus GPU metrics (replaced dcgm-exporter)
   metrics.py               shared Prometheus HTTP and gateway instrumentation
   telemetry.py             optional OpenTelemetry/Tempo setup
   tts/elevenlabs.py        optional hosted ElevenLabs TTS backend
@@ -521,14 +522,17 @@ practical equivalent for the firmware side.
 ## CI
 
 `.github/workflows/ci.yml` runs on every push/PR: the pytest suite above,
-building all six Docker images in `services/`/`controller/gpu_scheduler/`
+building the Docker images in `services/`/`controller/gpu_scheduler/` (only the
+ones a push touches: stt, three tts variants, agent, gateway, gpu-exporter,
+gpu-scheduler)
 (catches a broken Dockerfile — this dev environment has no working Docker
 daemon to test them locally), applying every `deploy/kubernetes/` and
 `controller/gpu_scheduler/deploy.yaml` manifest against a throwaway `kind`
 cluster (real server-side schema validation, not just YAML syntax — the
 pods won't actually schedule since a GPU-less kind node can't satisfy
 `nvidia.com/gpu` requests, which is fine, `apply` doesn't wait for that),
-and a `pio run` compile check of `firmware/m5stick_bridge/`.
+a `pio run` compile check of `firmware/m5stick_bridge/`, and a debug build
+of the Android companion app (`./gradlew assembleDebug`, APK kept as an artifact).
 
 ## Swapping backends
 

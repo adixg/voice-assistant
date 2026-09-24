@@ -225,7 +225,8 @@ second RAM stick remains the real fix.
   the `aicompanion/monitoring-paused` node label, which its affinity excludes.
 - **`tools/obs_tui.py`** is a terminal dashboard that replaces opening Grafana
   in a browser day to day: host RAM/swap/memory-pressure (from `/proc`), GPU
-  util/VRAM/temp/power, per-pod readiness/restarts/OOM kills/memory vs limit,
+  util/VRAM/temp/power plus SM clock, active throttle reasons, energy over 24h
+  and VRAM per pod (from `services/gpu_exporter`), per-pod readiness/restarts/OOM kills/memory vs limit,
   a role per pod (`pipeline`/`support`/..., and for the llama servers `serving`
   vs `standby`, taken from the agent's `aicompanion_agent_llm_target_info`
   metric) plus a dim row for each deployment scaled to 0,

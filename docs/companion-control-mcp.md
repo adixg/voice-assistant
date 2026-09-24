@@ -20,6 +20,15 @@ Version 0.1 is intentionally **read-only**:
   and a seven-day daily forecast. It requires no API key for this
   non-commercial use.
 
+**How a tool turn runs** (`voicepipe/backends/openai_compatible.py`): the agent
+sends the chat plus the tool list to llama.cpp; if the reply asks for tools, it
+runs each through this server, appends the results, and asks again, up to
+`max_tool_rounds=4`. Before each call it streams a status line ("checking the
+weather in Atlanta", "searching the web: ...") that the gateway forwards to the
+Stick's caption, so a tool turn no longer looks frozen (2026-09-24). With tools
+on, the reply text itself isn't streamed token by token; with one-sentence
+replies that costs well under a second.
+
 It has no subprocess, filesystem, Kubernetes API, or device-control access.
 That boundary is deliberate: a voice-triggered model must not receive generic
 cluster or shell control. Future write tools will use a project-owned,
