@@ -400,7 +400,24 @@ How to update: on the machine with `include/secrets.h`, `pio run` in
 then in the app: Start (connected), **Update Stick firmware...**, pick the file.
 About a minute at the measured BLE rate (not yet timed on the device).
 
-**Status: compiles (firmware locally, the app in CI); not yet run on the device.**
+**Status: verified on the device, 2026-09-24.** Serial log + app screen:
+
+1. USB flash of `a36b55d` with `default_8MB.csv`: booted, `[settings] volume=255
+   brightness=38 firmware=a36b55d` (first boot logs `nvs_open failed: NOT_FOUND`
+   once, harmless: the `stick` namespace didn't exist yet). The bond survived:
+   reconnected with `bonded=1` on the first attempt. App 1.2 showed the version.
+2. Sliders: `[settings] applied volume=197 brightness=128` live; after a reset the
+   Stick booted with the same values and the app showed them.
+3. OTA of a rebuilt image (`a36b55d-dirty`): 2,268,224 bytes received and
+   verified in ~30 s (~75 KB/s), rebooted into `app1`, `pending verification`,
+   AUTH passed, `rollback cancelled`. Settings carried over. The app asks for
+   confirmation ("Update the Stick?") before starting.
+4. Wrong-secret image: booted into `app0`, `AUTH frame: REJECTED`, then at
+   exactly 600 s `no AUTH on the new firmware; rolling back`, rebooted into the
+   previous image and the phone's AUTH was accepted immediately.
+
+Then a clean `a36b55d` went back on over OTA, and volume/brightness were reset
+to 255/39.
 First test after the USB flash: the version shows in the app, both sliders take
 effect and survive a reboot, then an OTA of a rebuilt image (version changes),
 then an OTA of a deliberately wrong-secret image to see the rollback.
