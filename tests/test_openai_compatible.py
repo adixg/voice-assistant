@@ -49,6 +49,72 @@ def test_registered():
     assert "openai-compatible" in LLM.names()
 
 
+def _sent(client):
+    return client.post.call_args.kwargs["json"]
+
+
+@pytest.mark.parametrize("think,expected", [(False, {"enable_thinking": False}),
+                                            (True, {"enable_thinking": True})])
+def test_think_flag_reaches_the_server(think, expected):
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {"content": "ok"}}]})
+    OpenAICompatibleLLM(client=client).ask([], think=think)
+    assert _sent(client)["chat_template_kwargs"] == expected
+
+
+def test_think_none_leaves_the_server_default():
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {"content": "ok"}}]})
+    OpenAICompatibleLLM(client=client).ask([], think=None)
+    assert "chat_template_kwargs" not in _sent(client)
+
+
+def test_thinking_switch_can_be_disabled_for_strict_endpoints():
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {"content": "ok"}}]})
+    OpenAICompatibleLLM(client=client, thinking_switch=False).ask([], think=False)
+    assert "chat_template_kwargs" not in _sent(client)
+
+
+def test_streaming_sends_think_flag():
+    streamed = Mock()
+    streamed.raise_for_status.return_value = None
+    streamed.iter_lines.return_value = ["data: [DONE]"]
+    context = Mock()
+    context.__enter__ = Mock(return_value=streamed)
+    context.__exit__ = Mock(return_value=False)
+    client = Mock()
+    client.stream.return_value = context
+    list(OpenAICompatibleLLM(client=client).ask_stream([], think=False))
+    body = client.stream.call_args.kwargs["json"]
+    assert body["stream"] is True
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_tool_loop_sends_think_flag_on_every_round():
+    client = Mock()
+    client.post.side_effect = [
+        _response({"choices": [{"message": {"content": None, "tool_calls": [{
+            "id": "c1", "function": {"name": "get_gpu_status", "arguments": "{}"}}]}}]}),
+        _response({"choices": [{"message": {"content": "done"}}]}),
+    ]
+    mcp = Mock()
+    mcp.openai_tools.return_value = [{"type": "function", "function": {"name": "get_gpu_status"}}]
+    mcp.call.return_value = "ok"
+    OpenAICompatibleLLM(client=client, mcp_client=mcp).ask([], think=False)
+    for call in client.post.call_args_list:
+        assert call.kwargs["json"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_env_can_disable_the_switch(monkeypatch):
+    import argparse
+    monkeypatch.setenv("LLM_THINKING_SWITCH", "0")
+    ap = argparse.ArgumentParser()
+    OpenAICompatibleLLM.add_arguments(ap)
+    args = ap.parse_args([])
+    assert OpenAICompatibleLLM.from_args(args).thinking_switch is False
+
+
 def test_mcp_tool_loop_executes_call_and_returns_followup():
     client = Mock()
     client.post.side_effect = [

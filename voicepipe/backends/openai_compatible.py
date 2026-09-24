@@ -30,7 +30,7 @@ class OpenAICompatibleLLM:
 
     def __init__(self, url=DEFAULT_URL, model=DEFAULT_MODEL, key=None,
                  timeout=DEFAULT_TIMEOUT, client=None, mcp_client=None,
-                 max_tool_rounds=4):
+                 max_tool_rounds=4, thinking_switch=True):
         self.url = url.rstrip("/")
         self.model = model
         self.key = key or os.environ.get("OPENAI_COMPATIBLE_API_KEY")
@@ -38,6 +38,7 @@ class OpenAICompatibleLLM:
         self._client = client
         self.mcp = mcp_client
         self.max_tool_rounds = max_tool_rounds
+        self.thinking_switch = thinking_switch
 
     @staticmethod
     def add_arguments(group):
@@ -54,6 +55,10 @@ class OpenAICompatibleLLM:
                            help=f"turn timeout in seconds (default: {DEFAULT_TIMEOUT})")
         group.add_argument("--mcp-server-command", default=os.environ.get("MCP_SERVER_COMMAND"),
                            help="trusted MCP stdio server command (also via MCP_SERVER_COMMAND)")
+        group.add_argument("--openai-compatible-no-thinking-switch", action="store_true",
+                           default=os.environ.get("LLM_THINKING_SWITCH", "1") == "0",
+                           help="don't send chat_template_kwargs.enable_thinking; use for strict "
+                                "hosted endpoints that reject unknown fields (also LLM_THINKING_SWITCH=0)")
 
     @classmethod
     def from_args(cls, args):
@@ -65,7 +70,8 @@ class OpenAICompatibleLLM:
         return cls(url=args.openai_compatible_url,
                    model=args.openai_compatible_model,
                    key=args.openai_compatible_key,
-                   timeout=args.openai_compatible_timeout, mcp_client=mcp)
+                   timeout=args.openai_compatible_timeout, mcp_client=mcp,
+                   thinking_switch=not getattr(args, "openai_compatible_no_thinking_switch", False))
 
     @property
     def client(self):
@@ -76,15 +82,30 @@ class OpenAICompatibleLLM:
                                         timeout=self.timeout)
         return self._client
 
+    def _request(self, messages, think, **extra):
+        """The chat-completions body, carrying ``think`` when we can.
+
+        OpenAI proper has no field for it, but llama.cpp and vLLM take
+        ``chat_template_kwargs.enable_thinking`` for Qwen3-style templates.
+        Without it Qwen3 reasons on every turn, and llama.cpp returns that
+        reasoning in ``reasoning_content`` -- so ``strip_think`` never sees it
+        and the caller just waits: measured 14.8 s vs 1.8 s per turn
+        (benchmarks/pipeline/README.md). ``think=None`` means "server
+        default", so nothing is sent.
+        """
+        request = {"model": self.model, "messages": messages, **extra}
+        if self.thinking_switch and think is not None:
+            request["chat_template_kwargs"] = {"enable_thinking": bool(think)}
+        return request
+
     def ask(self, messages, think=None):
-        # ``think`` is a vendor extension: OpenAI-compatible servers have no
-        # portable field for it.  Reasoning tags, if a model emits them, are
-        # removed at the common text boundary just as they are for Ollama.
+        # Reasoning tags, if a model still emits them inline, are removed at
+        # the common text boundary just as they are for Ollama.
         try:
             working = list(messages)
             tools = self.mcp.openai_tools() if self.mcp else None
             for _ in range(self.max_tool_rounds + 1):
-                request = {"model": self.model, "messages": working}
+                request = self._request(working, think)
                 if tools:
                     request["tools"] = tools
                 response = self.client.post("/chat/completions", json=request)
@@ -116,7 +137,7 @@ class OpenAICompatibleLLM:
         if self.mcp is not None:
             yield FINAL, self.ask(messages, think)
             return
-        request = {"model": self.model, "messages": messages, "stream": True}
+        request = self._request(messages, think, stream=True)
         try:
             with self.client.stream("POST", "/chat/completions", json=request) as response:
                 response.raise_for_status()
