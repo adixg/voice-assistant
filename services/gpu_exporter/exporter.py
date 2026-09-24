@@ -19,9 +19,10 @@ Added, under aicompanion_gpu_*:
   xid_errors_total{xid=...}          driver-reported GPU faults (XID codes)
   process_memory_bytes{namespace,pod,command}
                                      VRAM per process, attributed to its pod via
-                                     the host's /proc and /var/log/pods; NVML
-                                     can't report it under WSL2, so the laptop
-                                     node exports none
+                                     the host's /proc (needs hostPID: NVML only
+                                     lists processes in its own PID namespace)
+                                     and /var/log/pods; NVML can't report it
+                                     under WSL2, so the laptop node exports none
 """
 import argparse
 import os
