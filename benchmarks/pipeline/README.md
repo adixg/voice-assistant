@@ -92,8 +92,8 @@ Same prompt, text only, one warm run each:
 | live `agent` route (4060) | 6.6 s | — |
 
 The gateway asks for thinking off (`think=False`), but the agent's
-`openai-compatible` backend currently drops that flag, so Qwen3 reasons on
-every turn. See `TODO.md`.
+`openai-compatible` backend was dropping that flag, so Qwen3 reasoned on every
+turn. Fixed the same day (commit `2151781`); see the after numbers below.
 
 Full turn minus reply TTS (`--no-tts`), two sentences x two repetitions,
 warm, 4060 up (so `agent` was routed to the 4060):
@@ -108,3 +108,16 @@ Reply TTS could not be measured that day: the deployed Kokoro `tts` pod was
 OOM-killed (3 GiB limit) after three to four sequential `/synth` calls,
 memory climbing per request. STT at ~3 s is also well above the 0.33 s this
 card measured standalone (`docs/hardware-budget.md`). Both are in `TODO.md`.
+
+After the fix (same command, agent redeployed, 4060 route, warm):
+
+| route | STT p50 | LLM p50 | turn p50 (no TTS) | turn p95 |
+| --- | --- | --- | --- | --- |
+| live `agent` route, before | 3.06 s | 14.77 s | 17.86 s | 19.62 s |
+| live `agent` route, after | 3.14 s | 2.24 s | 5.39 s | 5.61 s |
+| RTX 4060 direct, thinking off | 3.14 s | 1.68 s | 4.79 s | 5.03 s |
+
+The agent now costs about 0.5 s over a direct call (its MCP tool loop). STT
+is now the largest stage. The GTX 1650 rows failed in this run because
+`llama-cpp-gtx1650` was OOM-killed at its 2 GiB limit mid-request (see
+`TODO.md`).
