@@ -44,7 +44,7 @@ preset() {
     tts/kokoro)       MEM="1536Mi 3Gi"
                       ARGS='"--tts-backend","kokoro","--kokoro-voice","af_bella","--kokoro-language","a","--kokoro-device","cpu"' ;;
     tts/kokoro-onnx)  MEM="1Gi 2Gi";     ARGS='"--tts-backend","kokoro-onnx","--kokoro-onnx-voice","af_bella"' ;;
-    tts/kitten)       MEM="384Mi 768Mi";  ARGS='"--tts-backend","kitten","--kitten-voice","Bella"' ;;
+    tts/kitten)       MEM="384Mi 768Mi";  ARGS='"--tts-backend","kitten","--kitten-voice","Bella","--kitten-speed","1.3"' ;;
     *) echo "unknown preset: $1 $2" >&2; usage 1 ;;
   esac
 }
