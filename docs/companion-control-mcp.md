@@ -2,7 +2,7 @@
 
 `tools/companion_control_mcp.py` is the project's first MCP server. It is a
 small, dependency-free stdio JSON-RPC server launched by the agent container.
-Version 0.1 is intentionally **read-only**:
+Version 0.1 was **read-only**; these tools still are:
 
 - `get_service_health` reads Prometheus scrape health, pod readiness, and
   container restarts.
@@ -29,11 +29,40 @@ Stick's caption, so a tool turn no longer looks frozen (2026-09-24). With tools
 on, the reply text itself isn't streamed token by token; with one-sentence
 replies that costs well under a second.
 
-It has no subprocess, filesystem, Kubernetes API, or device-control access.
-That boundary is deliberate: a voice-triggered model must not receive generic
-cluster or shell control. Future write tools will use a project-owned,
-authenticated control API, typed bounds, device acknowledgement, explicit
-confirmation in the voice flow, and an audit record.
+Since 0.2 (2026-09-24) it also has its first **write** tools, for the Stick:
+
+- `get_stick_settings`: volume and brightness in percent, whether the screen
+  is off, the firmware version.
+- `set_stick_volume`, `set_stick_brightness`: exactly one of `percent`
+  (absolute, 0-100) or `change` (relative, e.g. 15 for "a bit louder"),
+  clamped to 0-100. Brightness 0 turns the screen off (a button tap shows it
+  for 10 s). A volume above 75% carries a note that it can brown out the Stick
+  on battery.
+
+It still has no subprocess, filesystem or Kubernetes API access: a
+voice-triggered model must not receive generic cluster or shell control.
+The write tools follow the rules set for them before they existed:
+
+- **A project-owned, authenticated control API**: the gateway's
+  `GET/POST /device/settings`, off unless `GATEWAY_CONTROL_TOKEN` is set and
+  then requiring it as a bearer token. The agent reads the same token from the
+  `device-control` Secret (`COMPANION_CONTROL_TOKEN`), and never logs it.
+- **Typed bounds**: the gateway accepts only integers 0-255 (422 otherwise).
+- **Device acknowledgement**: the gateway sends `settings:V,B` down the relay's
+  WebSocket, the phone turns it into a BLE `SETTINGS` frame, and the Stick's
+  own report back (`settings:V,B,FIRMWARE`) is what the API returns. No
+  confirmation within 5 s is a 504, and the tool reports it as an error.
+- **An audit record**: every request is counted in
+  `aicompanion_gateway_device_settings_changes_total{result=applied|timeout|no_stick}`
+  and logged by the gateway with what was asked and what the Stick applied.
+- **Explicit confirmation**: not asked for these two. Both are harmless and
+  instantly reversible, so the spoken reply ("volume is at 40% now") is the
+  confirmation. A future tool that isn't (e.g. switching the model) should ask.
+
+Path of a change: agent (MCP tool) -> gateway `/device/settings` -> relay
+WebSocket (app 1.4+) -> BLE `SETTINGS` -> Stick, and the Stick's report back the
+same way. The gateway keeps reading the relay's socket while a turn runs, so a
+change requested mid-reply is confirmed without waiting for the turn to end.
 
 ## Agent configuration
 
@@ -44,6 +73,8 @@ MCP_SERVER_COMMAND: python /app/tools/companion_control_mcp.py
 COMPANION_CONTROL_PROMETHEUS_URL: http://prometheus:9090
 COMPANION_CONTROL_AGENT_URL: http://agent:8002
 COMPANION_CONTROL_SEARXNG_URL: http://searxng:8080
+COMPANION_CONTROL_GATEWAY_URL: http://gateway:8000
+COMPANION_CONTROL_TOKEN: (from the device-control Secret)
 ```
 
 `get_service_health` and `get_gpu_status` need only Prometheus. The agent

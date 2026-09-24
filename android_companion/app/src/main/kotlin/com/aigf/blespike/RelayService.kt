@@ -204,6 +204,10 @@ class RelayService : Service() {
                 return
             }
             log("WS connected to gateway")
+            // The gateway learns the Stick's settings from these reports (its
+            // device-control API needs them); the Stick's own report may have
+            // arrived before this socket opened.
+            stickInfo?.let { sendSettingsReport(it) }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -216,6 +220,20 @@ class RelayService : Service() {
                 text.startsWith("reply:") ->
                     enqueueFrame(FrameType.REPLY, text.substring(6).toByteArray(Charsets.UTF_8))
                 text == "end" -> enqueueFrame(FrameType.END, ByteArray(0))
+                // A settings change from the gateway (the agent's volume and
+                // brightness tools). The Stick applies it and reports back,
+                // which onStickSettings forwards as the confirmation.
+                text.startsWith("settings:") -> {
+                    val parts = text.substring(9).split(",")
+                    val volume = parts.getOrNull(0)?.toIntOrNull()
+                    val brightness = parts.getOrNull(1)?.toIntOrNull()
+                    if (volume == null || brightness == null) {
+                        log("malformed settings request: $text")
+                    } else {
+                        log("gateway: volume $volume, brightness $brightness")
+                        sendSettings(volume, brightness)
+                    }
+                }
                 else -> log("unrecognized WS text: $text")
             }
         }
@@ -377,6 +395,11 @@ class RelayService : Service() {
         stickInfo = info
         log("Stick: firmware ${info.firmware}, volume ${info.volume}, brightness ${info.brightness}")
         settingsListener?.invoke(info)
+        sendSettingsReport(info)
+    }
+
+    private fun sendSettingsReport(info: StickInfo) {
+        if (ws != null) sendWsText("settings:${info.volume},${info.brightness},${info.firmware}")
     }
 
     /** Send new volume/brightness (0-255 each). False when the Stick isn't connected. */

@@ -18,6 +18,10 @@ HTTP_DURATION = Histogram(
     ("service", "route", "method", "status"),
 )
 GATEWAY_TURNS = Counter("aicompanion_gateway_turns_total", "Gateway turns completed", ("outcome",))
+# Every device-settings change requested through the gateway's control API
+# (volume/brightness, from the agent's MCP tools), by result: the audit count.
+DEVICE_SETTINGS_CHANGES = Counter("aicompanion_gateway_device_settings_changes_total",
+                                  "Device settings changes requested", ("result",))
 GATEWAY_TURN_DURATION = Histogram("aicompanion_gateway_turn_duration_seconds", "Gateway full turn duration")
 GATEWAY_STAGE_DURATION = Histogram("aicompanion_gateway_stage_duration_seconds", "Gateway downstream stage duration", ("stage",))
 

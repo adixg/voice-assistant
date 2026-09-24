@@ -44,7 +44,15 @@ spec:
             # biometric data, kept local, bounded and pruned; delete this line and
             # the volume below to stop keeping it.
             - "--keep-utterances=/utterances"
-          env: [{name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}]
+          env:
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
+            # Bearer token for /device/settings (the agent's volume/brightness
+            # tools). Without the Secret the control API is simply disabled.
+            #   kubectl -n aicompanion create secret generic device-control \
+            #     --from-literal=token="$(openssl rand -hex 24)"
+            - name: GATEWAY_CONTROL_TOKEN
+              valueFrom:
+                secretKeyRef: {name: device-control, key: token, optional: true}
           ports:
             - {containerPort: 8000, name: metrics}
           readinessProbe:

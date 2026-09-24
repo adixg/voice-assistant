@@ -584,3 +584,80 @@ class TestSpeakPipelining:
         async with make_client(handler) as client:
             await make_session(client=client)._speak(FakeWebSocket(), "One sentence that is long enough.")
         assert REGISTRY.get_sample_value(name, labels) == before + 1
+
+
+# ------------------------------------------------ device settings control API
+
+def test_settings_report_is_parsed_and_malformed_ones_ignored():
+    session = make_session()
+    asyncio.run(session.on_device_report("197,0,a36b55d"))
+    assert session.device == {"volume": 197, "brightness": 0, "firmware": "a36b55d"}
+    asyncio.run(session.on_device_report("loud,bright"))
+    assert session.device["volume"] == 197
+
+
+def test_set_device_sends_request_and_returns_the_stick_confirmation():
+    session = make_session()
+    ws = FakeWebSocket()
+    session.ws = ws
+
+    async def scenario():
+        await session.on_device_report("255,38,fw")
+        setter = asyncio.create_task(session.set_device(volume=128))
+        await asyncio.sleep(0)
+        assert ws.sent == ["settings:128,38"]  # unset brightness keeps the current value
+        await session.on_device_report("128,38,fw")
+        return await setter
+
+    assert asyncio.run(scenario()) == {"volume": 128, "brightness": 38, "firmware": "fw"}
+
+
+def test_set_device_needs_a_stick_and_times_out_without_confirmation():
+    session = make_session()
+    with pytest.raises(LookupError):
+        asyncio.run(session.set_device(volume=1))
+    session.ws = FakeWebSocket()
+    with pytest.raises(LookupError, match="reported"):
+        asyncio.run(session.set_device(volume=1))
+    asyncio.run(session.on_device_report("255,38,fw"))
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(session.set_device(volume=1, timeout=0.05))
+
+
+def test_settings_report_is_read_while_a_turn_is_still_running():
+    """The agent changes settings mid-turn; the loop must not be blocked by it."""
+    session = make_session()
+    seen_during_turn = []
+
+    async def slow_turn(ws, pcm):
+        await asyncio.sleep(0.05)
+        seen_during_turn.append(session.device)
+
+    session.handle_utterance = slow_turn
+    ws = FakeWebSocket(["start", b"\x00" * 64, "stop", "settings:10,20,fw"])
+    asyncio.run(gateway_app.handle_client(ws, session))
+    assert seen_during_turn == [{"volume": 10, "brightness": 20, "firmware": "fw"}]
+    assert session.device is None  # cleared once the Stick disconnects
+
+
+def test_control_api_is_off_without_a_token_and_checks_it_when_set(monkeypatch):
+    from fastapi.testclient import TestClient
+    client = TestClient(gateway_app.app)
+    monkeypatch.delenv("GATEWAY_CONTROL_TOKEN", raising=False)
+    assert client.get("/device/settings").status_code == 503
+    monkeypatch.setenv("GATEWAY_CONTROL_TOKEN", "t0k")
+    assert client.get("/device/settings").status_code == 401
+    assert client.post("/device/settings", json={"volume": 9},
+                       headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_control_api_validates_bounds_and_reports_no_stick(monkeypatch):
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("GATEWAY_CONTROL_TOKEN", "t0k")
+    monkeypatch.setattr(gateway_app, "_session", make_session())
+    client = TestClient(gateway_app.app)
+    auth = {"Authorization": "Bearer t0k"}
+    assert client.post("/device/settings", json={"volume": 300}, headers=auth).status_code == 422
+    assert client.post("/device/settings", json={}, headers=auth).status_code == 422
+    assert client.post("/device/settings", json={"brightness": 0}, headers=auth).status_code == 503
+    assert client.get("/device/settings", headers=auth).status_code == 503

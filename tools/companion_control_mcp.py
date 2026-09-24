@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Read-only MCP control plane for AI Companion.
+"""MCP control plane for AI Companion.
 
 This server deliberately speaks the MCP stdio JSON-RPC transport itself rather
 than importing an SDK. That keeps its runtime small and lets the agent launch it
-with just Python 3.10+ installed.  It has no shell, Kubernetes, filesystem, or
-device-write capability: it reads the existing Prometheus and agent HTTP APIs.
+with just Python 3.10+ installed.  It has no shell, Kubernetes or filesystem
+access. It reads the existing Prometheus and agent HTTP APIs, and its only
+write capability is the Stick's volume and brightness, through the gateway's
+token-protected /device/settings API (bounded values, acknowledged by the
+device, counted in Prometheus).
 
 Configure the URLs through environment variables. The defaults work when the
 server runs inside the ``aicompanion`` Kubernetes namespace. For local development,
@@ -24,7 +27,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 SERVER_NAME = "aicompanion-companion-control"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18"}
 Json = dict[str, Any]
 FetchJson = Callable[[str], Json]
@@ -61,6 +64,91 @@ def fetch_json(url: str) -> Json:
     if not isinstance(payload, dict):
         raise ControlPlaneError(f"request to {url} returned a JSON value, not an object")
     return payload
+
+
+def gateway_request(method: str, path: str, body: Json | None = None) -> Json:
+    """Call the gateway's device-control API with the shared control token."""
+    url = _env_url("COMPANION_CONTROL_GATEWAY_URL", "http://gateway:8000") + path
+    token = os.environ.get("COMPANION_CONTROL_TOKEN", "")
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=data, headers=headers, method=method)
+    try:
+        # The gateway waits up to 5 s for the Stick to confirm a change.
+        with urlopen(request, timeout=max(_timeout(), 8.0)) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise ControlPlaneError(detail or f"gateway returned HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, ValueError) as exc:
+        raise ControlPlaneError(f"request to the gateway failed: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ControlPlaneError("the gateway returned a JSON value, not an object")
+    return payload
+
+
+# The Stick's settings are 0-255 on the wire; people think in percent.
+VOLUME_BROWNOUT_RAW = 191  # M5Stack: above this on battery the Stick can reboot
+
+
+def _to_percent(raw: int) -> int:
+    return round(raw * 100 / 255)
+
+
+def _to_raw(percent: int) -> int:
+    return round(max(0, min(100, percent)) * 255 / 100)
+
+
+def _describe_stick(settings: Json) -> Json:
+    volume, brightness = settings["volume"], settings["brightness"]
+    described = {
+        "volume_percent": _to_percent(volume),
+        "brightness_percent": _to_percent(brightness),
+        "screen_off": brightness == 0,
+        "firmware": settings.get("firmware"),
+    }
+    if volume > VOLUME_BROWNOUT_RAW:
+        described["note"] = "Volume above 75% can make the Stick reboot when it runs on battery."
+    return described
+
+
+def stick_settings(_args: Json | None = None, request: Callable[..., Json] = gateway_request) -> Json:
+    return _describe_stick(request("GET", "/device/settings"))
+
+
+def _target_percent(arguments: Json, current_percent: int, name: str) -> int:
+    percent, change = arguments.get("percent"), arguments.get("change")
+    if (percent is None) == (change is None):
+        raise ControlPlaneError(f"give exactly one of percent or change for {name}")
+    for value in (percent, change):
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
+            raise ControlPlaneError(f"{name} percent/change must be a whole number")
+    target = percent if percent is not None else current_percent + change
+    return max(0, min(100, target))
+
+
+def _set_stick(field: str, arguments: Json, request: Callable[..., Json]) -> Json:
+    current = request("GET", "/device/settings")
+    target = _target_percent(arguments, _to_percent(current[field]), field)
+    applied = request("POST", "/device/settings", {field: _to_raw(target)})
+    result = _describe_stick(applied)
+    result["changed"] = field
+    result["previous_percent"] = _to_percent(current[field])
+    return result
+
+
+def set_stick_volume(arguments: Json, request: Callable[..., Json] = gateway_request) -> Json:
+    return _set_stick("volume", arguments, request)
+
+
+def set_stick_brightness(arguments: Json, request: Callable[..., Json] = gateway_request) -> Json:
+    return _set_stick("brightness", arguments, request)
 
 
 def prometheus_query(query: str, get_json: FetchJson = fetch_json) -> list[Json]:
@@ -451,6 +539,33 @@ TOOLS: list[Json] = [
         },
     },
 ]
+_PERCENT_OR_CHANGE = {
+    "type": "object",
+    "properties": {
+        "percent": {"type": "integer", "minimum": 0, "maximum": 100,
+                    "description": "Absolute level in percent."},
+        "change": {"type": "integer", "minimum": -100, "maximum": 100,
+                   "description": "Relative change in percentage points, e.g. 15 for 'a bit louder/brighter', -15 for 'a bit quieter/dimmer'."},
+    },
+    "additionalProperties": False,
+}
+TOOLS += [
+    {
+        "name": "get_stick_settings",
+        "description": "Read the M5Stick's current speaker volume and screen brightness (percent), whether the screen is off, and its firmware version.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "set_stick_volume",
+        "description": "Change the M5Stick's speaker volume. Give exactly one of percent (absolute) or change (relative). Returns the level the Stick confirmed.",
+        "inputSchema": _PERCENT_OR_CHANGE,
+    },
+    {
+        "name": "set_stick_brightness",
+        "description": "Change the M5Stick's screen brightness. Give exactly one of percent (absolute) or change (relative). 0 percent turns the screen off to save battery; tapping a button on the Stick shows it for 10 seconds. Returns the level the Stick confirmed.",
+        "inputSchema": _PERCENT_OR_CHANGE,
+    },
+]
 TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_service_health": lambda _args: service_health(),
     "get_gpu_status": lambda _args: gpu_status(),
@@ -459,8 +574,12 @@ TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_time": current_time,
     "search_web": search_web,
     "get_weather": weather,
+    "get_stick_settings": lambda _args: stick_settings(),
+    "set_stick_volume": set_stick_volume,
+    "set_stick_brightness": set_stick_brightness,
 }
-NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status"}
+NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
+                     "get_stick_settings"}
 
 
 def _tool_result(payload: Json, is_error: bool = False) -> Json:

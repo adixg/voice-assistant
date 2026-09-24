@@ -43,7 +43,8 @@ from time import perf_counter
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 
 from voicepipe import cli, encouragement
 from voicepipe.personas import DEFAULT_PERSONA, PERSONAS
@@ -55,7 +56,7 @@ from voicepipe.speaker import (
 from voicepipe.text import sentences, speakable
 from voicepipe.utterances import DEFAULT_MAX_KEEP, keep as keep_utterance
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
-from services.metrics import (GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
+from services.metrics import (DEVICE_SETTINGS_CHANGES, GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
                               install_http_metrics, record_speaker_check, set_speaker_gate_state)
 from services.telemetry import install_tracing
 
@@ -144,6 +145,51 @@ def health():
             "speaker_gate": gate.status() if gate else None}
 
 
+class DeviceSettings(BaseModel):
+    volume: int | None = Field(None, ge=0, le=255)
+    brightness: int | None = Field(None, ge=0, le=255, description="0 turns the screen off")
+
+
+def _check_control_token(authorization):
+    """The device-control API is off unless GATEWAY_CONTROL_TOKEN is set, and
+    then needs it as a bearer token: the gateway's port is reachable from the
+    tailnet, and only the agent's MCP server should change the Stick."""
+    token = os.environ.get("GATEWAY_CONTROL_TOKEN")
+    if not token:
+        raise HTTPException(503, "device control is disabled (GATEWAY_CONTROL_TOKEN unset)")
+    if authorization != f"Bearer {token}":
+        raise HTTPException(401, "bad or missing control token")
+
+
+@app.get("/device/settings")
+def get_device_settings(authorization: str | None = Header(None)):
+    _check_control_token(authorization)
+    if _session is None or _session.ws is None:
+        raise HTTPException(503, "no Stick connected")
+    if _session.device is None:
+        raise HTTPException(503, "the Stick hasn't reported its settings yet")
+    return _session.device
+
+
+@app.post("/device/settings")
+async def post_device_settings(body: DeviceSettings, authorization: str | None = Header(None)):
+    _check_control_token(authorization)
+    if body.volume is None and body.brightness is None:
+        raise HTTPException(422, "give volume and/or brightness")
+    try:
+        applied = await _session.set_device(body.volume, body.brightness)
+    except LookupError as e:
+        DEVICE_SETTINGS_CHANGES.labels("no_stick").inc()
+        raise HTTPException(503, str(e)) from e
+    except (asyncio.TimeoutError, TimeoutError) as e:
+        DEVICE_SETTINGS_CHANGES.labels("timeout").inc()
+        raise HTTPException(504, "the Stick didn't confirm the change") from e
+    DEVICE_SETTINGS_CHANGES.labels("applied").inc()
+    print(f"  [device] settings changed via control API: {body.model_dump(exclude_none=True)}"
+          f" -> volume={applied['volume']} brightness={applied['brightness']}", flush=True)
+    return applied
+
+
 class GatewaySession:
     """One M5StickS3's conversation state -- ported from bridge_server.py's
     Session, adapted to call stt/agent/tts over HTTP instead of in-process.
@@ -168,6 +214,44 @@ class GatewaySession:
         self.speaking = asyncio.Lock()
         self.normalize = not args.no_normalize
         self.stt_lang = None if args.stt_lang == "auto" else args.stt_lang
+        # The Stick's volume/brightness as it last reported them (the relay
+        # forwards each SETTINGS report as "settings:V,B,FIRMWARE"), or None.
+        self.device = None
+        self._device_changed = asyncio.Condition()
+
+    async def on_device_report(self, text):
+        """A "settings:V,B[,FIRMWARE]" report from the relay."""
+        try:
+            volume, brightness, *rest = text.split(",", 2)
+            report = {"volume": int(volume), "brightness": int(brightness),
+                      "firmware": rest[0] if rest else None}
+        except ValueError:
+            print(f"  ? malformed settings report: {text!r}", flush=True)
+            return
+        async with self._device_changed:
+            self.device = report
+            self._device_changed.notify_all()
+
+    async def set_device(self, volume=None, brightness=None, timeout=5.0):
+        """Ask the Stick for new settings and wait for it to report them back.
+
+        Unset fields keep the Stick's current value, so this needs a report to
+        have arrived first. Raises LookupError with no Stick (or no report yet)
+        and TimeoutError if the Stick never confirms."""
+        ws, current = self.ws, self.device
+        if ws is None or current is None:
+            raise LookupError("no Stick connected" if ws is None else "the Stick hasn't reported its settings yet")
+        want = {"volume": current["volume"] if volume is None else volume,
+                "brightness": current["brightness"] if brightness is None else brightness}
+        await ws.send_text(f"settings:{want['volume']},{want['brightness']}")
+
+        def confirmed():
+            d = self.device
+            return d is not None and d["volume"] == want["volume"] and d["brightness"] == want["brightness"]
+
+        async with self._device_changed:
+            await asyncio.wait_for(self._device_changed.wait_for(confirmed), timeout)
+        return self.device
 
     def reset(self):
         self.messages = [m for m in self.messages if m["role"] == "system"]
@@ -395,7 +479,7 @@ class _AsgiWebSocketAdapter:
         await self._ws.send_bytes(data)
 
 
-async def _client_loop(ws, session):
+async def _client_loop(ws, session, turns):
     buf = bytearray()
     recording = False
     async for msg in ws:
@@ -410,10 +494,16 @@ async def _client_loop(ws, session):
         elif msg == "stop":
             recording = False
             print(f"  [stop] {len(buf) / (SAMPLE_RATE * 2):.2f}s of audio", flush=True)
-            await session.handle_utterance(ws, bytes(buf))
+            # In the background, so this loop keeps reading while the turn runs:
+            # the agent can change the Stick's settings mid-turn, and the
+            # Stick's confirmation arrives on this same socket. Turns still run
+            # one at a time, in order, behind session.speaking.
+            turns.append(asyncio.create_task(session.handle_utterance(ws, bytes(buf))))
         elif msg == "reset":
             print("  [reset] history cleared", flush=True)
             session.reset()
+        elif msg.startswith("settings:"):
+            await session.on_device_report(msg[len("settings:"):])
         else:
             print(f"  ? unexpected control message: {msg!r}")
 
@@ -421,11 +511,15 @@ async def _client_loop(ws, session):
 async def handle_client(ws, session):
     print("  Stick connected", flush=True)
     session.ws = ws
+    turns = []
     try:
-        await _client_loop(ws, session)
+        await _client_loop(ws, session, turns)
     finally:
+        # Let turns already started finish (or fail on the closed socket).
+        await asyncio.gather(*turns, return_exceptions=True)
         if session.ws is ws:
             session.ws = None
+            session.device = None
         print("  Stick disconnected", flush=True)
 
 

@@ -52,6 +52,13 @@ spec:
               value: "http://agent:8002"
             - name: COMPANION_CONTROL_SEARXNG_URL
               value: "http://searxng:8080"
+            # The Stick's volume/brightness tools call the gateway's
+            # /device/settings with the same token as the gateway (gateway.yaml).
+            - name: COMPANION_CONTROL_GATEWAY_URL
+              value: "http://gateway:8000"
+            - name: COMPANION_CONTROL_TOKEN
+              valueFrom:
+                secretKeyRef: {name: device-control, key: token, optional: true}
           ports:
             - {containerPort: 8002, name: metrics}
           readinessProbe:

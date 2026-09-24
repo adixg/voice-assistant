@@ -21,11 +21,13 @@ def test_initialize_negotiates_the_client_protocol_version():
     assert response["result"]["capabilities"] == {"tools": {"listChanged": False}}
 
 
-def test_tools_list_exposes_only_read_only_tools():
+def test_tools_list_is_read_only_except_the_sticks_volume_and_brightness():
+    """The permission boundary: adding any other write tool must change this test."""
     response = mcp.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert [tool["name"] for tool in response["result"]["tools"]] == [
         "get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
-        "get_time", "search_web", "get_weather"]
+        "get_time", "search_web", "get_weather",
+        "get_stick_settings", "set_stick_volume", "set_stick_brightness"]
 
 
 def test_current_time_returns_requested_timezone(monkeypatch):
@@ -259,3 +261,62 @@ def test_gpu_status_reports_active_throttling_but_not_idle(monkeypatch):
     assert result["throttling"] == [{"host": "arch-ssd", "gpu": "0", "reason": "hw_thermal_slowdown"}]
     assert 'reason!="gpu_idle"' in queries[-1]
     assert result["utilization"][0]["host"] == "arch-ssd"  # the real label is lowercase "hostname"
+
+
+class FakeGateway:
+    """Stands in for gateway_request: the Stick applies whatever is POSTed."""
+
+    def __init__(self, volume=255, brightness=38):
+        self.state = {"volume": volume, "brightness": brightness, "firmware": "a36b55d"}
+        self.calls = []
+
+    def __call__(self, method, path, body=None):
+        self.calls.append((method, path, body))
+        if method == "POST":
+            self.state.update(body)
+        return dict(self.state)
+
+
+def test_stick_settings_reports_percent_and_screen_off():
+    result = mcp.stick_settings(request=FakeGateway(volume=128, brightness=0))
+    assert result == {"volume_percent": 50, "brightness_percent": 0, "screen_off": True,
+                      "firmware": "a36b55d"}
+
+
+def test_loud_volume_carries_the_brownout_note():
+    assert "reboot" in mcp.stick_settings(request=FakeGateway(volume=255))["note"]
+
+
+def test_set_volume_absolute_posts_only_that_field():
+    gateway = FakeGateway()
+    result = mcp.set_stick_volume({"percent": 40}, request=gateway)
+    assert gateway.calls[-1] == ("POST", "/device/settings", {"volume": 102})
+    assert result["volume_percent"] == 40 and result["previous_percent"] == 100
+    assert result["changed"] == "volume"
+
+
+def test_set_brightness_relative_is_clamped_and_zero_means_screen_off():
+    gateway = FakeGateway(brightness=26)  # 10%
+    result = mcp.set_stick_brightness({"change": -30}, request=gateway)
+    assert gateway.calls[-1][2] == {"brightness": 0}
+    assert result["screen_off"] is True
+    result = mcp.set_stick_brightness({"change": 500}, request=gateway)
+    assert result["brightness_percent"] == 100
+
+
+@pytest.mark.parametrize("args", [{}, {"percent": 10, "change": 5}, {"percent": "10"}, {"change": True}])
+def test_set_needs_exactly_one_whole_number(args):
+    with pytest.raises(mcp.ControlPlaneError):
+        mcp.set_stick_volume(args, request=FakeGateway())
+
+
+def test_gateway_errors_surface_as_tool_errors(monkeypatch):
+    def down(method, path, body=None):
+        raise mcp.ControlPlaneError("no Stick connected")
+
+    monkeypatch.setitem(mcp.TOOL_HANDLERS, "set_stick_volume",
+                        lambda args: mcp.set_stick_volume(args, request=down))
+    response = mcp.handle_request({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                                   "params": {"name": "set_stick_volume", "arguments": {"percent": 5}}})
+    assert response["result"]["isError"] is True
+    assert "no Stick connected" in response["result"]["content"][0]["text"]
