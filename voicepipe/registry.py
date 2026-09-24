@@ -179,6 +179,20 @@ class Registry:
                 continue
             adder(parser.add_argument_group(f"{self.kind} backend '{name}'"))
 
+    def options(self, name, args):
+        """The parsed values of the flags backend `name` declares, e.g.
+        {"kitten_voice": "Bella", "kitten_speed": 1.6}, so a service can say
+        exactly how its backend is configured (defaults included) without
+        listing every other backend's flags too."""
+        import argparse
+
+        adder = getattr(self.lookup(name), "add_arguments", None)
+        if adder is None:
+            return {}
+        probe = argparse.ArgumentParser(add_help=False)
+        adder(probe)
+        return {a.dest: getattr(args, a.dest, None) for a in probe._actions}
+
     def build(self, name, args):
         """Construct the named backend from parsed CLI args, via its
         `from_args` adapter (or with no arguments if it doesn't define one)."""

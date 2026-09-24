@@ -85,3 +85,11 @@ class TestTranscribe:
         client.post("/transcribe", files={"audio": ("t.wav", b"data", "audio/wav")})
 
         assert not os.path.exists(seen_path["path"])
+
+
+def test_health_reports_backend_config_when_set(monkeypatch):
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(stt_app, "_backend", FakeSTT())
+    monkeypatch.setattr(stt_app, "_config", {"name": "moonshine", "options": {"moonshine_threads": 4}})
+    body = TestClient(stt_app.app).get("/health").json()
+    assert body["config"] == {"name": "moonshine", "options": {"moonshine_threads": 4}}

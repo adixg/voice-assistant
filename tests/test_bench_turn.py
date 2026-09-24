@@ -126,3 +126,57 @@ def test_unreachable_input_tts_records_failures_instead_of_crashing():
 
 def test_bad_repetitions_is_a_usage_error():
     assert bt.main(["--no-stt", "--repetitions", "0", "hi"]) == 2
+
+
+def test_service_config_reads_health_config(monkeypatch):
+    body = {"status": "ok", "backend": "KittenVoice",
+            "config": {"name": "kitten", "options": {"kitten_speed": 1.6}}}
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(bt.urllib.request, "urlopen",
+                        lambda url, timeout: Resp(json.dumps(body).encode()))
+    assert bt.service_config("http://tts:8003") == body["config"]
+    assert bt.describe(body["config"]) == "kitten (kitten_speed=1.6)"
+
+
+def test_service_config_falls_back_and_survives_errors(monkeypatch):
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(bt.urllib.request, "urlopen",
+                        lambda url, timeout: Resp(b'{"status": "ok", "backend": "OldSTT"}'))
+    assert bt.service_config("http://stt:8001") == {"name": "OldSTT", "options": {}}
+
+    def down(url, timeout):
+        raise OSError("refused")
+
+    monkeypatch.setattr(bt.urllib.request, "urlopen", down)
+    assert bt.service_config("http://stt:8001")["name"] is None
+
+
+def test_summary_carries_backends_and_speed_stats():
+    rows = [{"llm": "a", "tts": "t", "stt_backend": "moonshine", "tts_backend": "kitten", "ok": True,
+             "stt_ms": ms, "llm_ms": 1000, "tts_ms": 2000, "turn_ms": 3000 + ms,
+             "tts_x_realtime": x, "audio_s": 6.0} for ms, x in ((100, 3.0), (300, 2.0))]
+    (s,) = bt.summarize(rows)
+    assert (s["stt_backend"], s["tts_backend"], s["n"]) == ("moonshine", "kitten", 2)
+    assert s["stt_ms_mean"] == 200 and s["stt_ms_min"] == 100 and s["stt_ms_max"] == 300
+    assert s["tts_x_realtime_p50"] == 2.5
+
+
+def test_keep_writes_a_small_labelled_summary(tmp_path):
+    path = bt.keep([{"llm": "a"}], {"repetitions": 10}, "Moonshine + Kitten 1.6!", tmp_path)
+    assert path.name.endswith("-moonshine-kitten-1-6.json")
+    saved = json.loads(path.read_text())
+    assert saved == {"label": "Moonshine + Kitten 1.6!", "metadata": {"repetitions": 10},
+                     "summary": [{"llm": "a"}]}

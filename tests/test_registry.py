@@ -161,3 +161,17 @@ class TestBackendsAreAutoDiscovered:
         for name in TTS.names():
             backend = TTS.lookup(name)
             assert issubclass(backend, TTSBackend), name
+
+
+def test_options_reports_only_that_backends_flags_with_defaults():
+    import argparse
+
+    from voicepipe import backends  # noqa: F401
+    from voicepipe.registry import TTS
+
+    ap = argparse.ArgumentParser()
+    TTS.add_arguments(ap)
+    args = ap.parse_args(["--kitten-speed", "1.6"])
+    opts = TTS.options("kitten", args)
+    assert opts["kitten_speed"] == 1.6 and opts["kitten_voice"] == "Bella"
+    assert all(k.startswith("kitten_") for k in opts)

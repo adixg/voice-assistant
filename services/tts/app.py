@@ -46,9 +46,18 @@ def build_parser():
     return ap
 
 
+# Which registry backend this process runs and with which options, set in
+# main(). /health reports it so a benchmark can record what it measured
+# (benchmarks/pipeline/bench_turn.py) rather than assume.
+_config = None
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "backend": _backend.__class__.__name__ if _backend else None}
+    body = {"status": "ok", "backend": _backend.__class__.__name__ if _backend else None}
+    if _config:
+        body["config"] = _config
+    return body
 
 
 @app.post("/synth", response_model=SynthResponse)
@@ -64,10 +73,12 @@ def synth(req: SynthRequest):
 
 
 def main():
-    global _backend
+    global _backend, _config
     args = build_parser().parse_args()
     _backend = (ElevenLabsTTS.from_environment() if args.tts_backend == "elevenlabs"
                 else TTS.build(args.tts_backend, args))
+    _config = {"name": args.tts_backend,
+               "options": {} if args.tts_backend == "elevenlabs" else TTS.options(args.tts_backend, args)}
     try:
         uvicorn.run(app, host=args.host, port=args.port)
     finally:

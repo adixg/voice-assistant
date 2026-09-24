@@ -44,9 +44,18 @@ def build_parser():
     return ap
 
 
+# Which registry backend this process runs and with which options, set in
+# main(). /health reports it so a benchmark can record what it measured
+# (benchmarks/pipeline/bench_turn.py) rather than assume.
+_config = None
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "backend": _backend.__class__.__name__ if _backend else None}
+    body = {"status": "ok", "backend": _backend.__class__.__name__ if _backend else None}
+    if _config:
+        body["config"] = _config
+    return body
 
 
 @app.post("/transcribe", response_model=TranscribeResponse)
@@ -64,9 +73,10 @@ async def transcribe(audio: UploadFile, lang: str | None = None):
 
 
 def main():
-    global _backend
+    global _backend, _config
     args = build_parser().parse_args()
     _backend = STT.build(args.stt_backend, args)
+    _config = {"name": args.stt_backend, "options": STT.options(args.stt_backend, args)}
     uvicorn.run(app, host=args.host, port=args.port)
 
 

@@ -70,6 +70,27 @@ A TTS target is any service speaking the `tts` HTTP contract (`POST /synth`
 adding another `--tts`. To compare *local* TTS engines without deploying them,
 use `tools/bench_tts.py`.
 
+## What gets recorded
+
+Before timing anything, `bench_turn` asks the `stt` and `tts` services'
+`/health` which backend they run and with which options (defaults included),
+prints it, and saves it with every row (`stt_backend`, `tts_backend`) and in
+the run's metadata alongside the git commit and the sentences. A saved run
+therefore says what it measured, whatever the `--tts NAME` label says.
+
+For a result worth keeping, use the shared sentences and 50 samples, and
+`--keep` to write a small committable summary to `benchmarks/runs/pipeline/`:
+
+```bash
+python benchmarks/pipeline/bench_turn.py --cluster-ssh arch-ssd.<tailnet>.ts.net \
+    --llm agent=http://agent:8002,kind=agent \
+    --sentences-file benchmarks/sentences.txt --warmups 3 --repetitions 10 \
+    --keep "moonshine + kitten 1.6"
+```
+
+Summaries carry n, p50, p95, mean, min and max per stage, plus the reply
+voice's x realtime. See `benchmarks/README.md` for where everything lives.
+
 ## Reading the numbers
 
 - Run `--warmups 1` (the default) or more: the first request after a model

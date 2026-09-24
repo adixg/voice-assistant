@@ -1,0 +1,22 @@
+{
+  "label": "RTX 4060 GPU (transcribed)",
+  "metadata": {
+    "timestamp_utc": "2026-09-05T00:00:00+00:00",
+    "host": "laptop",
+    "device": "gpu",
+    "cpu": null,
+    "warmups": null,
+    "repetitions": 1,
+    "sentences": ["three reply-length sentences, voice cloned from voice_audition/refs/hinata_ref.wav"],
+    "git_commit": null,
+    "failures": [],
+    "source": "Transcribed by hand from docs/hardware-budget.md ('TTS backends - measured'). The raw measurements were not kept. n=3 per engine, no warm-up recorded; x_realtime is that table's avg RTF.",
+    "memory_note": "rss_peak_mib holds VRAM here (nvidia-smi from a 0 MiB idle card), not process RAM"
+  },
+  "summary": [
+    {"label": "Chatterbox Nano", "backend": "chatterbox", "options": {"chatterbox_nano": true},
+     "n": 3, "load_s": 9.0, "rss_peak_mib": 1857, "x_realtime": 2.54, "s_per_10s_speech": 3.937},
+    {"label": "Chatterbox Turbo", "backend": "chatterbox", "options": {"chatterbox_nano": false},
+     "n": 3, "load_s": 10.7, "rss_peak_mib": 2805, "x_realtime": 1.75, "s_per_10s_speech": 5.714}
+  ]
+}

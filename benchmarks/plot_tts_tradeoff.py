@@ -7,24 +7,39 @@ dark), standard library only.
 writes assets/charts/tts-speed-vs-memory-{light,dark}.svg. The README shows
 whichever matches the viewer's theme via <picture>.
 
-Every point is a measurement from docs/hardware-budget.md; edit POINTS when a
-number there changes and re-run. Engines missing either number are left off
-the chart and listed under it in the README instead of being guessed.
+The points come from the committed run summaries in benchmarks/runs/tts_engines/
+(written by benchmarks/tts_engines/bench_tts_engines.py --keep): for each
+engine label, the newest run that measured it. Nothing here is typed in by
+hand; to update the chart, re-run the benchmark with --keep and then this.
 """
+import json
 from pathlib import Path
 
-# (label, memory MiB, x realtime, where it ran, label placement)
-# Memory is what the engine itself holds: process RSS for the CPU engines
-# (sherpa-onnx profile on arch-ssd, 2026-09-24) and VRAM for the GPU ones
-# (RTX 4060, 2026-09-05). Time is seconds to synthesize 10 s of speech.
-POINTS = [
-    ("Kitten nano (live)", 330, 3.09, "cpu", "below"),
-    ("Kitten mini", 535, 1.43, "cpu", "right"),
-    ("Kokoro-ONNX int8", 581, 0.87, "cpu", "right"),
-    ("Kokoro-ONNX fp32", 700, 2.21, "cpu", "right"),
-    ("Chatterbox Nano", 1857, 2.54, "gpu", "above"),
-    ("Chatterbox Turbo", 2805, 1.75, "gpu", "left"),
-]
+ROOT = Path(__file__).resolve().parents[1]
+RUNS = ROOT / "benchmarks" / "runs" / "tts_engines"
+
+# Labels measured but not drawn: plain "Kitten nano" is the same engine as the
+# live 1.6x point, and would sit on top of it.
+HIDE = {"Kitten nano"}
+# Where each label goes relative to its mark, so labels don't collide.
+PLACE = {"Kitten nano 1.6x (live)": "below", "Chatterbox Nano": "above",
+         "Chatterbox Turbo": "left"}
+
+
+def load_points(runs=RUNS):
+    """(label, memory MiB, x realtime, device, placement, n) per engine label,
+    taken from the newest kept run that measured it."""
+    newest = {}
+    for path in sorted(runs.glob("*.json")):  # names start with a UTC stamp
+        run = json.loads(path.read_text())
+        device = run["metadata"].get("device", "cpu")
+        for entry in run.get("summary", []):
+            if entry.get("x_realtime") and entry.get("rss_peak_mib"):
+                newest[entry["label"]] = (entry, device)
+    return [(label, entry["rss_peak_mib"], entry["x_realtime"], device,
+             PLACE.get(label, "right"), entry.get("n"))
+            for label, (entry, device) in sorted(newest.items()) if label not in HIDE]
+
 
 THEMES = {
     "light": {"surface": "#fcfcfb", "text": "#0b0b0b", "muted": "#52514e",
@@ -58,7 +73,7 @@ def marker(kind, x, y, colour, surface):
             f'fill="{colour}" stroke="{surface}" stroke-width="2"/>')
 
 
-def svg(theme):
+def svg(theme, points):
     t = THEMES[theme]
     font = 'font-family="system-ui, -apple-system, Segoe UI, sans-serif"'
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" '
@@ -66,7 +81,7 @@ def svg(theme):
            '<title id="t">TTS engines: time to make 10 s of speech vs memory</title>',
            '<desc id="d">' + "; ".join(
                f"{label}: {10 / rt:.1f} s, {mib} MiB, {kind.upper()}"
-               for label, mib, rt, kind, _ in POINTS) + "</desc>",
+               for label, mib, rt, kind, _, _ in points) + "</desc>",
            f'<rect width="{W}" height="{H}" fill="{t["surface"]}"/>',
            f'<text x="{LEFT}" y="30" font-size="16" font-weight="600" fill="{t["text"]}">'
            'Seconds to make 10 s of speech, by memory used</text>']
@@ -97,10 +112,10 @@ def svg(theme):
                f'fill="{t["muted"]}">lower is faster, further left is lighter</text>')
 
     # Marks and direct labels (six points: every one is labelled).
-    for label, mib, rt, kind, where in POINTS:
+    for label, mib, rt, kind, where, n in points:
         x, y = sx(mib), sy(10 / rt)
         out.append(marker(kind, x, y, t[kind], t["surface"]))
-        value = f"{10 / rt:.1f} s · {mib} MiB"
+        value = f"{10 / rt:.1f} s · {mib:.0f} MiB" + (f" · n={n}" if n else "")
         if where == "right":
             ax, ay, anchor = x + 12, y - 2, "start"
         elif where == "left":
@@ -118,11 +133,12 @@ def svg(theme):
 
 
 def main():
-    root = Path(__file__).resolve().parents[1] / "assets" / "charts"
+    points = load_points()
+    root = ROOT / "assets" / "charts"
     root.mkdir(parents=True, exist_ok=True)
     for theme in THEMES:
         path = root / f"tts-speed-vs-memory-{theme}.svg"
-        path.write_text(svg(theme))
+        path.write_text(svg(theme, points))
         print(path.relative_to(root.parents[1]))
 
 

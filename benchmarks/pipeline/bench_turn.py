@@ -47,6 +47,7 @@ import base64
 import csv
 import io
 import json
+import re
 import statistics
 import subprocess
 import sys
@@ -233,6 +234,34 @@ def llm_stream(target: LLMTarget, messages: list[dict], timeout: float) -> dict:
 
 # ---------------------------------------------------------------- the benchmark
 
+def service_config(base_url: str, timeout: float = 10) -> dict:
+    """Which backend a stt/tts service is running, from its /health: the
+    registry name and every option it was started with (defaults included).
+    Recorded with each result so a saved run says what it measured."""
+    try:
+        with urllib.request.urlopen(f"{base_url.rstrip('/')}/health", timeout=timeout) as resp:
+            body = json.loads(resp.read())
+    except (OSError, ValueError) as exc:
+        return {"name": None, "error": str(exc)}
+    return body.get("config") or {"name": body.get("backend"), "options": {}}
+
+
+def describe(config: dict | None) -> str:
+    """'kitten (kitten_speed=1.6, kitten_voice=Bella, ...)' for printing."""
+    if not config:
+        return "-"
+    opts = ", ".join(f"{k}={v}" for k, v in sorted((config.get("options") or {}).items()))
+    return f"{config.get('name')}" + (f" ({opts})" if opts else "")
+
+
+def git_commit() -> str | None:
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+                              text=True, timeout=5, check=True).stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def percentile(values: list[float], p: float) -> float | None:
     if not values:
         return None
@@ -243,8 +272,10 @@ def percentile(values: list[float], p: float) -> float | None:
 
 
 class Bench:
-    def __init__(self, args, llms: list[LLMTarget], ttss: list[tuple[str, str]]):
+    def __init__(self, args, llms: list[LLMTarget], ttss: list[tuple[str, str]],
+                 stt_backend: str | None = None, tts_backends: dict[str, str] | None = None):
         self.args, self.llms, self.ttss = args, llms, ttss
+        self.stt_backend, self.tts_backends = stt_backend, tts_backends or {}
         self.input_audio: dict[str, bytes] = {}
         self.records: list[dict] = []
 
@@ -276,14 +307,15 @@ class Bench:
                          "ok": False, "error": f"stt: {exc}"} for t in self.llms]
         for llm in self.llms:
             base = {"sentence": sentence, "rep": rep, "heard": heard, "stt_ms": stt_ms,
-                    "llm": llm.name, "llm_think": llm.think}
+                    "stt_backend": self.stt_backend, "llm": llm.name, "llm_think": llm.think}
             try:
                 result = llm_stream(llm, self.messages(heard), self.args.timeout)
             except (OSError, ValueError, urllib.error.URLError) as exc:
                 rows.append({**base, "ok": False, "error": f"llm: {exc}"})
                 continue
             for tts_name, tts_url in self.ttss:
-                row = {**base, **result, "tts": tts_name, "reply_chars": len(result["reply"])}
+                row = {**base, **result, "tts": tts_name, "tts_backend": self.tts_backends.get(tts_name),
+                       "reply_chars": len(result["reply"])}
                 if self.args.no_tts or not result["reply"]:
                     row.update(tts_ms=0.0, audio_s=0.0)
                 else:
@@ -292,6 +324,8 @@ class Bench:
                         chunks = tts_synth(tts_url, result["reply"], self.args.timeout)
                         row["tts_ms"] = round((time.perf_counter() - t0) * 1000, 1)
                         row["audio_s"] = round(wav_seconds(chunks), 3)
+                        if row["tts_ms"]:
+                            row["tts_x_realtime"] = round(row["audio_s"] / (row["tts_ms"] / 1000), 3)
                     except (OSError, ValueError, urllib.error.URLError) as exc:
                         rows.append({**row, "ok": False, "error": f"tts: {exc}"})
                         continue
@@ -357,11 +391,15 @@ def summarize(records: list[dict]) -> list[dict]:
     summary = []
     for (llm, tts), rows in combos.items():
         ok = [r for r in rows if r.get("ok")]
-        entry = {"llm": llm, "tts": tts, "ok": len(ok), "n": len(rows)}
-        for key in ("stt_ms", "llm_ms", "tts_ms", "turn_ms"):
+        entry = {"llm": llm, "tts": tts, "stt_backend": rows[0].get("stt_backend"),
+                 "tts_backend": rows[0].get("tts_backend"), "ok": len(ok), "n": len(rows)}
+        for key in ("stt_ms", "llm_ms", "tts_ms", "turn_ms", "tts_x_realtime", "audio_s"):
             vals = [r[key] for r in ok if r.get(key) is not None]
             entry[f"{key}_p50"] = percentile(vals, 50)
             entry[f"{key}_p95"] = percentile(vals, 95)
+            entry[f"{key}_mean"] = round(sum(vals) / len(vals), 3) if vals else None
+            entry[f"{key}_min"] = min(vals) if vals else None
+            entry[f"{key}_max"] = max(vals) if vals else None
         summary.append(entry)
     return summary
 
@@ -392,6 +430,18 @@ def save(records: list[dict], summary: list[dict], metadata: dict, output_dir: P
     return stem
 
 
+def keep(summary: list[dict], metadata: dict, label: str, runs_dir: Path) -> Path:
+    """A small, committable record of one run: its metadata (backends, options,
+    commit, sample counts) and summary statistics, without the raw rows. Raw
+    JSON/CSV stay in the gitignored --output-dir."""
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:60] or "run"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    path = runs_dir / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{slug}.json"
+    path.write_text(json.dumps({"label": label, "metadata": metadata, "summary": summary},
+                               indent=2) + "\n")
+    return path
+
+
 def read_sentences(args) -> list[str]:
     sentences = list(args.sentences)
     if args.sentences_file:
@@ -418,7 +468,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--timeout", type=float, default=300, help="per-request timeout, seconds")
     ap.add_argument("--cluster-ssh", metavar="HOST",
                     help="resolve service names to ClusterIPs via kubectl on HOST")
-    ap.add_argument("--output-dir", type=Path, default=Path("benchmarks/results/pipeline"))
+    ap.add_argument("--output-dir", type=Path, default=Path("benchmarks/results/pipeline"),
+                    help="raw JSON/CSV per run (gitignored)")
+    ap.add_argument("--keep", metavar="LABEL",
+                    help="also write a small summary to --runs-dir, meant to be committed")
+    ap.add_argument("--runs-dir", type=Path, default=Path("benchmarks/runs/pipeline"))
     return ap
 
 
@@ -443,7 +497,10 @@ def main(argv=None) -> int:
         ttss = [(n, mapping[u]) for n, u in ttss]
         args.stt, args.input_tts = mapping[args.stt], mapping[args.input_tts]
 
-    bench = Bench(args, llms, ttss)
+    stt_config = None if args.no_stt else service_config(args.stt)
+    tts_configs = {} if args.no_tts else {name: service_config(url) for name, url in ttss}
+    bench = Bench(args, llms, ttss, stt_backend=stt_config and stt_config.get("name"),
+                  tts_backends={n: c.get("name") for n, c in tts_configs.items()})
     sentences = read_sentences(args)
     interactive = not sentences and sys.stdin.isatty()
     if not sentences and not interactive:
@@ -452,6 +509,10 @@ def main(argv=None) -> int:
     print("targets:  LLM " + ", ".join(f"{t.name}(think={t.think})" for t in llms)
           + "  |  TTS " + ", ".join(n for n, _ in ttss)
           + ("" if args.no_stt else "  |  STT on"), flush=True)
+    if stt_config:
+        print(f"stt backend: {describe(stt_config)}", flush=True)
+    for name, config in tts_configs.items():
+        print(f"tts backend [{name}]: {describe(config)}", flush=True)
     try:
         first = sentences[0] if sentences else "Hello there, how are you today?"
         if args.warmups:
@@ -477,10 +538,14 @@ def main(argv=None) -> int:
     print_summary(summary)
     metadata = {"timestamp_utc": datetime.now(timezone.utc).isoformat(),
                 "llms": [vars(t) for t in llms], "tts": ttss, "stt": None if args.no_stt else args.stt,
-                "repetitions": args.repetitions, "warmups": args.warmups, "system": args.system}
+                "repetitions": args.repetitions, "warmups": args.warmups, "system": args.system,
+                "stt_backend": stt_config, "tts_backends": tts_configs, "git_commit": git_commit(),
+                "sentences": sentences, "records": len(bench.records)}
     stem = save(bench.records, summary, metadata, args.output_dir)
     if stem:
         print(f"\nsaved {stem}.json and {stem}.csv")
+    if args.keep and summary:
+        print(f"kept {keep(summary, metadata, args.keep, args.runs_dir)}")
     failed = sum(1 for r in bench.records if not r.get("ok"))
     return 1 if failed else 0
 

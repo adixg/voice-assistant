@@ -1,0 +1,8 @@
+# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,
+# so runs on different days measure the same text. Short to long, the kind of
+# thing said to and by the companion.
+Hey, how was your day?
+Can you remind me to drink water in an hour?
+Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.
+What's the GPU temperature right now, and is anything running hot?
+I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?
