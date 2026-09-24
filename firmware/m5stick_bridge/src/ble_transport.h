@@ -206,8 +206,12 @@ static void begin() {
   txChar->setCallbacks(new TxCharCB());
   // Plain WRITE, not WRITE_ENC -- see the header comment for why: bleAuthed
   // is the real gate, not the ATT layer, confirmed on real hardware.
-  NimBLECharacteristic *rxChar =
-      service->createCharacteristic(RX_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
+  // WRITE_NR too: reply audio arrives as write-without-response. With only
+  // acknowledged writes the phone could send one ~500-byte packet per round
+  // trip, measured at ~12 KB/s against the speaker's 32 KB/s, so every reply
+  // stuttered (2026-09-24). Control frames and AUTH still use WRITE.
+  NimBLECharacteristic *rxChar = service->createCharacteristic(
+      RX_CHAR_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   rxChar->setCallbacks(new RxCharCB());
   service->start();
 

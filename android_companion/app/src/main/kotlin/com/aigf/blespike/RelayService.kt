@@ -261,7 +261,18 @@ class RelayService : Service() {
         val (type, payload) = next
         val packets = ArrayDeque<ByteArray>()
         encodeFrame(type, payload) { packets.addLast(it); true }
-        writeNextPacket(g, rx, packets) { sendNextFrame() }
+        // Reply audio goes without response: an acknowledged write costs a
+        // round trip per ~500-byte packet, which measured ~12 KB/s against the
+        // Stick's 32 KB/s playback, so replies stuttered. Everything else (AUTH,
+        // control, text) stays acknowledged. Android still calls
+        // onCharacteristicWrite once a no-response packet is handed to the
+        // controller, so the one-write-at-a-time queue keeps its flow control.
+        val writeType = if (type == FrameType.AUDIO_CHUNK) {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        }
+        writeNextPacket(g, rx, packets, writeType) { sendNextFrame() }
     }
 
     // Same design (peek-not-pop + bounded retry on ERROR_GATT_WRITE_NOT_ALLOWED/
@@ -270,7 +281,9 @@ class RelayService : Service() {
     // reproducible Android quirk confirmed on hardware, not a guess.
     private fun writeNextPacket(
         g: BluetoothGatt, rx: BluetoothGattCharacteristic,
-        packets: ArrayDeque<ByteArray>, retriesLeft: Int = 5, onFrameDone: () -> Unit
+        packets: ArrayDeque<ByteArray>, writeType: Int,
+        retriesLeft: Int = if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) 100 else 5,
+        onFrameDone: () -> Unit
     ) {
         if (g !== gatt || !running) return
         val packet = packets.firstOrNull()
@@ -279,10 +292,10 @@ class RelayService : Service() {
             return
         }
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(rx, packet, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            g.writeCharacteristic(rx, packet, writeType)
         } else {
             @Suppress("DEPRECATION")
-            rx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            rx.writeType = writeType
             @Suppress("DEPRECATION")
             rx.value = packet
             @Suppress("DEPRECATION")
@@ -291,11 +304,15 @@ class RelayService : Service() {
         when {
             result == BluetoothStatusCodes.SUCCESS -> {
                 packets.removeFirst()
-                pendingPacketQueues[rx.uuid] = { writeNextPacket(g, rx, packets, onFrameDone = onFrameDone) }
+                pendingPacketQueues[rx.uuid] = { writeNextPacket(g, rx, packets, writeType, onFrameDone = onFrameDone) }
             }
             (result == BluetoothStatusCodes.ERROR_GATT_WRITE_NOT_ALLOWED ||
                 result == BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY) && retriesLeft > 0 -> {
-                handler.postDelayed({ writeNextPacket(g, rx, packets, retriesLeft - 1, onFrameDone) }, 300)
+                // A full controller buffer is routine when streaming without
+                // response, so retry that quickly; acknowledged writes keep the
+                // original slow backoff for the Android quirk described above.
+                val backoffMs = if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) 10L else 300L
+                handler.postDelayed({ writeNextPacket(g, rx, packets, writeType, retriesLeft - 1, onFrameDone) }, backoffMs)
             }
             else -> restartBle("BLE write could not be queued (status=$result)")
         }

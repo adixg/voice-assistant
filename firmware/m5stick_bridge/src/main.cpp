@@ -153,6 +153,10 @@ static bool playbackStarted = false;
 static bool replyEnded = false;       // FRAME_END seen: no more audio is coming
 static bool replyAborted = false;     // interrupted, or the user started talking
 static uint32_t lastAudioMs = 0;
+// Serial-only timing for diagnosing choppy playback: when the reply text
+// arrived, and whether the speaker is currently starved waiting for audio.
+static uint32_t replyStartMs = 0;
+static bool playbackDry = false;
 // BLE delivers roughly 50 KB/s against 32 KB/s of playback, only ~1.5x, and the
 // phone relay adds jitter, so a small cushion stutters. Start with 1.5s buffered,
 // and after the speaker runs dry mid-reply wait for 1s more before resuming
@@ -786,6 +790,8 @@ void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
       replyEnded = false;
       replyAborted = false;
       lastAudioMs = millis();
+      replyStartMs = millis();
+      playbackDry = false;
       break;
     case FRAME_AUDIO_CHUNK:
       if (receivingReply) {
@@ -799,6 +805,9 @@ void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
     case FRAME_END:
       receivingReply = false;
       replyEnded = true;
+      Serial.printf("[audio] end: %u bytes (%.1fs of audio) arrived %lu ms after the reply text\n",
+                    (unsigned)replyLen, replyLen / 2.0f / SAMPLE_RATE,
+                    (unsigned long)(millis() - replyStartMs));
       if (replyAborted) {
         // interrupted mid-reply; nothing left to play or show
       } else if (replyLen > 0) {
@@ -942,9 +951,19 @@ static void pumpPlayback() {
     playbackStarted = true;
     speakStartMs = millis();
     uiState = UI_SPEAKING;
+    Serial.printf("[audio] play start %lu ms after the reply text, %u bytes buffered\n",
+                  (unsigned long)(millis() - replyStartMs), (unsigned)pending);
   }
   size_t slots = M5.Speaker.isPlaying(0);  // 0 idle, 1 playing, 2 playing + next queued
-  if (slots == 0 && !replyEnded && pending < PLAY_REBUFFER_BYTES) return;  // ran dry: refill first
+  if (slots == 0 && !replyEnded && pending < PLAY_REBUFFER_BYTES) {  // ran dry: refill first
+    if (!playbackDry) {
+      playbackDry = true;
+      Serial.printf("[audio] ran dry at %lu ms: %u of %u received bytes played\n",
+                    (unsigned long)(millis() - replyStartMs), (unsigned)queuedOff, (unsigned)replyLen);
+    }
+    return;
+  }
+  playbackDry = false;
   if (slots < 2 && pending >= 2 && (pending >= PLAY_MIN_QUEUE_BYTES || replyEnded)) {
     size_t n = pending & ~(size_t)1;
     M5.Speaker.playRaw((const int16_t *)(replyBuf + queuedOff), n / 2, SAMPLE_RATE, false, 1, 0, false);
@@ -1088,6 +1107,8 @@ void loop() {
       }
     } else {
       speakLevel = 0.0f;
+      Serial.printf("[audio] done %lu ms after the reply text (%.1fs of audio)\n",
+                    (unsigned long)(millis() - replyStartMs), replyLen / 2.0f / SAMPLE_RATE);
       showTransient(lastReplyWasError ? UI_ERROR : UI_DONE, 900);
     }
   }

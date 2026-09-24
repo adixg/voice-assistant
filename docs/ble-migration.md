@@ -258,6 +258,25 @@ failed) almost exactly. **Comfortably clears the ~256 kbps target with ~56%
 headroom**, genuinely received and counted end-to-end, not inferred from the
 sender. Phase 2's go/no-go: **pass**.
 
+**Correction (2026-09-24): that only covered one direction.** Phase 2 measured
+Stick → phone notifications. Reply audio goes the other way, phone → Stick,
+over the RX characteristic, and the relay wrote it with
+`WRITE_TYPE_DEFAULT` (an acknowledged write, one ~500-byte packet per round
+trip). Measured with serial timing added to `main.cpp` (`[audio] ...` lines),
+a 19.6 s reply (627 KB of 16 kHz PCM16) took **53 s to arrive, ~12 KB/s**
+against 32 KB/s of playback. The speaker ran dry 14 times, about every 3.3 s,
+mid-sentence, and the reply finished 53.6 s after its text. No amount of
+firmware buffering can fix a feed slower than playback.
+
+Fix: RX gained `WRITE_NR` alongside `WRITE`, and `RelayService` sends
+`AUDIO_CHUNK` frames with `WRITE_TYPE_NO_RESPONSE` (everything else, AUTH
+included, stays acknowledged). Android still calls `onCharacteristicWrite`
+once a no-response packet reaches the controller, so the one-write-at-a-time
+queue keeps its flow control; a busy controller is retried after 10 ms
+instead of 300 ms. Same reply afterwards: **arrived in 9.2 s (~69 KB/s, 2.1x
+playback), zero underruns, playback started 1.8 s after the text, and it
+finished at 21.4 s.** App `versionName` 1.1.
+
 ## Phase 3 — byte-envelope codec, in progress (2026-09-16)
 
 Codec + two-characteristic split written and build-checked on both sides
