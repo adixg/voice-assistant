@@ -138,7 +138,6 @@ def test_lean_mode_never_touches_the_voice_pipeline():
                 assert name not in line.replace("kube-state-metrics", "")
 
 
-<<<<<<< Updated upstream
 # Highest memory each pod was actually measured to use (MiB, from the cgroup's
 # memory.peak, 2026-09-23/24, ANON where it is known). A limit at or below one
 # of these has already OOM-killed the pod once: tts at 1792Mi (idle reading
@@ -180,7 +179,8 @@ def test_a_pods_request_never_exceeds_its_limit():
             if request and limit:
                 to_mib = lambda q: float(str(q)[:-2]) * (1024 if str(q).endswith("Gi") else 1)  # noqa: E731
                 assert to_mib(request) <= to_mib(limit), (path, doc["metadata"]["name"])
-=======
+
+
 def test_switch_backend_presets_parse_with_the_real_service_flags():
     """Every tools/switch-backend.sh preset must be args the service accepts,
     or a switch would crash-loop the live pod."""
@@ -209,4 +209,3 @@ def test_switch_backend_default_presets_match_the_manifests():
     for svc, name in (("stt", "whisper"), ("tts", "kokoro")):
         body = re.search(rf"{svc}/{name}\).*?ARGS='([^']*)'", script, re.S).group(1)
         assert f"args: [{body.replace(',', ', ')}]" in read(f"deploy/kubernetes/{svc}.yaml")
->>>>>>> Stashed changes
