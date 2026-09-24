@@ -93,6 +93,58 @@ the GPU is now free for STT + LLM only by default, which loosens the "LLM
 already spilling to CPU" finding below — worth re-measuring `GET /api/ps`
 against a clean idle card if that matters for a future change.
 
+## sherpa-onnx backends — measured on arch-ssd
+
+Four CPU backends run through one runtime, sherpa-onnx
+(`voicepipe/backends/sherpa_stt.py`, `sherpa_tts.py`): STT `parakeet` and
+`moonshine`, TTS `kokoro-onnx` and `kitten`. Switch the live one with
+`tools/switch-backend.sh`, which also sets the matching memory limit.
+
+Live, in the cluster, 2026-09-24. Three sentences x two reps, warm, via
+`benchmarks/pipeline/bench_turn.py` (4060 LLM direct); pod memory is the
+cgroup's `memory.peak`:
+
+| STT backend | p50 | pod peak | transcripts |
+| --- | ---: | ---: | --- |
+| faster-whisper small, GTX 1650 | 3.31 s | 1023 MiB (1 GiB limit) | all correct |
+| `parakeet` (0.6B int8, CPU) | **0.23 s** | 962 MiB | all correct |
+| `moonshine` (base, CPU, English) | **0.18 s** | 571 MiB | all correct |
+
+Why whisper takes 3.3 s here against 0.33 s standalone on the 4060 was not
+investigated. It shares the 1650 with the LLM by time-slicing, and it also
+has `vad_filter` on. Either CPU backend removes the question.
+
+| TTS backend | speed | pod peak | notes |
+| --- | ---: | ---: | --- |
+| `kokoro` (PyTorch) | — | OOM at 3 GiB | killed about 1 min after start under the benchmark |
+| `kokoro-onnx` fp32 | 2.2x realtime | ~1.35 GiB, flat | same af_bella voice; the preset limit is 2 GiB |
+| `kokoro-onnx` int8 | 0.9x realtime | OOM at 1 GiB | slower than fp32 on this CPU, see below |
+| `kitten` nano int8 | 3.1x realtime | 559 MiB | lower quality, speaks more slowly |
+
+Turn p50 (STT + LLM + TTS), before and after: **10.6 s** with whisper and
+kokoro-onnx, **7.4 s** with moonshine and kokoro-onnx. PyTorch Kokoro couldn't
+finish a run.
+
+How the TTS rows above were split (a one-off pod on arch-ssd, 12 identical
+reply-sized sentences in a row, 4 threads, RSS of a bare process without the
+HTTP service):
+
+| model | x realtime | RSS |
+| --- | ---: | ---: |
+| kokoro fp32 (`kokoro-multi-lang-v1_0`) | 2.21 | 700 MB |
+| kokoro int8 (`kokoro-int8-multi-lang-v1_0`) | 0.87 | 581 MB |
+| kitten nano int8 (`kitten-nano-en-v0_8-int8`) | 3.09 | 330 MB |
+| kitten mini (`kitten-mini-en-v0_8`) | 1.43 | 535 MB |
+
+- **int8 is slower on arch-ssd.** Its i5-10300H has AVX2 but no VNNI, so
+  quantized matmuls get no hardware help. The same int8 model ran about 1x
+  realtime on this laptop. Hence the defaults are fp32 Kokoro and nano Kitten.
+- **8 threads is no faster than 4** (kokoro fp32: 2.04x vs 2.21x).
+- **Memory stops growing.** RSS is flat after the second call. In the service,
+  `kokoro-onnx` settled at 1346 MiB and stayed there across ten more requests
+  of 50-1907 characters. It's a high-water mark (onnxruntime's arena), not a
+  leak, but it's about double the bare process's, hence the 2 GiB limit.
+
 ### Chatterbox Nano — needs a git install, not a PyPI version
 
 - `ResembleAI/chatterbox-nano` on Hugging Face (updated 2026-07-21) holds

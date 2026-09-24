@@ -63,8 +63,8 @@ def fake_sherpa(monkeypatch, tmp_path):
     monkeypatch.setenv("SHERPA_MODELS_DIR", str(tmp_path))
     for name in (sherpa_stt.PARAKEET_MODEL, sherpa_stt.MOONSHINE_MODEL):
         (tmp_path / name).mkdir()
-    for name, model in ((sherpa_tts.KOKORO_MODEL, "model.int8.onnx"),
-                        (sherpa_tts.KITTEN_MODEL, "model.onnx")):
+    for name, model in ((sherpa_tts.KOKORO_MODEL, "model.onnx"),
+                        (sherpa_tts.KITTEN_MODEL, "model.int8.onnx")):
         (tmp_path / name).mkdir()
         (tmp_path / name / model).write_bytes(b"")
     return tmp_path
@@ -140,7 +140,7 @@ def test_kokoro_onnx_synth_writes_one_wav_per_chunk(fake_sherpa):
     tts = TTS.create("kokoro-onnx", speed=1.1)
     assert isinstance(tts, TTSBackend)
     kokoro = tts.tts.config.model.kokoro
-    assert kokoro.model.endswith("model.int8.onnx") and kokoro.lang == "en-us"
+    assert kokoro.model.endswith("model.onnx") and kokoro.lang == "en-us"
     paths = tts.synth("First sentence. " * 40)
     assert len(paths) > 1 and all(os.path.exists(p) for p in paths)
     assert {call[1:] for call in tts.tts.calls} == {(2, 1.1)}  # af_bella, speed
@@ -156,7 +156,7 @@ def test_kitten_defaults_to_bella_and_accepts_voice_flag(fake_sherpa):
     tts = TTS.build("kitten", ap.parse_args(["--kitten-voice", "luna"]))
     assert tts.sid == 3
     assert TTS.create("kitten").sid == 1
-    assert tts.tts.config.model.kitten.model.endswith("model.onnx")
+    assert tts.tts.config.model.kitten.model.endswith("model.int8.onnx")
 
 
 def test_model_dir_uses_an_existing_directory_as_is(tmp_path):

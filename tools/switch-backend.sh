@@ -6,7 +6,7 @@
 #   tools/switch-backend.sh stt moonshine    Moonshine base, English only, CPU
 #   tools/switch-backend.sh tts kokoro       Kokoro af_bella on PyTorch (manifest default)
 #   tools/switch-backend.sh tts kokoro-onnx  the same Kokoro voice on onnxruntime, far less RAM
-#   tools/switch-backend.sh tts kitten       KittenTTS mini, voice Bella, smallest
+#   tools/switch-backend.sh tts kitten       KittenTTS nano, voice Bella, smallest and fastest
 #   tools/switch-backend.sh status           what each service is running now
 #
 # Extra flags after the preset go to the backend, e.g.
@@ -16,7 +16,9 @@
 # Memory limits move with the backend because they differ by up to 10x, and
 # arch-ssd has 7 GiB for the whole stack: keeping PyTorch Kokoro's 3 GiB limit
 # on kitten would waste it, and giving parakeet whisper's 1 GiB would OOM it.
-# See docs/hardware-budget.md for the measurements behind each number.
+# Each limit is the measured peak on arch-ssd plus headroom (2026-09-24,
+# docs/hardware-budget.md "sherpa-onnx backends"). kokoro-onnx settles at
+# ~1.35 GiB in the service, well above a bare process, and stays there.
 #
 # This patches the live Deployment. `kubectl apply -f deploy/kubernetes/`
 # puts the manifest's backend back; to change the default, edit the
@@ -41,7 +43,7 @@ preset() {
     stt/moonshine)    MEM="512Mi 1Gi";    ARGS='"--stt-backend","moonshine"' ;;
     tts/kokoro)       MEM="1536Mi 3Gi"
                       ARGS='"--tts-backend","kokoro","--kokoro-voice","af_bella","--kokoro-language","a","--kokoro-device","cpu"' ;;
-    tts/kokoro-onnx)  MEM="512Mi 1Gi";    ARGS='"--tts-backend","kokoro-onnx","--kokoro-onnx-voice","af_bella"' ;;
+    tts/kokoro-onnx)  MEM="1Gi 2Gi";     ARGS='"--tts-backend","kokoro-onnx","--kokoro-onnx-voice","af_bella"' ;;
     tts/kitten)       MEM="384Mi 768Mi";  ARGS='"--tts-backend","kitten","--kitten-voice","Bella"' ;;
     *) echo "unknown preset: $1 $2" >&2; usage 1 ;;
   esac

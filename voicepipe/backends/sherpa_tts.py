@@ -6,10 +6,17 @@ The PyTorch one grew to 2.8 GiB and was OOM-killed on the 7 GiB home server;
 this one stays in the hundreds of MiB. `kitten` is smaller still, English
 only, with 8 preset voices, for when memory matters more than polish.
 
-Measured on this laptop's CPU (4 threads, 2026-09-24, warm):
+Measured on arch-ssd's i5-10300H (4 threads, 2026-09-24, 12 reply-sized
+sentences in a row; RSS is flat after the second, no growth):
 
-    kokoro-onnx  ~2.6 s for 2.7 s of speech   ~360 MB RSS
-    kitten       ~1.9 s for 4.3 s of speech   ~250-350 MB RSS (mini)
+    kokoro-onnx  fp32 (default)  2.2x realtime   ~700 MB RSS
+                 int8            0.9x realtime   ~580 MB RSS
+    kitten       nano int8 (default)  3.1x realtime   ~330 MB RSS
+                 mini            1.4x realtime   ~535 MB RSS
+
+The int8 Kokoro is *slower* there: that CPU has AVX2 but no VNNI, so
+quantized matmuls get no hardware help. Load time is 1-20 s (first read of
+the model file from disk).
 
 Models download on first use (see _sherpa.py). Switch with --tts-backend.
 
@@ -26,7 +33,7 @@ from ._sherpa import model_dir, write_wav
 
 DEFAULT_THREADS = 4
 
-KOKORO_MODEL = "kokoro-int8-multi-lang-v1_0"
+KOKORO_MODEL = "kokoro-multi-lang-v1_0"
 # Speaker ids in that model's voices.bin, from sherpa-onnx's
 # scripts/kokoro/v1.0/generate_voices_bin.py. The prefix is language + sex:
 # a=American, b=British, e=Spanish, f=French, h=Hindi, i=Italian, j=Japanese,
@@ -42,7 +49,7 @@ KOKORO_VOICES = [
     "zf_xiaoyi", "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang", "em_santa",
 ]
 
-KITTEN_MODEL = "kitten-mini-en-v0_8"
+KITTEN_MODEL = "kitten-nano-en-v0_8-int8"
 # sherpa-onnx's voices.bin order (scripts/kitten-tts/v0_8/generate_voices_bin.py),
 # named with KittenML's own aliases from the model's config.json.
 KITTEN_VOICES = ["Jasper", "Bella", "Bruno", "Luna", "Hugo", "Rosie", "Leo", "Kiki"]
@@ -116,7 +123,8 @@ class KokoroOnnxVoice(_SherpaTTS):
         group.add_argument("--kokoro-onnx-voice", default="af_bella",
                            help="voice name or speaker id (default: af_bella)")
         group.add_argument("--kokoro-onnx-model", default=KOKORO_MODEL,
-                           help=f"sherpa-onnx release name or local directory (default: {KOKORO_MODEL})")
+                           help="sherpa-onnx release name or local directory, e.g. kokoro-int8-multi-lang-v1_0 "
+                                f"on a CPU with VNNI (default: {KOKORO_MODEL})")
         group.add_argument("--kokoro-onnx-speed", type=float, default=1.0,
                            help="speaking rate; above 1 is faster (default: 1.0)")
         group.add_argument("--kokoro-onnx-threads", type=int, default=DEFAULT_THREADS,
@@ -151,8 +159,8 @@ class KittenVoice(_SherpaTTS):
         group.add_argument("--kitten-voice", default="Bella",
                            help=f"one of {', '.join(KITTEN_VOICES)}, or a speaker id (default: Bella)")
         group.add_argument("--kitten-model", default=KITTEN_MODEL,
-                           help="sherpa-onnx release name or local directory, e.g. the smaller "
-                                f"kitten-nano-en-v0_8-int8 (default: {KITTEN_MODEL})")
+                           help="sherpa-onnx release name or local directory, e.g. the larger, "
+                                f"slower kitten-mini-en-v0_8 (default: {KITTEN_MODEL})")
         group.add_argument("--kitten-speed", type=float, default=1.0,
                            help="speaking rate; above 1 is faster (default: 1.0)")
         group.add_argument("--kitten-threads", type=int, default=DEFAULT_THREADS,

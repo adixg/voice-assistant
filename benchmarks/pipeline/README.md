@@ -121,3 +121,21 @@ The agent now costs about 0.5 s over a direct call (its MCP tool loop). STT
 is now the largest stage. The GTX 1650 rows failed in this run because
 `llama-cpp-gtx1650` was OOM-killed at its 2 GiB limit mid-request (see
 `TODO.md`).
+
+## Comparing STT and TTS backends
+
+`bench_turn` talks to whichever backend the `stt` and `tts` services are
+running, so compare backends by switching and re-running the same command:
+
+```bash
+tools/switch-backend.sh stt moonshine      # on arch-ssd, or anywhere with kubectl
+python benchmarks/pipeline/bench_turn.py --cluster-ssh arch-ssd.<tailnet>.ts.net \
+    --llm 4060=http://llama-cpp-rtx4060:8080/v1,model=qwen3-8b,think=off \
+    --sentences-file my_sentences.txt --repetitions 2
+```
+
+The `tts` column is the target's label (`kokoro` by default), not the
+backend, so note which backend each saved result was run against. Results of
+doing this on 2026-09-24 are in `docs/hardware-budget.md` ("sherpa-onnx
+backends"): STT p50 went from 3.31 s (whisper) to 0.18 s (moonshine) and turn
+p50 from 10.6 s to 7.4 s. The PyTorch Kokoro pod was OOM-killed mid-run.
