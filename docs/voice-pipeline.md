@@ -239,3 +239,24 @@ it now. `bridge_server.py --enroll` doesn't exist in the cluster gateway, so:
 
 The clips are biometric data: they stay on the node, are pruned to 50, and are
 not in git (`memory/voiceprint_samples/` is gitignored).
+
+
+## Why the 2-second minimum stays (measured 2026-09-24)
+
+With 33 samples enrolled, each of the owner's 23 real Stick clips was cut to its
+first N seconds (the way a short utterance looks, leading silence included) and
+scored leave-one-out against the other 32 samples:
+
+| length | owner min | owner mean | owner clips under 0.5 |
+|---|---|---|---|
+| 1.0s | 0.252 | 0.460 | 14 / 23 |
+| 1.2s | 0.318 | 0.496 | 11 / 23 |
+| 1.5s | 0.382 | 0.561 | 6 / 23 |
+| 2.0s | 0.541 | 0.644 | 0 / 23 |
+
+Lowering `--speaker-min-seconds` to 1.5s would reject the owner about one time in
+four, and lowering the threshold to compensate would approach strangers' 0.28.
+So sub-2s clips stay unjudged, and `--short-utterances` decides what happens to
+them: the cluster gateway runs `allow` (answered unchecked, owner's choice), with
+`ask` as the code default. Revisit before any tool that acts (Spotify, notes) is
+reachable by voice.

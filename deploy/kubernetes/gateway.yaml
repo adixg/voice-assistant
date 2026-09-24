@@ -34,6 +34,11 @@ spec:
             # 0.6 rejected the owner (0.536 on 2026-09-24; through the Stick they
             # score 0.54-0.66). Strangers score 0.07-0.28, so 0.5 keeps a wide gap.
             - "--speaker-threshold=0.5"
+            # Clips under 2s can't be verified (measured 2026-09-24: cut to 1.5s,
+            # 6 of 23 owner clips score under 0.5), so this answers them unchecked:
+            # quick phrases work, and anyone can get a short reply. Switch to
+            # "ask" once tools that act (not just read) are added.
+            - "--short-utterances=allow"
             # Keep the newest 50 utterances (any verdict) on the node so real Stick
             # audio can be added to the voiceprint: tools/voiceprint_add.py. It is
             # biometric data, kept local, bounded and pruned; delete this line and
