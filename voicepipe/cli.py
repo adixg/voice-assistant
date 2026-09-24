@@ -14,7 +14,7 @@ from . import backends  # noqa: F401 - registers every backend as a side effect
 from .personas import DEFAULT_PERSONA, PERSONAS, PROFILE_PATH, compose, load_profile, resolve
 from .registry import LLM, STT, SV, TTS
 from .speaker import (
-    DEFAULT_THRESHOLD, SHORT_ASK, SHORT_POLICIES, SpeakerGate, Voiceprint,
+    DEFAULT_THRESHOLD, ERROR_POLICIES, ERROR_REJECT, SHORT_ASK, SHORT_POLICIES, SpeakerGate, Voiceprint,
 )
 
 
@@ -65,6 +65,11 @@ def build_parser(description):
                          "one (default, safe), or 'allow' to let it through unjudged — "
                          "convenient for short commands, but anyone can then get past the "
                          "gate by keeping it brief")
+    ap.add_argument("--speaker-on-error", default=ERROR_REJECT, choices=ERROR_POLICIES,
+                    help="what to do when the speaker check itself fails (model missing, "
+                         "embedding crashed): 'reject' (default) refuses the utterance, "
+                         "'allow' lets it through unchecked, which means a broken gate "
+                         "answers everyone")
     ap.add_argument("--no-speaker-check", action="store_true",
                     help="answer anyone, even with a voiceprint enrolled")
 
@@ -111,15 +116,16 @@ def build_speaker_gate(args):
     an un-enrolled setup pays nothing — no download, no onnxruntime import.
     """
     short_policy = getattr(args, "short_utterances", SHORT_ASK)
+    on_error = getattr(args, "speaker_on_error", ERROR_REJECT)
     voiceprint = Voiceprint.load()
     if args.no_speaker_check or not voiceprint:
         if voiceprint and args.no_speaker_check:
             print("  speaker check disabled (--no-speaker-check)")
         return SpeakerGate(None, voiceprint, args.speaker_threshold, args.speaker_min_seconds,
-                           short_policy)
+                           short_policy, on_error)
 
     gate = SpeakerGate(SV.build(args.speaker_backend, args), voiceprint,
-                       args.speaker_threshold, args.speaker_min_seconds, short_policy)
+                       args.speaker_threshold, args.speaker_min_seconds, short_policy, on_error)
     if gate.mismatch:
         # Loud, because the alternative is a gate that looks on but is off.
         print(f"  ! speaker gate OFF: {gate.mismatch}")
@@ -127,6 +133,9 @@ def build_speaker_gate(args):
         print(f"  speaker gate on — {len(voiceprint)} enrolled samples, "
               f"backend {args.speaker_backend}, threshold {gate.threshold}, "
               f"min {gate.min_verify_seconds}s")
+        if gate.on_error != ERROR_REJECT:
+            # Loud, because it turns a broken model into an open gate.
+            print("  ! a failed speaker check is ALLOWED THROUGH (--speaker-on-error allow)")
         if gate.short_policy != SHORT_ASK:
             # Loud, because it is the one configuration in which the gate can
             # be walked past without scoring anything at all.

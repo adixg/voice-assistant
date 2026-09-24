@@ -66,6 +66,21 @@ MIN_VERIFY_SECONDS = 2.0
 ACCEPTED = "accepted"
 REJECTED = "rejected"
 TOO_SHORT = "too_short"
+# The check itself could not run (model missing, embedding crashed). Kept apart
+# from REJECTED: it says nothing about who is speaking, so it must not be
+# answered with the escalating "you are not the owner" lines or counted towards
+# the anger streak.
+CHECK_FAILED = "check_failed"
+
+# What to do when the check itself fails.
+#   "reject" — refuse the utterance. The default: a gate that answers everyone
+#              whenever its model is unavailable is not a gate. This was
+#              "allow" until the gateway shipped without curl, could not
+#              download its model, and silently accepted every voice.
+#   "allow"  — let it through (the old behaviour). Opt-in only.
+ERROR_REJECT = "reject"
+ERROR_ALLOW = "allow"
+ERROR_POLICIES = (ERROR_REJECT, ERROR_ALLOW)
 
 # What to do with a clip too brief to embed reliably.
 #   "ask"   — say a line asking for a longer one. The safe default: a clip
@@ -92,6 +107,18 @@ TOO_SHORT_LINES = [
 
 def too_short_line():
     return random.choice(TOO_SHORT_LINES)
+
+
+# When the voice check itself is broken. Neutral on purpose: it is not an
+# accusation, and it is not the owner's fault.
+CHECK_FAILED_LINES = [
+    "I can't check who's talking right now, sorry.",
+    "My voice check isn't working at the moment, so I can't answer.",
+]
+
+
+def check_failed_line():
+    return random.choice(CHECK_FAILED_LINES)
 
 
 # What she says to someone who isn't the owner, escalating with persistence.
@@ -245,7 +272,7 @@ class SpeakerGate:
     """
 
     def __init__(self, backend, voiceprint, threshold=None, min_verify_seconds=None,
-                 short_policy=SHORT_ASK):
+                 short_policy=SHORT_ASK, on_error=ERROR_REJECT):
         self.backend = backend
         self.voiceprint = voiceprint
         # Fall back to whatever this backend measured for itself, so a new
@@ -257,6 +284,13 @@ class SpeakerGate:
         if short_policy not in SHORT_POLICIES:
             raise ValueError(f"short_policy must be one of {SHORT_POLICIES}, got {short_policy!r}")
         self.short_policy = short_policy
+        if on_error not in ERROR_POLICIES:
+            raise ValueError(f"on_error must be one of {ERROR_POLICIES}, got {on_error!r}")
+        self.on_error = on_error
+        # The most recent reason the model could not be used, or None while it
+        # is working. Surfaced by status() so /health can tell "a voiceprint is
+        # loaded" apart from "the checker actually runs".
+        self.last_error = None
         self.mismatch = self._backend_mismatch()
 
     def _backend_mismatch(self):
@@ -298,9 +332,9 @@ class SpeakerGate:
         keeping it brief — unless `short_policy` is SHORT_ALLOW, which trades
         exactly that hole for the convenience of short commands.
 
-        Still accepts without checking when the gate is off or the backend
-        fails: a broken model should degrade to the previous behaviour rather
-        than making the device stop answering everyone.
+        Accepts without checking when the gate is off (no voiceprint, no
+        backend, or a mismatched model). When the check itself fails on an
+        enabled gate the verdict is CHECK_FAILED, unless on_error is "allow".
         """
         if not self.enabled:
             return ACCEPTED, None
@@ -320,6 +354,36 @@ class SpeakerGate:
         try:
             score = self.voiceprint.score(self.backend.embed(wav_path))
         except Exception as e:  # noqa: BLE001
-            print(f"  ! speaker check failed, letting it through: {e}")
-            return ACCEPTED, None
+            self.last_error = str(e)
+            if self.on_error == ERROR_ALLOW:
+                print(f"  ! speaker check failed, letting it through (--speaker-on-error allow): {e}")
+                return ACCEPTED, None
+            print(f"  ! speaker check failed, refusing this utterance: {e}")
+            return CHECK_FAILED, None
+        self.last_error = None
         return (ACCEPTED if score >= self.threshold else REJECTED), score
+
+    def warm(self):
+        """Load the model now instead of on the first utterance.
+
+        Returns True when the checker can run (or the gate is off, so nothing is
+        needed). Failure is recorded in last_error rather than raised: the
+        service should still start and answer /health, and every utterance is
+        refused until the model is available.
+        """
+        if not self.enabled:
+            return True
+        try:
+            getattr(self.backend, "warm", lambda: None)()
+        except Exception as e:  # noqa: BLE001
+            self.last_error = str(e)
+            print(f"  ! speaker model unavailable: {e}")
+            return False
+        self.last_error = None
+        return True
+
+    def status(self):
+        """What /health reports. `enabled` only means a voiceprint and backend
+        exist; `ready` is whether the model is actually usable."""
+        return {"enabled": self.enabled, "ready": self.enabled and self.last_error is None,
+                "on_error": self.on_error, "error": self.last_error}

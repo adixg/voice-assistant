@@ -14,6 +14,7 @@ from starlette.routing import WebSocketRoute
 
 import services.gateway.app as gateway_app
 from conftest import FakeWebSocket
+from voicepipe.speaker import CHECK_FAILED_LINES
 
 
 def make_args(**overrides):
@@ -269,6 +270,25 @@ class TestSpeakerGate:
             assert ws.sent[-1] == "end"
             assert session.rejection_streak == 0  # not held against them
 
+    async def test_a_broken_check_refuses_neutrally_and_skips_stt(self):
+        """Regression: the gateway image had no curl, so the check failed on every
+        utterance and the old code let everyone through."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/synth":
+                return httpx.Response(200, json={"chunks_b64": []})
+            raise AssertionError(f"unexpected request to {request.url.path}")
+
+        async with make_client(handler) as client:
+            gate = self.make_gate(gateway_app.CHECK_FAILED, score=None)
+            session = make_session(client=client, gate=gate)
+            ws = FakeWebSocket()
+
+            await session.handle_utterance(ws, LOUD_PCM)
+
+            assert ws.sent[0].startswith("reply:") and ws.sent[-1] == "end"
+            assert ws.sent[0][len("reply:"):] in CHECK_FAILED_LINES
+            assert session.rejection_streak == 0
+
     async def test_accepted_proceeds_to_stt_and_resets_the_streak(self):
         async with make_client(stt_agent_tts_handler(text="hi", reply="ok")) as client:
             gate = self.make_gate("accepted")
@@ -366,3 +386,28 @@ class TestAnnounce:
             await session.announce("hi")
 
             assert resample.await_args.args[1] is False
+
+
+class TestHealthReportsWhetherTheGateActuallyWorks:
+    def test_gate_true_alone_used_to_hide_a_gate_that_could_not_run(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        gate = Mock()
+        gate.enabled = True
+        gate.status = Mock(return_value={"enabled": True, "ready": False, "on_error": "reject",
+                                         "error": "couldn't download the speaker model"})
+        session = SimpleNamespace(gate=gate)
+        monkeypatch.setattr(gateway_app, "_session", session)
+        monkeypatch.setattr(gateway_app, "_urls", {})
+
+        body = TestClient(gateway_app.app).get("/health").json()
+
+        assert body["gate"] is True                       # configured...
+        assert body["speaker_gate"]["ready"] is False     # ...but not working, and now visible
+        assert "download" in body["speaker_gate"]["error"]
+
+    def test_no_gate_reports_none(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        monkeypatch.setattr(gateway_app, "_session", SimpleNamespace(gate=None))
+        monkeypatch.setattr(gateway_app, "_urls", {})
+        body = TestClient(gateway_app.app).get("/health").json()
+        assert body["gate"] is False and body["speaker_gate"] is None

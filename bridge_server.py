@@ -46,7 +46,7 @@ from voicepipe import cli
 from voicepipe import encouragement
 from voicepipe.cuda import ensure_cuda_libs
 from voicepipe.registry import FINAL, STATUS, stream_reply
-from voicepipe.speaker import REJECTED, TOO_SHORT, rejection_line, too_short_line
+from voicepipe.speaker import CHECK_FAILED, REJECTED, TOO_SHORT, check_failed_line, rejection_line, too_short_line
 from voicepipe.wire_audio import NORMALIZE_FILTER, SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16  # noqa: F401
 
 ensure_cuda_libs()
@@ -309,6 +309,12 @@ class Session:
                 # brief, so ask for more rather than accusing them — and don't
                 # count it toward the anger streak.
                 await self._say(ws, too_short_line())
+                return
+            if verdict == CHECK_FAILED:
+                # The check couldn't run, which says nothing about who is
+                # speaking: refuse, but neutrally, and don't count it toward
+                # the anger streak.
+                await self._say(ws, check_failed_line())
                 return
             if verdict == REJECTED:
                 self.rejection_streak += 1

@@ -13,10 +13,10 @@ import pytest
 import bridge_server
 from conftest import FakeWebSocket
 from voicepipe.speaker import (
-    ACCEPTED, MIN_VERIFY_SECONDS, OWNER, REJECTED, REJECTION_LINES, REJECTION_TIERS,
+    ACCEPTED, CHECK_FAILED, CHECK_FAILED_LINES, ERROR_ALLOW, MIN_VERIFY_SECONDS, OWNER, REJECTED, REJECTION_LINES, REJECTION_TIERS,
     DEFAULT_THRESHOLD, SHORT_ALLOW, SHORT_ASK, TOO_SHORT, TOO_SHORT_LINES,
     SpeakerGate, Voiceprint,
-    rejection_line, too_short_line, wav_seconds,
+    check_failed_line, rejection_line, too_short_line, wav_seconds,
 )
 
 
@@ -115,14 +115,118 @@ class TestSpeakerGate:
         gate = self._gate([ME], threshold=1.0, embedding=ME)
         assert gate.check("x.wav")[0] == ACCEPTED
 
-    def test_a_broken_backend_lets_the_utterance_through(self):
-        """A failed model should degrade to the old behaviour, not silently
-        make the device stop answering anyone."""
+    def test_a_broken_backend_refuses_the_utterance_instead_of_answering_everyone(self):
+        """A gate that answers anyone whenever its model is unavailable is not a
+        gate: the gateway shipped without curl, couldn't fetch its model, and
+        silently accepted every voice."""
         backend = fake_backend(ME)
         backend.embed.side_effect = RuntimeError("model missing")
         gate = SpeakerGate(backend, Voiceprint([ME]))
 
+        assert gate.check("x.wav") == (CHECK_FAILED, None)
+        assert "model missing" in gate.last_error
+
+    def test_letting_a_failed_check_through_is_an_explicit_opt_in(self):
+        backend = fake_backend(ME)
+        backend.embed.side_effect = RuntimeError("model missing")
+        gate = SpeakerGate(backend, Voiceprint([ME]), on_error=ERROR_ALLOW)
+
         assert gate.check("x.wav") == (ACCEPTED, None)
+
+    def test_an_unknown_error_policy_is_rejected(self):
+        with pytest.raises(ValueError):
+            SpeakerGate(fake_backend(ME), Voiceprint([ME]), on_error="shrug")
+
+    def test_a_working_check_clears_the_recorded_error(self):
+        backend = fake_backend(ME)
+        gate = SpeakerGate(backend, Voiceprint([ME]))
+        gate.last_error = "earlier failure"
+        assert gate.check("x.wav")[0] == ACCEPTED
+        assert gate.last_error is None
+
+    def test_a_gate_that_is_off_still_answers_everyone_regardless_of_error_policy(self):
+        assert SpeakerGate(None, Voiceprint([ME])).check("x.wav") == (ACCEPTED, None)
+
+    def test_status_says_whether_the_checker_can_actually_run(self):
+        backend = fake_backend(ME)
+        gate = SpeakerGate(backend, Voiceprint([ME]))
+        assert gate.status() == {"enabled": True, "ready": True, "on_error": "reject", "error": None}
+
+        backend.warm.side_effect = RuntimeError("no model")
+        assert gate.warm() is False
+        status = gate.status()
+        assert status["enabled"] is True and status["ready"] is False and "no model" in status["error"]
+
+    def test_warm_is_a_no_op_for_a_disabled_gate(self):
+        backend = fake_backend(ME)
+        assert SpeakerGate(backend, Voiceprint([])).warm() is True
+        backend.warm.assert_not_called()
+
+    def test_a_failed_check_line_is_neutral_not_an_accusation(self):
+        assert check_failed_line() in CHECK_FAILED_LINES
+        for line in CHECK_FAILED_LINES:
+            assert not any(word in line.lower() for word in ("stranger", "impostor", OWNER.lower()))
+
+
+class TestEnsureModelDownload:
+    """The model is fetched with urllib, not a curl subprocess: the slim gateway
+    image has no curl, and the subprocess version failed on every utterance."""
+
+    def _fake_urlopen(self, payload, monkeypatch, wespeaker):
+        import io
+
+        class Response(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        monkeypatch.setattr(wespeaker.urllib.request, "urlopen", lambda url, timeout=None: Response(payload))
+
+    def test_downloads_without_shelling_out_to_curl(self, tmp_path, monkeypatch):
+        from voicepipe.backends import wespeaker
+        self._fake_urlopen(b"\x00" * (wespeaker.MIN_MODEL_BYTES + 10), monkeypatch, wespeaker)
+        monkeypatch.setattr(wespeaker.subprocess, "run",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not shell out")))
+        target = tmp_path / "sub" / "model.onnx"
+
+        assert wespeaker.ensure_model(str(target)) == str(target)
+        assert target.stat().st_size == wespeaker.MIN_MODEL_BYTES + 10
+        assert not (tmp_path / "sub" / "model.onnx.part").exists()
+
+    def test_an_existing_model_is_not_downloaded_again(self, tmp_path, monkeypatch):
+        from voicepipe.backends import wespeaker
+        target = tmp_path / "model.onnx"
+        target.write_bytes(b"already here")
+        monkeypatch.setattr(wespeaker.urllib.request, "urlopen",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not download")))
+        assert wespeaker.ensure_model(str(target)) == str(target)
+
+    def test_a_truncated_or_error_page_download_is_not_kept_as_the_model(self, tmp_path, monkeypatch):
+        from voicepipe.backends import wespeaker
+        self._fake_urlopen(b"<html>captive portal</html>", monkeypatch, wespeaker)
+        target = tmp_path / "model.onnx"
+        with pytest.raises(RuntimeError, match="couldn't download"):
+            wespeaker.ensure_model(str(target))
+        assert not target.exists() and not (tmp_path / "model.onnx.part").exists()
+
+    def test_a_network_failure_becomes_a_clear_error_and_leaves_no_partial_file(self, tmp_path, monkeypatch):
+        from voicepipe.backends import wespeaker
+
+        def boom(url, timeout=None):
+            raise wespeaker.urllib.error.URLError("no route to host")
+        monkeypatch.setattr(wespeaker.urllib.request, "urlopen", boom)
+        with pytest.raises(RuntimeError, match="no route to host"):
+            wespeaker.ensure_model(str(tmp_path / "model.onnx"))
+        assert list(tmp_path.iterdir()) == []
+
+    def test_the_cache_directory_can_be_baked_into_an_image(self, monkeypatch):
+        import importlib
+        from voicepipe.backends import wespeaker
+        monkeypatch.setenv("VOICEPIPE_CACHE_DIR", "/opt/voicepipe")
+        try:
+            importlib.reload(wespeaker)
+            assert wespeaker.default_model_path() == "/opt/voicepipe/" + wespeaker.MODEL_FILE
+        finally:
+            monkeypatch.undo()
+            importlib.reload(wespeaker)
 
 
 class TestBridgeGate:
@@ -182,6 +286,30 @@ class TestBridgeGate:
         await session.handle_utterance(ws, self.LOUD)
 
         assert ws.sent[-1] == "end"
+
+    async def test_a_broken_check_refuses_neutrally_and_never_reaches_stt_or_the_llm(self):
+        backend = fake_backend(ME)
+        backend.embed.side_effect = RuntimeError("model missing")
+        session = self._session(SpeakerGate(backend, Voiceprint([ME])))
+        ws = FakeWebSocket()
+
+        await session.handle_utterance(ws, self.LOUD)
+
+        session.stt.transcribe.assert_not_called()
+        session.llm.ask.assert_not_called()
+        assert any(line in ws.sent[0] for line in CHECK_FAILED_LINES)
+        assert not any(line in ws.sent[0] for line in REJECTION_LINES)   # not the "you are a stranger" lines
+        assert ws.sent[-1] == "end"
+
+    async def test_a_broken_check_does_not_count_towards_the_anger_streak(self):
+        backend = fake_backend(ME)
+        backend.embed.side_effect = RuntimeError("model missing")
+        session = self._session(SpeakerGate(backend, Voiceprint([ME])))
+
+        for _ in range(4):
+            await session.handle_utterance(FakeWebSocket(), self.LOUD)
+
+        assert session.rejection_streak == 0
 
 
 class TestRejectionLines:

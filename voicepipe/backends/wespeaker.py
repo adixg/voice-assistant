@@ -21,9 +21,12 @@ Two details the model is unforgiving about, both learned the hard way:
   [-1, 1] floats a normal audio library hands back.
 """
 import os
+import shutil
 import subprocess
 import tempfile
+import urllib.request
 import wave
+from contextlib import suppress
 
 from ..registry import SV
 
@@ -35,15 +38,25 @@ NUM_MEL_BINS = 80
 MODEL_REPO = "Wespeaker/wespeaker-ecapa-tdnn512-LM"
 MODEL_FILE = "voxceleb_ECAPA512_LM.onnx"
 MODEL_URL = f"https://huggingface.co/{MODEL_REPO}/resolve/main/{MODEL_FILE}"
-CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "voicepipe")
+# Overridable so a container image can bake the model into a fixed directory at
+# build time and never touch the network at run time.
+CACHE_DIR = os.environ.get("VOICEPIPE_CACHE_DIR") or os.path.join(os.path.expanduser("~"), ".cache", "voicepipe")
+# The real file is ~24MB; anything far smaller is an error page or a truncated
+# transfer that must not be kept as if it were the model.
+MIN_MODEL_BYTES = 1_000_000
 
 
 def default_model_path():
     return os.path.join(CACHE_DIR, MODEL_FILE)
 
 
-def ensure_model(path=None):
-    """The ONNX model on disk, downloading it once if it isn't there."""
+def ensure_model(path=None, timeout=60):
+    """The ONNX model on disk, downloading it once if it isn't there.
+
+    Uses urllib, not a `curl` subprocess: this runs in slim container images
+    that don't ship curl, where the subprocess version failed on every
+    utterance and (with the gate failing open) let everyone through.
+    """
     path = path or default_model_path()
     if os.path.exists(path):
         return path
@@ -51,10 +64,13 @@ def ensure_model(path=None):
     print(f"  downloading {MODEL_FILE} (~24MB) to {path} ...", flush=True)
     partial = path + ".part"  # never leave a truncated file that looks complete
     try:
-        subprocess.run(["curl", "-sSfL", "-o", partial, MODEL_URL], check=True)
+        with urllib.request.urlopen(MODEL_URL, timeout=timeout) as response, open(partial, "wb") as out:
+            shutil.copyfileobj(response, out)
+        if os.path.getsize(partial) < MIN_MODEL_BYTES:
+            raise OSError(f"downloaded only {os.path.getsize(partial)} bytes, expected ~24MB")
         os.replace(partial, path)
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        with __import__("contextlib").suppress(FileNotFoundError):
+    except OSError as e:  # URLError, timeouts and short reads are all OSErrors
+        with suppress(FileNotFoundError):
             os.unlink(partial)
         raise RuntimeError(f"couldn't download the speaker model from {MODEL_URL}: {e}") from e
     return path
@@ -146,6 +162,10 @@ class WeSpeakerSV:
             self._session = ort.InferenceSession(ensure_model(self.model_path),
                                                  providers=["CPUExecutionProvider"])
         return self._session
+
+    def warm(self):
+        """Fetch and load the model now; raises if it can't be."""
+        return self.session
 
     def embed(self, wav_path):
         """A unit-length embedding, so a dot product is the cosine score."""

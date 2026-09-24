@@ -48,7 +48,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from voicepipe import cli, encouragement
 from voicepipe.personas import DEFAULT_PERSONA, PERSONAS
 from voicepipe.registry import FINAL, STATUS, SV
-from voicepipe.speaker import REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT, rejection_line, too_short_line
+from voicepipe.speaker import (
+    CHECK_FAILED, ERROR_POLICIES, ERROR_REJECT, REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT,
+    check_failed_line, rejection_line, too_short_line,
+)
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
                               install_http_metrics)
@@ -104,6 +107,9 @@ def build_parser():
                     help="below this many seconds an utterance isn't judged at all")
     ap.add_argument("--short-utterances", default=SHORT_ASK, choices=SHORT_POLICIES,
                     help="what to do with a clip too brief to verify: 'ask' (default) or 'allow'")
+    ap.add_argument("--speaker-on-error", default=ERROR_REJECT, choices=ERROR_POLICIES,
+                    help="when the speaker check itself fails (model missing, embedding crashed): "
+                         "'reject' (default) refuses the utterance, 'allow' answers anyone")
     ap.add_argument("--no-speaker-check", action="store_true",
                     help="answer anyone, even with a voiceprint enrolled")
     SV.add_arguments(ap)
@@ -120,7 +126,14 @@ def build_parser():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "downstream": _urls, "gate": bool(_session and _session.gate and _session.gate.enabled)}
+    gate = _session.gate if _session else None
+    return {"status": "ok", "downstream": _urls,
+            # `gate` only says a voiceprint and backend are configured; it stayed
+            # true for weeks while the model could not be downloaded and every
+            # voice was accepted. `speaker_gate.ready` is whether the checker
+            # can actually run.
+            "gate": bool(gate and gate.enabled),
+            "speaker_gate": gate.status() if gate else None}
 
 
 class GatewaySession:
@@ -257,6 +270,11 @@ class GatewaySession:
                       f"({verdict}, threshold {self.gate.threshold}{streak})")
             if verdict == TOO_SHORT:
                 await self._say(ws, too_short_line())
+                return
+            if verdict == CHECK_FAILED:
+                # The check couldn't run, which says nothing about who is
+                # speaking: refuse, neutrally, and don't count it as a rejection.
+                await self._say(ws, check_failed_line())
                 return
             if verdict == REJECTED:
                 self.rejection_streak += 1
@@ -420,6 +438,10 @@ def main():
 
     @app.on_event("startup")
     async def _startup():
+        # Load the speaker model now, so a missing model shows up at start-up
+        # (and in /health) instead of on the first utterance.
+        if gate is not None:
+            await asyncio.to_thread(gate.warm)
         app.state.announcer = await announce_server(_session, args.announce_socket)
         app.state.cheerleader = None
         if args.encourage:
