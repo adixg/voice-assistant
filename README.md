@@ -318,6 +318,20 @@ flag (`--only`, `--no-NAME`, `--history`). It reads Prometheus and Tempo through
 
 ## TTS backends
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/charts/tts-speed-vs-memory-dark.svg">
+  <img src="assets/charts/tts-speed-vs-memory-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against memory used. Kitten nano (live): 3.2 s, 330 MiB. Kokoro-ONNX fp32: 4.5 s, 700 MiB. Kitten mini: 7.0 s, 535 MiB. Kokoro-ONNX int8: 11.5 s, 581 MiB. All four on the home server's CPU. Chatterbox Nano: 3.9 s, 1857 MiB VRAM, and Chatterbox Turbo: 5.7 s, 2805 MiB VRAM, on the RTX 4060." width="760">
+</picture>
+
+Lower is faster, further left is lighter. Time is at normal speaking speed
+(the live Kitten runs at `--kitten-speed 1.6`, which makes less audio per
+sentence, so it's quicker still). Memory is process RAM for the CPU engines and
+VRAM for the GPU ones. Not plotted, for lack of one of the two numbers: VITS
+(1.8x realtime on the laptop CPU, RAM not measured), Chatterbox on CPU
+(0.4-0.8x realtime), PyTorch Kokoro (OOM-killed at 3 GiB before finishing a
+run) and ElevenLabs (cloud). Every number and its source is in
+`docs/hardware-budget.md`; regenerate with `python benchmarks/plot_tts_tradeoff.py`.
+
 The deployed TTS backend is KittenTTS nano (voice `Bella`) on CPU via
 sherpa-onnx: 3.1x realtime at ~560 MiB on the home server. `kokoro-onnx` is the
 higher-quality alternative (Kokoro-82M's `af_bella` voice, 2.2x realtime, ~1.35
