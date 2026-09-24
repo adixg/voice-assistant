@@ -31,6 +31,9 @@ spec:
             - "--stt-url=http://stt:8001"
             - "--agent-url=http://agent:8002"
             - "--tts-url=http://tts:8003"
+            # 0.6 rejected the owner (0.536 on 2026-09-24; through the Stick they
+            # score 0.54-0.66). Strangers score 0.07-0.28, so 0.5 keeps a wide gap.
+            - "--speaker-threshold=0.5"
           env: [{name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}]
           ports:
             - {containerPort: 8000, name: metrics}
