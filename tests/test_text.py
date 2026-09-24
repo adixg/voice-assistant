@@ -100,3 +100,20 @@ class TestOneLine:
 
     def test_plain_text_is_unchanged(self):
         assert one_line("nothing to do here") == "nothing to do here"
+
+
+def test_speakable_drops_emoji_and_markdown():
+    from voicepipe.text import speakable
+    assert speakable("How was your day? 😊") == "How was your day?"
+    assert speakable("in one hour. 🍃\n\nYou'll get **one** reminder.") == \
+        "in one hour. You'll get one reminder."
+    assert speakable("- first\n- second") == "first second"
+    assert speakable("👍🏽❤️") == ""
+    assert speakable("Café at 3.8 km, 50% off") == "Café at 3.8 km, 50% off"
+
+
+def test_speakable_fixes_the_emoji_starting_the_next_sentence():
+    from voicepipe.text import sentences, speakable
+    reply = "Sure! I'll remind you to drink water in one hour. 🍃\n\nYou'll get a reminder soon."
+    assert sentences(speakable(reply)) == [
+        "Sure! I'll remind you to drink water in one hour.", "You'll get a reminder soon."]

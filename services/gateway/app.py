@@ -52,7 +52,7 @@ from voicepipe.speaker import (
     ACCEPTED, CHECK_FAILED, ERROR_POLICIES, ERROR_REJECT, REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT,
     check_failed_line, rejection_line, too_short_line,
 )
-from voicepipe.text import sentences
+from voicepipe.text import sentences, speakable
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
                               install_http_metrics, record_speaker_check, set_speaker_gate_state)
@@ -199,6 +199,9 @@ class GatewaySession:
         other down.
         """
         if self.args.no_voice:
+            return
+        text = speakable(text)
+        if not text:  # nothing but emoji or markup: nothing to say
             return
         parts = sentences(text)
         started = perf_counter()

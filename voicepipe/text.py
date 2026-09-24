@@ -77,6 +77,25 @@ def sentences(text, min_chars=MIN_SENTENCE_CHARS):
     return parts or [text.strip()]
 
 
+# Emoji and pictographs (plus the joiners/selectors that build them), and the
+# markdown punctuation chat models like to add. None of it is speech: TTS
+# engines either read it out ("smiling face") or make a noise for it, and an
+# emoji after a full stop used to start the *next* spoken sentence.
+_EMOJI = re.compile(
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "\U0000FE0E\U0000FE0F\U0000200D\U000020E3\U00002B00-\U00002BFF]+")
+_MARKDOWN = re.compile(r"[*_#`~>|]+")
+
+
+def speakable(text):
+    """`text` with emoji and markdown symbols removed and whitespace collapsed,
+    for handing to a TTS engine. The caption shown on the device keeps the
+    original; only what is spoken is cleaned."""
+    text = _MARKDOWN.sub(" ", _EMOJI.sub(" ", text))
+    text = re.sub(r"^\s*[-+]\s+", "", text, flags=re.M)  # list bullets
+    return " ".join(text.split())
+
+
 def one_line(text):
     """Collapse newlines: the worker protocols below are line-oriented, so a
     reply containing a newline would otherwise be read as two requests."""

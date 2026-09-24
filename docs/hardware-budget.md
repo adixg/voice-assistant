@@ -4,6 +4,38 @@ Detail behind the current-state summary in `CLAUDE.md`. Every number below is
 measured or fetched, with the date and the command that produced it, so it
 can be re-checked rather than trusted.
 
+## Every STT and TTS backend at a glance
+
+One table for choosing a backend; the sections below have the detail behind
+each number. Two machines: the **laptop** (20 CPU threads, RTX 4060) and
+**arch-ssd** (i5-10300H, 8 threads, AVX2 without VNNI, GTX 1650). "—" means
+never measured. Switch the live one with `tools/switch-backend.sh`.
+
+STT, seconds to transcribe one 2-4 s utterance:
+
+| backend | CPU, laptop | CPU, arch-ssd | GPU | measured |
+| --- | ---: | ---: | --- | --- |
+| `faster-whisper` small | 1.30 s | — | 0.33 s on the 4060 (685 MiB); 3.31 s on the 1650, time-sliced with the LLM | 09-05, 09-24 |
+| `parakeet` 0.6B int8 | 0.19-0.37 s | **0.23 s** | — (needs sherpa-onnx's CUDA build) | 09-24 |
+| `moonshine` base (deployed) | 0.12-0.17 s | **0.18 s** | — (same) | 09-24 |
+
+TTS, as a multiple of realtime (2x = 10 s of speech made in 5 s):
+
+| backend | CPU, laptop | CPU, arch-ssd | GPU (4060) | memory | measured |
+| --- | ---: | ---: | ---: | --- | --- |
+| `kitten` nano int8 (deployed) | — | **3.1x** | — | 559 MiB pod peak | 09-24 |
+| `kitten` mini | ~2.2x | 1.4x | — | ~535 MB RSS | 09-24 |
+| `kokoro-onnx` fp32 | — | **2.2x** | — | ~1.35 GiB pod peak | 09-24 |
+| `kokoro-onnx` int8 | ~1.0x | 0.9x | — | ~580 MB RSS | 09-24 |
+| `kokoro` (PyTorch) | — | OOM-killed at 3 GiB | — | 2.8 GiB+ | 09-23/24 |
+| `vits` (Umamusume) | 1.84x | — | — | 0 MiB VRAM | 09-05 |
+| `chatterbox` Nano | 0.79x | — | **2.54x** | 1857 MiB VRAM | 09-05 |
+| `chatterbox` Turbo | 0.43x | — | 1.75x | 2805 MiB VRAM | 09-05 |
+| `elevenlabs` | cloud | | | | not measured |
+
+Missing GPU numbers need the 4060 free of `llama-cpp-rtx4060` (it holds
+~7.9 of 8 GiB), and the sherpa-onnx rows need its CUDA wheel.
+
 ## Hardware budget
 
 **NVIDIA RTX 4060 Laptop GPU, 8188 MiB total, driver 560.94** (WSL2).
