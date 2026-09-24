@@ -364,9 +364,14 @@ the Stick applies it in `loop()` (never in the NimBLE callback, which would race
 the display/speaker), saves it in NVS (namespace `stick`), and reports back the
 applied values plus its firmware version (`FW_VERSION`, from `git describe` at
 build time) after every change and whenever the link comes up. Defaults are the
-old hardcoded 255 volume / 38 brightness; brightness never goes below 8 (a black
-screen looks like a dead Stick). The app warns above volume 191, M5Stack's
-battery brownout guidance.
+old hardcoded 255 volume / 38 brightness. **Brightness 0 turns the screen off**
+for battery (2026-09-24, replacing a floor of 8 that kept the backlight on so
+the Stick wouldn't look dead): backlight off, panel asleep (`M5.Display.sleep()`),
+nothing drawn. A tap on A or B wakes it at the last on-brightness for 10 s and
+does nothing else; a tap during those 10 s acts normally. Holding A still talks
+without lighting the screen. Both taps act on release, since a press can't be
+told from the start of a hold. Owner-verified on the device, including booting
+dark. The app warns above volume 191, M5Stack's battery brownout guidance.
 
 **Firmware updates over BLE**, `ota_update.h` + `RelayService.startOta()`:
 
