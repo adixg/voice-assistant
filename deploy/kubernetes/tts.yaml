@@ -1,5 +1,7 @@
-# Kokoro-82M: small, local female voice backend. It runs on CPU so the
-# always-on 1650 remains available to Whisper and the selected LLM.
+# KittenTTS nano (voice Bella) on CPU via sherpa-onnx, the lightest and
+# fastest TTS measured on arch-ssd (docs/hardware-budget.md, "sherpa-onnx
+# backends"). The image also has kokoro-onnx and PyTorch Kokoro; switch with
+# tools/switch-backend.sh.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,18 +27,16 @@ spec:
         - name: tts
           image: ghcr.io/adixg/aicompanion-tts-kokoro:latest
           imagePullPolicy: Always
-          # Measured 2026-09-23 via process_resident_memory_bytes: 1.6Gi right
-          # after start, 2.2Gi after one reply-sized synth, 2.8Gi after a ~1000
-          # character one, and it does not shrink afterwards. A first cut of
-          # 1792Mi, sized from an idle reading, OOM-killed it mid-reply, so the
-          # limit has to cover peak synthesis, not idle. Largest pod on the node.
+          # kitten peaked at 559Mi in the service (cgroup memory.peak, a
+          # 150 s reply included, 2026-09-24). PyTorch Kokoro, the previous
+          # default, needed a 3Gi limit and was still OOM-killed.
           resources:
-            requests: {memory: 1536Mi}
-            limits: {memory: 3Gi}
-          args: ["--tts-backend", "kokoro", "--kokoro-voice", "af_bella", "--kokoro-language", "a", "--kokoro-device", "cpu"]
-          # Switch backend with tools/switch-backend.sh (tts: kokoro,
-          # kokoro-onnx, kitten); it patches these args and the memory limit
-          # together, since kokoro-onnx and kitten need a fraction of this one.
+            requests: {memory: 384Mi}
+            limits: {memory: 768Mi}
+          args: ["--tts-backend", "kitten", "--kitten-voice", "Bella"]
+          # Switch backend with tools/switch-backend.sh (tts: kitten,
+          # kokoro-onnx, kokoro); it patches these args and the memory limit
+          # together, since they need 768Mi, 2Gi and 3Gi+ respectively.
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
             - {name: SHERPA_MODELS_DIR, value: /models/sherpa-onnx}

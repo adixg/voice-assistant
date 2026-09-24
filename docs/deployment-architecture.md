@@ -117,7 +117,8 @@ around one registry entry, with **no change to any backend** — same
 `add_arguments`/`from_args` contract every entrypoint in this repo already
 uses.
 
-- `services/stt/` — faster-whisper over HTTP (`POST /transcribe`).
+- `services/stt/` — any STT backend over HTTP (`POST /transcribe`); Moonshine on CPU
+  since 2026-09-24, faster-whisper before.
 - `services/agent/` — LLM turn-taking over HTTP (`POST /ask`,
   `POST /ask_stream` as NDJSON). This container does no GPU work itself;
   it's a thin OpenAI-compatible client to whichever llama.cpp server
@@ -167,6 +168,11 @@ a ~1000-character one, and it does not shrink afterwards (measured through its
 own `process_resident_memory_bytes`). Its limit is 3Gi, and a first cut of
 1792Mi, sized from an idle reading, OOM-killed it mid-reply. Reducing this is
 the most valuable remaining RAM lever.
+
+**Done 2026-09-24:** `tts` now runs KittenTTS nano via sherpa-onnx, with a
+peak of 559Mi and a 768Mi limit (`kokoro-onnx`, the same af_bella voice, settles
+at ~1.35Gi). `stt` moved off the GPU to Moonshine (571Mi peak). See
+`docs/hardware-budget.md`, "sherpa-onnx backends".
 
 **Measured per-pod memory (2026-09-24, arch-ssd).** Read from each container's
 cgroup (`memory.peak`, `memory.stat`, sampled once a second where noted); the
@@ -268,7 +274,7 @@ stick remains the real fix.
 
 | Node | Label | Runs |
 |---|---|---|
-| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `llama-cpp-gtx1650`, `stt`, `tts` (Kokoro CPU), `gateway`, `agent`, `gpu-scheduler` |
+| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `llama-cpp-gtx1650`, `stt` (Moonshine CPU), `tts` (Kitten CPU), `gateway`, `agent`, `gpu-scheduler` |
 | Laptop (RTX 4060) | `gpu-tier=rtx4060` | k3s agent, `llama-cpp-rtx4060` (only while the laptop is up) |
 
 `agent` and `gpu-scheduler` are pinned here too (`nodeSelector`, added

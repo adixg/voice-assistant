@@ -145,7 +145,9 @@ def test_lean_mode_never_touches_the_voice_pipeline():
 # llama-cpp-gtx1650 at 2Gi (reclaimable GGUF cache plus 1.06Gi of anon). Add to
 # this table when a pod is measured; never lower a limit below its row.
 MEASURED_PEAK_MIB = {
-    "tts": 2801,
+    # The manifest's backend, kitten (2026-09-24). PyTorch Kokoro peaked at
+    # 2801 and its switch-backend preset keeps a 3Gi limit.
+    "tts": 559,
     "tempo": 384,
     "llama-cpp-gtx1650": 2057,
 }
@@ -202,10 +204,10 @@ def test_switch_backend_presets_parse_with_the_real_service_flags():
 
 
 def test_switch_backend_default_presets_match_the_manifests():
-    """`stt whisper` and `tts kokoro` restore exactly what the manifests run."""
+    """`stt moonshine` and `tts kitten` restore exactly what the manifests run."""
     import re
 
     script = read("tools/switch-backend.sh")
-    for svc, name in (("stt", "whisper"), ("tts", "kokoro")):
+    for svc, name in (("stt", "moonshine"), ("tts", "kitten")):
         body = re.search(rf"{svc}/{name}\).*?ARGS='([^']*)'", script, re.S).group(1)
         assert f"args: [{body.replace(',', ', ')}]" in read(f"deploy/kubernetes/{svc}.yaml")

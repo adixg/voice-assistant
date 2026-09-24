@@ -1,13 +1,16 @@
 # aicompanion
 
-A voice assistant: mic → faster-whisper (STT) → llama.cpp (LLM) → TTS → speaker
-(Kokoro-82M in Kubernetes, VITS locally by default).
+A voice assistant: mic → STT → llama.cpp (LLM) → TTS → speaker. In Kubernetes
+STT is Moonshine and TTS is KittenTTS, both on CPU via sherpa-onnx; locally the
+defaults are faster-whisper and VITS.
 The primary device path is M5StickS3 → BLE → Android relay → the k3s gateway
 and split STT/agent/TTS services. `bridge_server.py` remains the standalone
 development fallback, and `chat_loop.py` runs the same backends with this
 machine's local mic/speaker. TTS is
-swappable (`--tts-backend kokoro` (the deployed default), `vits`, `chatterbox`,
-or `elevenlabs`) — see "Swapping backends" below.
+swappable (`--tts-backend kitten` (the deployed default), `kokoro-onnx`,
+`kokoro`, `vits`, `chatterbox`, or `elevenlabs`), and so is STT (`moonshine`,
+`parakeet`, `faster-whisper`) — see "Swapping backends" below. In the cluster,
+`tools/switch-backend.sh` swaps either one live.
 
 ## What the M5Stick does today
 
@@ -40,8 +43,8 @@ Bluetooth-toggle reconnects are already verified on the device).
 ### On-device screens
 
 The Stick cycles between Rina's animated face, a clock, and a pomodoro timer
-with BtnA. The repository includes the source sprite and representative
-240×135 previews of the three screens:
+with BtnA. The repository includes the source sprite and real M5StickS3
+captures of the three screens:
 
 <table>
   <tr>
@@ -51,8 +54,8 @@ with BtnA. The repository includes the source sprite and representative
   </tr>
   <tr>
     <td><img src="assets/sprites/idle.png" alt="Rina-chan pixel-art face" width="240"></td>
-    <td><img src="assets/screens/clock.svg" alt="Catppuccin digital clock screen" width="240"></td>
-    <td><img src="assets/screens/pomodoro.svg" alt="50-minute pomodoro focus timer" width="240"></td>
+    <td><img src="assets/screens/clock-device.png" alt="M5StickS3 digital clock screen" width="240"></td>
+    <td><img src="assets/screens/pomodoro-device.jpg" alt="M5StickS3 50-minute pomodoro focus timer" width="240"></td>
   </tr>
 </table>
 
@@ -66,9 +69,9 @@ flowchart TB
     stick["<b>M5StickS3</b><br>push-to-talk, mic + speaker<br>240×135 pixel-art UI<br>BLE peripheral, no Wi-Fi"]
     relay["<b>android_companion/</b><br>RelayService.kt, foreground service<br>BLE central + WebSocket client<br>host/port/secret set in-app"]
     gateway["<b>gateway</b><br>k3s on always-on node<br>NodePort 30800"]
-    stt["<b>stt service</b><br>faster-whisper"]
+    stt["<b>stt service</b><br>Moonshine, CPU"]
     agent["<b>agent service</b><br>LLM turn-taking"]
-    tts["<b>tts service</b><br>Kokoro af_bella, CPU"]
+    tts["<b>tts service</b><br>KittenTTS Bella, CPU"]
     controller["<b>gpu-scheduler</b><br>selects available llama.cpp"]
     llama1650[("<b>llama.cpp</b><br>GTX 1650 / qwen3.5-4b")]
     llama4060[("<b>llama.cpp</b><br>RTX 4060 / qwen3-8b")]
@@ -156,7 +159,7 @@ the laptop node is an optional RTX 4060 worker. The GPU scheduler patches the
 agent's `LLM_HOST` and `LLM_MODEL`: the preferred route is `qwen3-8b` on the
 RTX 4060, with `qwen3.5-4b` on the GTX 1650 as the fallback. MCP remains
 available on both routes because the MCP server runs in the CPU-side agent
-container, independently of the model server. STT, Kokoro TTS, gateway, agent,
+container, independently of the model server. STT, TTS, gateway, agent,
 and the core observability services are pinned to `arch-ssd`; DCGM Exporter
 still runs on both GPU nodes. The laptop can therefore disappear without
 taking down the primary route or monitoring. See
@@ -179,10 +182,10 @@ flowchart LR
     subgraph ssd["arch-ssd — GTX 1650, always on"]
         direction TB
         gw["<b>gateway</b><br>:30800<br>speaker gate"]
-        stt["<b>stt</b><br>faster-whisper small<br>GPU (time-sliced)"]
+        stt["<b>stt</b><br>Moonshine base<br>CPU"]
         agent["<b>agent</b><br>CPU + MCP tools"]
         llm[("<b>llama-cpp-gtx1650</b><br>qwen3.5-4b<br>GPU (time-sliced)")]
-        tts["<b>tts</b><br>Kokoro af_bella<br>CPU"]
+        tts["<b>tts</b><br>KittenTTS Bella<br>CPU"]
     end
 
     stick -->|"1 mic audio (BLE)"| phone
@@ -219,9 +222,9 @@ flowchart LR
     subgraph ssd["arch-ssd — GTX 1650, always on"]
         direction TB
         gw["<b>gateway</b><br>:30800<br>speaker gate"]
-        stt["<b>stt</b><br>faster-whisper small<br>GPU"]
+        stt["<b>stt</b><br>Moonshine base<br>CPU"]
         agent["<b>agent</b><br>CPU + MCP tools"]
-        tts["<b>tts</b><br>Kokoro af_bella<br>CPU"]
+        tts["<b>tts</b><br>KittenTTS Bella<br>CPU"]
     end
 
     subgraph lap["laptop — RTX 4060, selected by gpu-scheduler when Ready"]
@@ -312,9 +315,12 @@ The provisioned dashboard path is
 
 ## TTS backends
 
-The deployed TTS backend is Kokoro-82M with the `af_bella` American-English
-female voice. It runs on CPU and uses very little VRAM, leaving the GTX 1650
-available for Whisper. VITS-Umamusume remains available for the original
+The deployed TTS backend is KittenTTS nano (voice `Bella`) on CPU via
+sherpa-onnx: 3.1x realtime at ~560 MiB on the home server. `kokoro-onnx` is the
+higher-quality alternative (Kokoro-82M's `af_bella` voice, 2.2x realtime, ~1.35
+GiB); the PyTorch `kokoro` backend with the same voice needed 3 GiB and was
+still OOM-killed there. Measurements: `docs/hardware-budget.md`. Switch live
+with `tools/switch-backend.sh tts kitten|kokoro-onnx|kokoro`. VITS-Umamusume remains available for the original
 Umamusume voice, Chatterbox remains available for local voice cloning, and
 ElevenLabs is an optional hosted backend. The
 ElevenLabs backend reads its API key, voice ID, model ID, and optional credit
@@ -334,12 +340,17 @@ voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
   backends/               the concrete engines, one file each, discovered
                           automatically — adding a file here is all it takes
     whisper.py              faster-whisper           ("faster-whisper", STT)
+    sherpa_stt.py           Parakeet, Moonshine on CPU via sherpa-onnx
+                            ("parakeet", "moonshine", STT; moonshine deployed)
     ollama.py               local Ollama compatibility backend ("ollama", LLM;
                             development only, not the Kubernetes production path)
     openai_compatible.py    OpenAI-compatible Qwen3 + MCP agent backend
                             (llama.cpp, vLLM, LM Studio, LiteLLM)
     chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS)
-    kokoro.py               Kokoro-82M              ("kokoro", TTS, default)
+    kokoro.py               Kokoro-82M on PyTorch    ("kokoro", TTS)
+    sherpa_tts.py           Kokoro-82M, KittenTTS on CPU via sherpa-onnx
+                            ("kokoro-onnx", "kitten", TTS; kitten deployed)
+    _sherpa.py              shared model download + wav helpers
     vits.py                 VITS-Umamusume           ("vits", TTS)
   cli.py                  the flags every entrypoint shares, assembled from
                           the registries — this is why no entrypoint mentions

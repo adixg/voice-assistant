@@ -26,9 +26,11 @@ spec:
       containers:
         - name: stt
           image: ghcr.io/adixg/aicompanion-stt:latest
-          args: ["--stt-backend", "faster-whisper", "--whisper-model", "small", "--whisper-device", "cuda"]
-          # Switch backend with tools/switch-backend.sh (stt: whisper, parakeet,
-          # moonshine); it patches these args and the memory limit together.
+          # Moonshine base on CPU: 0.18 s p50 on arch-ssd vs whisper-on-1650's
+          # 3.31 s (docs/hardware-budget.md, "sherpa-onnx backends"). English only.
+          # Switch backend with tools/switch-backend.sh (stt: moonshine, parakeet,
+          # whisper); it patches these args and the memory limit together.
+          args: ["--stt-backend", "moonshine"]
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
             - {name: SHERPA_MODELS_DIR, value: /models/sherpa-onnx}
@@ -36,9 +38,11 @@ spec:
             - {containerPort: 8001, name: metrics}
           volumeMounts:
             - {name: sherpa-models, mountPath: /models/sherpa-onnx}
-          # Memory measured ~500-575Mi (2026-09-23). The request is close to real
-          # use so the OOM killer treats this as well-behaved and picks pods
-          # running far over their request first.
+          # Memory: moonshine peaked at 571Mi (2026-09-24); whisper measured
+          # ~500-575Mi (2026-09-23) but its peak touched 1023Mi. The request is
+          # close to real use so the OOM killer picks pods running far over
+          # their request first. The GPU slot is kept so switching back to
+          # whisper on cuda needs no manifest change; moonshine doesn't use it.
           resources:
             requests: {memory: 512Mi}
             limits:

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Switch the live STT or TTS backend, and its memory limit, in one command.
 #
-#   tools/switch-backend.sh stt whisper      faster-whisper small on the GTX 1650 (manifest default)
+#   tools/switch-backend.sh stt whisper      faster-whisper small on the GTX 1650
 #   tools/switch-backend.sh stt parakeet     NVIDIA Parakeet TDT 0.6B v3, CPU
-#   tools/switch-backend.sh stt moonshine    Moonshine base, English only, CPU
-#   tools/switch-backend.sh tts kokoro       Kokoro af_bella on PyTorch (manifest default)
+#   tools/switch-backend.sh stt moonshine    Moonshine base, English only, CPU (manifest default)
+#   tools/switch-backend.sh tts kokoro       Kokoro af_bella on PyTorch (OOMs on arch-ssd)
 #   tools/switch-backend.sh tts kokoro-onnx  the same Kokoro voice on onnxruntime, far less RAM
-#   tools/switch-backend.sh tts kitten       KittenTTS nano, voice Bella, smallest and fastest
+#   tools/switch-backend.sh tts kitten       KittenTTS nano, voice Bella, smallest and fastest (manifest default)
 #   tools/switch-backend.sh status           what each service is running now
 #
 # Extra flags after the preset go to the backend, e.g.
