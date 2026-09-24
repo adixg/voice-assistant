@@ -57,9 +57,17 @@ its node stays `Ready` all heal on their own. Nothing is kept in memory; the
 
 ## Status
 
-**Standby autoscaling (2026-09-24) is written and unit-tested but not yet deployed or
-exercised on the live cluster** -- the measured failover time from scale-zero is
-still to be recorded here.
+**Standby autoscaling deployed and verified live (2026-09-24).** With the 4060 up and
+`agent` on it, the controller scaled `llama-cpp-gtx1650` to 0 by itself on its
+first pass; pinning it with `tools/standby.sh warm` brought it back and it was
+Ready in **61s** (up to 10s of that is the controller's poll, so the model load
+from the hostPath cache is ~50s), and `auto` scaled it away again. That 61s is
+the floor for a failover from zero -- on a real laptop loss add the time k3s
+takes to mark the node NotReady (not yet measured; the 4060-down test is still
+open). Kopf logs harmless 403s listing namespaces (the ClusterRole doesn't grant
+it, kopf falls back to `aicompanion`). Also found while rolling out: the live
+standby predated the manifest (no `--jinja`, no readiness probe), and the
+controller's ordering depends on that probe, so the manifest had to be applied.
 
 **Deployed and verified on the live two-node cluster (2026-09-16, against the
 Ollama-era services it was first built for).** Both Ready and NotReady
