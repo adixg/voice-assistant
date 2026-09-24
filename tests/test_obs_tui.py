@@ -121,9 +121,26 @@ def test_gpu_panel_prints_each_physical_gpu_once_with_vram_percent():
     assert "2,000 / 4,000 MiB" in text and "44°C" in text and "7W" in text
 
 
+def test_gpu_panel_shows_clock_energy_throttling_and_vram_per_pod():
+    routes = gpu_routes(duplicate_1650=False)
+    gtx = {"hostname": "arch-ssd", "modelName": "GTX 1650", "gpu": "0"}
+    routes.update({
+        "aicompanion_gpu_clock_mhz": [(gtx, 1590)],
+        "aicompanion_gpu_energy_joules_total": [(gtx, 7200)],
+        "aicompanion_gpu_throttle": [({**gtx, "reason": "hw_thermal_slowdown"}, 1)],
+        "aicompanion_gpu_process_memory_bytes": [({**gtx, "pod": "llama-cpp-gtx1650-x", "command": "llama-server"},
+                                                  3 * 2**30)],
+    })
+    text = "\n".join(obs_tui.panel_gpu(PLAIN, "http://p", fake_prom(routes)))
+    assert "sm 1,590 MHz" in text and "2.0 Wh in 24h" in text
+    assert "throttled: hw_thermal_slowdown" in text
+    assert "3,072 MiB  llama-cpp-gtx1650-x  llama-server" in text
+    assert text.count("not throttled") == 1  # the 4060, which reported no reasons
+
+
 def test_gpu_panel_explains_missing_data():
     text = "\n".join(obs_tui.panel_gpu(PLAIN, "http://p", fake_prom({})))
-    assert "no DCGM samples" in text and "lean-mode" in text
+    assert "no GPU samples" in text and "lean-mode" in text
 
 
 # -------------------------------------------------------------------- pods

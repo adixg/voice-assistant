@@ -100,7 +100,7 @@ data:
           "type": "timeseries"
         },
         {
-          "description": "NVIDIA GPU utilization reported by DCGM on each labeled GPU node.",
+          "description": "NVIDIA GPU utilization reported by gpu-exporter on each labeled GPU node.",
           "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "max": 100, "min": 0, "unit": "percent"}, "overrides": []},
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
           "id": 10,
@@ -110,7 +110,7 @@ data:
           "type": "timeseries"
         },
         {
-          "description": "NVIDIA framebuffer use as a percentage of total VRAM. DCGM reports one series per physical GPU.",
+          "description": "NVIDIA framebuffer use as a percentage of total VRAM. gpu-exporter reports one series per physical GPU.",
           "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "max": 100, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 80}, {"color": "red", "value": 95}]}, "unit": "percent"}, "overrides": []},
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
           "id": 11,
@@ -120,9 +120,32 @@ data:
           "type": "timeseries"
         },
         {
+          "description": "VRAM held by each pod's processes (gpu-exporter, from NVML). Not reported under WSL2, so the laptop node shows none.",
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"stacking": {"mode": "normal"}, "fillOpacity": 30}, "unit": "bytes"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 46},
+          "id": 20,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [{"expr": "sum by (hostname, pod) (aicompanion_gpu_process_memory_bytes)", "legendFormat": "{{hostname}} / {{pod}}", "refId": "A"}],
+          "title": "VRAM by pod",
+          "type": "timeseries"
+        },
+        {
+          "description": "SM clock, and any reason the driver is holding it down (thermal, power cap, ...). gpu_idle is left out: it only means there is no work.",
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "none"}, "overrides": [{"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [{"id": "custom.axisPlacement", "value": "right"}, {"id": "custom.drawStyle", "value": "bars"}, {"id": "max", "value": 1}]}]},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 46},
+          "id": 21,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+          "targets": [
+            {"expr": "aicompanion_gpu_clock_mhz{clock=\"sm\"}", "legendFormat": "{{hostname}} SM MHz", "refId": "A"},
+            {"expr": "aicompanion_gpu_throttle{reason!=\"gpu_idle\"} == 1", "legendFormat": "{{hostname}} throttled: {{reason}}", "refId": "B"}
+          ],
+          "title": "GPU clock and throttling",
+          "type": "timeseries"
+        },
+        {
           "datasource": {"type": "tempo", "uid": "tempo"},
           "description": "Distributed traces emitted by the FastAPI services through OpenTelemetry and stored in Tempo.",
-          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 47},
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 54},
           "id": 12,
           "options": {"showSearch": true, "showTable": true, "spanBar": {"type": "Tag"}},
           "targets": [{"queryType": "traceql", "query": "{ resource.service.name =~ \".+\" }", "refId": "A"}],
@@ -132,7 +155,7 @@ data:
         {
           "description": "Estimated ElevenLabs credits used in the selected 30-day window. This assumes one credit per character.",
           "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "unit": "short"}, "overrides": []},
-          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 57},
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 64},
           "id": 13,
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "targets": [{"expr": "sum(increase(elevenlabs_characters_total[30d]))", "legendFormat": "estimated credits", "refId": "A"}],
@@ -142,7 +165,7 @@ data:
         {
           "description": "Estimated remaining ElevenLabs credits, initialized from the configured account balance.",
           "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 1000}, {"color": "green", "value": 3000}]}, "unit": "short"}, "overrides": []},
-          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 57},
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 64},
           "id": 14,
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "targets": [{"expr": "sum(elevenlabs_credits_remaining_estimate)", "legendFormat": "estimated credits remaining", "refId": "A"}],

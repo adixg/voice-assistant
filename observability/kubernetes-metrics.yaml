@@ -75,36 +75,25 @@ spec:
   ports:
     - {name: metrics, port: 8080, targetPort: metrics}
 ---
-# One DCGM exporter per GPU node. The NVIDIA runtime and pod-resources socket
-# let it report GPU utilization and framebuffer use without consuming a
-# time-sliced nvidia.com/gpu workload slot.
+# One GPU exporter per GPU node: services/gpu_exporter/exporter.py, reading
+# NVML at scrape time. It replaced NVIDIA's dcgm-exporter (2026-09-24), which
+# embeds the DCGM host engine and held ~405 MiB of anonymous memory on arch-ssd
+# to export six numbers; this measured 37 MiB. It keeps the DCGM_FI_DEV_* names
+# and labels the dashboard, obs_tui.py and the agent's GPU tool read (a test in
+# tests/test_observability.py keeps them in step), and adds clocks, throttle
+# reasons, energy, XID errors and VRAM per pod.
 #
-# Only the six fields something here reads (obs_tui.py, the Grafana dashboard,
-# companion_control_mcp.py; tests/test_observability.py keeps this list and
-# theirs in step), collected every 15 s to match the Prometheus scrape instead
-# of the default ~15 fields every second. This cuts the exporter's work, NOT its
-# memory: it held ~405 MiB of anonymous memory on arch-ssd before and 408 MiB
-# after (measured 2026-09-24) -- that is the embedded DCGM host engine itself.
-apiVersion: v1
-kind: ConfigMap
-metadata: {name: dcgm-exporter-counters, namespace: aicompanion}
-data:
-  counters.csv: |
-    # DCGM field, Prometheus type, help
-    DCGM_FI_DEV_GPU_UTIL,     gauge, GPU utilization (in %).
-    DCGM_FI_DEV_FB_USED,      gauge, Framebuffer memory used (in MiB).
-    DCGM_FI_DEV_FB_FREE,      gauge, Framebuffer memory free (in MiB).
-    DCGM_FI_DEV_FB_RESERVED,  gauge, Framebuffer memory reserved (in MiB).
-    DCGM_FI_DEV_GPU_TEMP,     gauge, GPU temperature (in C).
-    DCGM_FI_DEV_POWER_USAGE,  gauge, Power draw (in W).
----
+# It uses the NVIDIA runtime to reach NVML without consuming a time-sliced
+# nvidia.com/gpu slot. VRAM per pod needs the host's /proc (NVML reports host
+# PIDs) and /var/log/pods (pod names by UID; root-only on the host, hence
+# runAsUser 0 with every capability dropped and a read-only filesystem).
 apiVersion: apps/v1
 kind: DaemonSet
-metadata: {name: dcgm-exporter, namespace: aicompanion}
+metadata: {name: gpu-exporter, namespace: aicompanion}
 spec:
-  selector: {matchLabels: {app: dcgm-exporter}}
+  selector: {matchLabels: {app: gpu-exporter}}
   template:
-    metadata: {labels: {app: dcgm-exporter}}
+    metadata: {labels: {app: gpu-exporter}}
     spec:
       automountServiceAccountToken: false
       affinity:
@@ -115,47 +104,52 @@ spec:
                   - key: gpu-tier
                     operator: In
                     values: [gtx1650, rtx4060]
-                  # tools/lean-mode.sh labels a node with this to free the
-                  # exporter's ~430Mi on that node only, leaving the other
-                  # node's exporter running. Unlabelled nodes match as before.
+                  # tools/lean-mode.sh labels a node with this to pause the
+                  # exporter on that node only (deep/max levels). Unlabelled
+                  # nodes match as before.
                   - key: aicompanion/monitoring-paused
                     operator: NotIn
                     values: ["true"]
       priorityClassName: monitoring
       runtimeClassName: nvidia
       containers:
-        - name: dcgm-exporter
-          image: nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless
+        - name: gpu-exporter
+          image: ghcr.io/adixg/aicompanion-gpu-exporter:latest
+          imagePullPolicy: Always
           env:
-            - {name: DCGM_EXPORTER_LISTEN, value: ":9400"}
-            - {name: DCGM_EXPORTER_KUBERNETES, value: "true"}
-            - {name: DCGM_EXPORTER_COLLECTORS, value: /etc/dcgm-exporter/custom/counters.csv}
-            - {name: DCGM_EXPORTER_INTERVAL, value: "15000"}
+            - {name: NVIDIA_VISIBLE_DEVICES, value: all}
+            - {name: NVIDIA_DRIVER_CAPABILITIES, value: utility}
             - name: NODE_NAME
               valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
           ports:
             - {containerPort: 9400, name: metrics}
+          readinessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            initialDelaySeconds: 3
+            periodSeconds: 30
+          # Measured 37 MiB RSS on arch-ssd (2026-09-24).
           resources:
-            requests: {cpu: 100m, memory: 256Mi}
-            limits: {cpu: 200m, memory: 512Mi}
+            requests: {cpu: 10m, memory: 48Mi}
+            limits: {cpu: 100m, memory: 128Mi}
           securityContext:
-            runAsNonRoot: false
             runAsUser: 0
-            capabilities: {add: [SYS_ADMIN], drop: [ALL]}
             allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+            seccompProfile: {type: RuntimeDefault}
           volumeMounts:
-            - {name: pod-gpu-resources, mountPath: /var/lib/kubelet/pod-resources, readOnly: true}
-            - {name: counters, mountPath: /etc/dcgm-exporter/custom, readOnly: true}
+            - {name: host-proc, mountPath: /host/proc, readOnly: true}
+            - {name: pod-logs, mountPath: /var/log/pods, readOnly: true}
       volumes:
-        - name: counters
-          configMap: {name: dcgm-exporter-counters}
-        - name: pod-gpu-resources
-          hostPath: {path: /var/lib/kubelet/pod-resources, type: Directory}
+        - name: host-proc
+          hostPath: {path: /proc, type: Directory}
+        - name: pod-logs
+          hostPath: {path: /var/log/pods, type: Directory}
 ---
 apiVersion: v1
 kind: Service
-metadata: {name: dcgm-exporter, namespace: aicompanion}
+metadata: {name: gpu-exporter, namespace: aicompanion}
 spec:
-  selector: {app: dcgm-exporter}
+  selector: {app: gpu-exporter}
   ports:
     - {name: metrics, port: 9400, targetPort: metrics}

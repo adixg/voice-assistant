@@ -184,7 +184,7 @@ is what actually causes OOM kills.
 | `tts` | 1.2-1.9 GiB in normal turns | 2.8 GiB (1000-char stress) | 3 GiB | OOM-killed at 1792Mi |
 | `llama-cpp-gtx1650` | 0.6 GiB after load, **1.06 GiB after a long generation, never shrinks** | 2.0 GiB at load (1.76 GiB is GGUF page cache) | 3 GiB | OOM-killed at 2Gi mid-request; a standby while the agent uses the laptop's LLM |
 | `stt` | ~0.4 GiB | 1.0 GiB (page cache) | 1 GiB | 0.27s of memory stall in 17h, so the limit is not what makes it slow |
-| `dcgm-exporter` | ~0.42 GiB | 0.44 GiB | 512Mi | closest small pod to its limit |
+| `gpu-exporter` | 37 MiB | — | 128Mi | replaced `dcgm-exporter` (~0.42 GiB, limit 512Mi) on 2026-09-24 |
 | `gateway` / `prometheus` / `searxng` / `gpu-scheduler` / `agent` / `kube-state-metrics` | 47-243 MiB | 47-243 MiB | 128-512Mi | comfortable |
 
 Both OOM kills came from sizing a limit off an idle reading. Measure through
@@ -206,7 +206,7 @@ second RAM stick remains the real fix.
 - **Every workload here has a memory limit and a priority class**
   (`tests/test_deployment_manifests.py` enforces it). `voice-critical`
   (llama-cpp, stt, tts, agent, gateway, gpu-scheduler) outranks the default;
-  `monitoring` (grafana, tempo, prometheus, kube-state-metrics, dcgm-exporter,
+  `monitoring` (grafana, tempo, prometheus, kube-state-metrics, gpu-exporter,
   searxng) is below it, so monitoring is evicted first. Definitions:
   `deploy/kubernetes/priorityclasses.yaml`.
 - **Requests sit near measured use, limits well above it.** A limit that is
@@ -217,11 +217,11 @@ second RAM stick remains the real fix.
   briefly hold two ~1GB copies of the pod on this node.
 - **`tools/lean-mode.sh`** pauses optional pods to free RAM on demand (`on`:
   Grafana+Tempo, ~0.2GB, nothing functional lost; `deep`: also Prometheus,
-  kube-state-metrics and this node's dcgm-exporter, taking available RAM from
+  kube-state-metrics and this node's gpu-exporter, taking available RAM from
   ~340MB to ~1.1GB, but the agent's status/GPU tools stop answering; `max`:
   also SearXNG, so web search stops; `traces` starts only Tempo, for
   `obs_tui.py --traces`; `off` restores). The voice pipeline is
-  never touched. dcgm-exporter is a DaemonSet, so it is paused per node with
+  never touched. gpu-exporter is a DaemonSet, so it is paused per node with
   the `aicompanion/monitoring-paused` node label, which its affinity excludes.
 - **`tools/obs_tui.py`** is a terminal dashboard that replaces opening Grafana
   in a browser day to day: host RAM/swap/memory-pressure (from `/proc`), GPU

@@ -216,7 +216,7 @@ def test_gpu_status_normalizes_labels_and_vram(monkeypatch):
     def get_json(url):
         query = parse_qs(urlparse(url).query)["query"][0]
         if query == "DCGM_FI_DEV_GPU_UTIL":
-            return prom_result([sample({"Hostname": "arch-ssd", "gpu": "0"}, 73)])
+            return prom_result([sample({"hostname": "arch-ssd", "gpu": "0"}, 73)])
         return prom_result([sample({"instance": "10.42.1.92:9400", "gpu": "0"}, 88)])
 
     result = mcp.gpu_status(get_json)
@@ -241,3 +241,21 @@ def test_tool_call_rejects_arguments_for_a_zero_argument_tool():
 
 def test_notifications_do_not_receive_a_json_rpc_response():
     assert mcp.handle_request({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+
+
+def test_gpu_status_reports_active_throttling_but_not_idle(monkeypatch):
+    monkeypatch.setenv("COMPANION_CONTROL_PROMETHEUS_URL", "http://prometheus.test")
+    queries = []
+
+    def get_json(url):
+        query = parse_qs(urlparse(url).query)["query"][0]
+        queries.append(query)
+        if "aicompanion_gpu_throttle" in query:
+            return prom_result([sample({"hostname": "arch-ssd", "gpu": "0", "reason": "hw_thermal_slowdown"}, 1)])
+        return prom_result([sample({"hostname": "arch-ssd", "gpu": "0"}, 42)])
+
+    result = mcp.gpu_status(get_json)
+
+    assert result["throttling"] == [{"host": "arch-ssd", "gpu": "0", "reason": "hw_thermal_slowdown"}]
+    assert 'reason!="gpu_idle"' in queries[-1]
+    assert result["utilization"][0]["host"] == "arch-ssd"  # the real label is lowercase "hostname"

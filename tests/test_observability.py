@@ -105,18 +105,14 @@ def test_gateway_metrics_keep_outcome_and_stage_labels():
     assert any(sample.labels["stage"] == "stt" and sample.name.endswith("_count") for sample in stage_samples)
 
 
-def test_dcgm_counters_file_collects_every_field_the_code_reads():
-    """The exporter only collects what its counters file lists; a field used by a
-    dashboard/tool but missing there would silently read as no data."""
+def test_gpu_exporter_exports_every_dcgm_field_the_code_reads():
+    """services/gpu_exporter replaced dcgm-exporter but keeps its metric names; a
+    field a dashboard/tool reads that the exporter doesn't produce would silently
+    read as no data."""
     import re
-    import subprocess
-    import yaml
-    docs = list(yaml.safe_load_all(open(ROOT / "observability" / "kubernetes-metrics.yaml")))
-    counters = next(d for d in docs if d and d.get("kind") == "ConfigMap"
-                    and d["metadata"]["name"] == "dcgm-exporter-counters")["data"]["counters.csv"]
-    collected = set(re.findall(r"^(DCGM_FI_\w+)", counters, re.M))
+    exported = set(re.findall(r'"(DCGM_FI_\w+)"', (ROOT / "services/gpu_exporter/exporter.py").read_text()))
     used = set()
     for path in ("tools/obs_tui.py", "tools/companion_control_mcp.py", "observability/grafana/dashboard.yaml"):
         used |= set(re.findall(r"DCGM_FI_[A-Z_]*[A-Z](?![A-Z_])", (ROOT / path).read_text()))  # not "FB_.*" patterns
     used.discard("DCGM_FI_DEV_FB_TOTAL")  # deliberately not queried: see companion_control_mcp.py
-    assert used <= collected, f"read but not collected: {sorted(used - collected)}"
+    assert used and used <= exported, f"read but not exported: {sorted(used - exported)}"

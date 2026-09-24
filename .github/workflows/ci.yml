@@ -63,6 +63,9 @@ jobs:
             scheduler:
               - 'controller/gpu_scheduler/**'
               - '.dockerignore'
+            gpuexporter:
+              - 'services/gpu_exporter/**'
+              - '.dockerignore'
       - name: Build affected image matrix
         id: matrix
         env:
@@ -71,6 +74,7 @@ jobs:
           AGENT: ${{ steps.filter.outputs.agent }}
           GATEWAY: ${{ steps.filter.outputs.gateway }}
           SCHEDULER: ${{ steps.filter.outputs.scheduler }}
+          GPUEXPORTER: ${{ steps.filter.outputs.gpuexporter }}
         run: |
           matrix='{"include":[]}'
           if [ "$STT" = true ]; then
@@ -91,6 +95,9 @@ jobs:
           fi
           if [ "$SCHEDULER" = true ]; then
             matrix=$(jq -c '.include += [{"image":"aicompanion-gpu-scheduler","dockerfile":"controller/gpu_scheduler/Dockerfile","context":"controller/gpu_scheduler","build-args":""}]' <<<"$matrix")
+          fi
+          if [ "$GPUEXPORTER" = true ]; then
+            matrix=$(jq -c '.include += [{"image":"aicompanion-gpu-exporter","dockerfile":"services/gpu_exporter/Dockerfile","build-args":""}]' <<<"$matrix")
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           if [ "$(jq '.include | length' <<<"$matrix")" -gt 0 ]; then

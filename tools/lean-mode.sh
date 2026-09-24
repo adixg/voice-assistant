@@ -16,8 +16,8 @@
 #   on    Nothing functional. Grafana is UI only; Tempo only receives traces,
 #         so services just log failed trace exports while it's down.
 #   deep  The agent's status/GPU tools (tools/companion_control_mcp.py) query
-#         Prometheus, kube-state-metrics and dcgm-exporter, so "how is the
-#         GPU doing" style questions stop working. dcgm-exporter is paused on
+#         Prometheus, kube-state-metrics and gpu-exporter, so "how is the
+#         GPU doing" style questions stop working. gpu-exporter is paused on
 #         this node only, the laptop node's keeps running.
 #   max   The agent's web search (SearXNG) stops working.
 set -euo pipefail
@@ -39,8 +39,8 @@ pause() {
   kc scale deployment "${names[@]}" --replicas=0
 }
 
-pause_dcgm() {
-  # dcgm-exporter is a DaemonSet, so it can't be scaled to 0. Its affinity
+pause_gpu_exporter() {
+  # gpu-exporter is a DaemonSet, so it can't be scaled to 0. Its affinity
   # (observability/kubernetes-metrics.yaml) excludes nodes with this label.
   kubectl label node "$NODE" "${PAUSE_LABEL}=true" --overwrite
 }
@@ -55,7 +55,7 @@ status() {
   kc get deployment "${UI[@]}" "${METRICS[@]}" "${SEARCH[@]}" \
     -o custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas,READY:.status.readyReplicas
   echo
-  echo "== dcgm-exporter on $NODE =="
+  echo "== gpu-exporter on $NODE =="
   if [[ "$(kubectl get node "$NODE" -o "jsonpath={.metadata.labels.aicompanion/monitoring-paused}" 2>/dev/null \
       || true)" == "true" ]]; then echo "paused (label ${PAUSE_LABEL}=true)"; else echo "running"; fi
   echo
@@ -65,8 +65,8 @@ status() {
 
 case "${1:-status}" in
   on)   pause "${UI[@]}" ;;
-  deep) pause "${UI[@]}" "${METRICS[@]}"; pause_dcgm ;;
-  max)  pause "${UI[@]}" "${METRICS[@]}" "${SEARCH[@]}"; pause_dcgm ;;
+  deep) pause "${UI[@]}" "${METRICS[@]}"; pause_gpu_exporter ;;
+  max)  pause "${UI[@]}" "${METRICS[@]}" "${SEARCH[@]}"; pause_gpu_exporter ;;
   dashboards) kc scale deployment "${UI[@]}" --replicas=1 ;;
   traces) kc scale deployment tempo --replicas=1 ;;
   off)  restore ;;

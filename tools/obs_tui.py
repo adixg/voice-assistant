@@ -246,7 +246,7 @@ def gpu_history(base, seconds, get_json):
 
 
 def panel_gpu(style, base, get_json=fetch_json, history=None):
-    lines = heading(style, "gpu", "(DCGM)")
+    lines = heading(style, "gpu", "(gpu-exporter)")
     # The 1650 is exported once per time-sliced slot, so collapse duplicates.
     by = "by (hostname, modelName, gpu)"
     q = lambda name: {  # noqa: E731
@@ -255,7 +255,18 @@ def panel_gpu(style, base, get_json=fetch_json, history=None):
     util, used, free = q("DCGM_FI_DEV_GPU_UTIL"), q("DCGM_FI_DEV_FB_USED"), q("DCGM_FI_DEV_FB_FREE")
     reserved, temp, power = q("DCGM_FI_DEV_FB_RESERVED"), q("DCGM_FI_DEV_GPU_TEMP"), q("DCGM_FI_DEV_POWER_USAGE")
     if not util:
-        return lines + [style("y", "  no DCGM samples (dcgm-exporter paused by lean-mode deep?)")]
+        return lines + [style("y", "  no GPU samples (gpu-exporter paused by lean-mode deep?)")]
+    # gpu-exporter's additions. "gpu_idle" is left out: it only means there is
+    # nothing to run, not that anything is being slowed down.
+    key_of = lambda m: (m.get("hostname"), m.get("modelName"), m.get("gpu"))  # noqa: E731
+    sm_clock = {key_of(m): v for m, v in prom(base, 'aicompanion_gpu_clock_mhz{clock="sm"}', get_json)}
+    energy_day = {key_of(m): v for m, v in prom(base, "increase(aicompanion_gpu_energy_joules_total[24h])", get_json)}
+    throttled = {}
+    for m, v in prom(base, 'aicompanion_gpu_throttle{reason!="gpu_idle"} == 1', get_json):
+        throttled.setdefault(key_of(m), set()).add(m.get("reason", "?"))
+    proc_vram = {}
+    for m, v in prom(base, "aicompanion_gpu_process_memory_bytes", get_json):
+        proc_vram.setdefault(key_of(m), {})[(m.get("pod", ""), m.get("command", ""))] = v
     util_hist, vram_hist = graph_data(lambda: gpu_history(base, history, get_json)) or ({}, {}) if history else ({}, {})
 
     def graph(values):
@@ -271,6 +282,16 @@ def panel_gpu(style, base, get_json=fetch_json, history=None):
         lines.append(f"    vram  {bar(style, vram)} {style.level(vram, f'{vram:3.0f}%')}{graph(vram_hist.get(key))}  "
                      f"{used.get(key, 0):,.0f} / {total:,.0f} MiB"
                      f"   {temp.get(key, 0):.0f}°C  {power.get(key, 0):.0f}W")
+        extra = []
+        if key in sm_clock:
+            extra.append(f"sm {sm_clock[key]:,.0f} MHz")
+        if key in energy_day:
+            extra.append(f"{energy_day[key] / 3600:,.1f} Wh in 24h")
+        reasons = throttled.get(key)
+        extra.append(style("r", "throttled: " + ", ".join(sorted(reasons))) if reasons else style("d", "not throttled"))
+        lines.append("    " + "   ".join(extra))
+        for (pod, command), nbytes in sorted(proc_vram.get(key, {}).items(), key=lambda kv: -kv[1]):
+            lines.append(style("d", f"      {nbytes / 2**20:7,.0f} MiB  {pod or '(not a pod)'}  {command}"))
     return lines
 
 
@@ -281,7 +302,7 @@ def panel_gpu(style, base, get_json=fetch_json, history=None):
 ROLES = {
     "gateway": "pipeline", "stt": "pipeline", "tts": "pipeline", "agent": "pipeline",
     "gpu-scheduler": "control",
-    "prometheus": "support", "kube-state-metrics": "support", "dcgm-exporter": "support",
+    "prometheus": "support", "kube-state-metrics": "support", "gpu-exporter": "support",
     "searxng": "support",
     "grafana": "observ.", "tempo": "observ.",
 }

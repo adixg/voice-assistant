@@ -160,7 +160,7 @@ agent's `LLM_HOST` and `LLM_MODEL`: the preferred route is `qwen3-8b` on the
 RTX 4060, with `qwen3.5-4b` on the GTX 1650 as the fallback. MCP remains
 available on both routes because the MCP server runs in the CPU-side agent
 container, independently of the model server. STT, TTS, gateway, agent,
-and the core observability services are pinned to `arch-ssd`; DCGM Exporter
+and the core observability services are pinned to `arch-ssd`; the GPU exporter
 still runs on both GPU nodes. The laptop can therefore disappear without
 taking down the primary route or monitoring. See
 [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md).
@@ -283,15 +283,17 @@ until it is the Stick still waits for the full reply.
 ## Observability
 
 The cluster runs Prometheus, Grafana, Tempo, OpenTelemetry, kube-state-
-metrics, and NVIDIA DCGM Exporter. Prometheus scrapes the gateway, STT,
-agent, TTS, kube-state-metrics, and DCGM Exporter every 15 seconds. Grafana
+metrics, and a GPU exporter of our own (`services/gpu_exporter`, NVML; it
+replaced NVIDIA's DCGM Exporter, ~405 MiB, with 37 MiB and adds clocks, throttle
+reasons, energy, XID errors and VRAM per pod). Prometheus scrapes the gateway,
+STT, agent, TTS, kube-state-metrics, and the GPU exporter every 15 seconds. Grafana
 provisions Prometheus and Tempo datasources and a service-performance
 dashboard covering target health, request/error rate, HTTP and gateway
 latency, pod readiness/restarts, GPU/VRAM usage, traces, and optional
 ElevenLabs usage.
 
 Prometheus and Tempo use 5 GiB `local-path` PVCs pinned to `arch-ssd`:
-`prometheus-data-arch` and `tempo-data-arch`. DCGM Exporter remains a
+`prometheus-data-arch` and `tempo-data-arch`. The GPU exporter is a
 DaemonSet on both GPU nodes, so a missing RTX 4060 appears as an unavailable
 target while the monitoring stack stays online on the GTX 1650 node.
 
@@ -483,7 +485,7 @@ controller/gpu_scheduler/  custom controller that retargets the agent
                          service to whichever GPU node is up, and scales the
                          1650's standby LLM server to zero while the 4060 serves
 observability/           Prometheus, Grafana, Tempo, OpenTelemetry, kube-state-
-                         metrics, and DCGM Exporter manifests
+                         metrics, and GPU exporter manifests
 benchmarks/              benchmark scripts and comparison notes
 deploy/helm/, deploy/argocd/  future GitOps packaging; not the active deploy path
 ```

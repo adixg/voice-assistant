@@ -1,7 +1,7 @@
 # Prometheus
 
 `prometheus.yaml` discovers the named `metrics` ports for the gateway, STT,
-agent, TTS, `kube-state-metrics`, and DCGM Exporter, and scrapes their
+agent, TTS, `kube-state-metrics`, and `gpu-exporter`, and scrapes their
 `/metrics` endpoint every 15 seconds. Prometheus stores its TSDB on the
 `prometheus-data-arch` 5 GiB `local-path` PVC pinned to the always-on
 `arch-ssd` node.
@@ -21,5 +21,7 @@ kubectl apply -f observability/kubernetes-metrics.yaml
 
 `kube-state-metrics` is intentionally limited to the `aicompanion` namespace
 and exposes pod readiness, container restarts, and deployment readiness.
-DCGM Exporter runs only on nodes labeled `gpu-tier=gtx1650` or
-`gpu-tier=rtx4060`; it exposes NVIDIA utilization and framebuffer metrics.
+`gpu-exporter` (`services/gpu_exporter`, replacing DCGM Exporter) runs only on
+nodes labeled `gpu-tier=gtx1650` or `gpu-tier=rtx4060`; it exposes NVIDIA
+utilization and framebuffer metrics under their DCGM names, plus clocks,
+throttle reasons, energy, XID errors and VRAM per pod.

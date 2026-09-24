@@ -6,7 +6,8 @@ Version 0.1 is intentionally **read-only**:
 
 - `get_service_health` reads Prometheus scrape health, pod readiness, and
   container restarts.
-- `get_gpu_status` reads DCGM GPU and VRAM utilization from Prometheus.
+- `get_gpu_status` reads GPU and VRAM utilization, and any active throttling, from
+  Prometheus (series from `services/gpu_exporter`).
 - `get_agent_status` reads the agent service's `/health` response.
 - `get_model_status` reads the configured llama.cpp route/model selected by the
   scheduler. It does not call llama.cpp recursively while a model turn waits

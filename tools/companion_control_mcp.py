@@ -88,7 +88,7 @@ def _sample_value(sample: Json) -> float | None:
 def service_health(get_json: FetchJson = fetch_json) -> Json:
     """Return scrape health, pod readiness, and recent restarts by stable names."""
     up = prometheus_query(
-        'up{service=~"gateway|stt|agent|tts|kube-state-metrics|dcgm-exporter"}', get_json)
+        'up{service=~"gateway|stt|agent|tts|kube-state-metrics|gpu-exporter"}', get_json)
     ready = prometheus_query(
         'max by (pod) (kube_pod_status_ready{namespace="aicompanion",condition="true"})', get_json)
     restarts = prometheus_query(
@@ -124,7 +124,7 @@ def service_health(get_json: FetchJson = fetch_json) -> Json:
 
 
 def gpu_status(get_json: FetchJson = fetch_json) -> Json:
-    """Return GPU compute and VRAM percentage from DCGM, without pod-level labels."""
+    """Return GPU compute and VRAM percentage, and any active throttling, from gpu-exporter."""
     util = prometheus_query("DCGM_FI_DEV_GPU_UTIL", get_json)
     # DCGM Exporter exposes framebuffer used/free/reserved, but not a
     # DCGM_FI_DEV_FB_TOTAL series on this cluster.  Derive the total from the
@@ -142,7 +142,7 @@ def gpu_status(get_json: FetchJson = fetch_json) -> Json:
             if not isinstance(labels, dict):
                 continue
             output.append({
-                "host": labels.get("Hostname", labels.get("instance", "unknown")),
+                "host": labels.get("hostname", labels.get("instance", "unknown")),
                 "gpu": labels.get("gpu", "unknown"),
                 field: _sample_value(sample),
             })
@@ -150,9 +150,16 @@ def gpu_status(get_json: FetchJson = fetch_json) -> Json:
 
     utilization = series(util, "utilization_percent")
     vram_utilization = series(vram, "vram_percent")
+    # Reasons the clocks are being held down right now (gpu-exporter), minus
+    # "gpu_idle", which only means there is nothing to do.
+    throttled = prometheus_query('aicompanion_gpu_throttle{reason!="gpu_idle"} == 1', get_json)
+    throttling = [{"host": s.get("metric", {}).get("hostname", "unknown"),
+                   "gpu": s.get("metric", {}).get("gpu", "unknown"),
+                   "reason": s.get("metric", {}).get("reason", "unknown")} for s in throttled]
     return {
         "utilization": utilization,
         "vram_utilization": vram_utilization,
+        "throttling": throttling,
         "message": None if utilization else "No DCGM GPU samples are available yet.",
     }
 
