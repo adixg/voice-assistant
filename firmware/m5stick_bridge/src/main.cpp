@@ -144,6 +144,18 @@ static size_t replyCap = 0;
 static size_t replyLen = 0;
 static bool receivingReply = false;
 
+// Playback starts while the reply is still arriving (the gateway sends it a
+// sentence at a time), so these track how much of replyBuf has been handed to
+// the speaker. replyBuf must not move once playback has started -- the speaker
+// reads it in place -- which is why ensureReplyCap() stops growing it then.
+static size_t queuedOff = 0;          // bytes of replyBuf already given to the speaker
+static bool playbackStarted = false;
+static bool replyEnded = false;       // FRAME_END seen: no more audio is coming
+static bool replyAborted = false;     // interrupted, or the user started talking
+static uint32_t lastAudioMs = 0;
+static const size_t PLAY_PREBUFFER_BYTES = 9600;       // 0.3s at 16kHz PCM16
+static const uint32_t UNDERRUN_GIVEUP_MS = 10000;      // reply stalled mid-stream
+
 static float rms16(const int16_t *data, size_t n) {
   if (n == 0) return 0.0f;
   double sumsq = 0;
@@ -153,7 +165,7 @@ static float rms16(const int16_t *data, size_t n) {
 }
 
 static void ensureReplyCap(size_t need) {
-  if (replyCap >= need) return;
+  if (replyCap >= need || playbackStarted) return;
   size_t newCap = need + 64 * 1024;
   uint8_t *nb = (uint8_t *)ps_realloc(replyBuf, newCap);
   if (nb) {
@@ -760,24 +772,31 @@ void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
       captionText = String((const char *)payload, len);
       lastReplyWasError = captionText.startsWith("(");
       setStatus("Generating", captionText);
+      if (playbackStarted) M5.Speaker.stop();  // an earlier reply still playing
       receivingReply = true;
       replyLen = 0;
+      queuedOff = 0;
+      playbackStarted = false;
+      replyEnded = false;
+      replyAborted = false;
+      lastAudioMs = millis();
       break;
     case FRAME_AUDIO_CHUNK:
       if (receivingReply) {
         ensureReplyCap(replyLen + len);
+        if (replyLen + len > replyCap) len = replyCap - replyLen;  // can't grow mid-playback
         memcpy(replyBuf + replyLen, payload, len);
         replyLen += len;
+        lastAudioMs = millis();
       }
       break;
     case FRAME_END:
       receivingReply = false;
-      if (replyLen > 0) {
-        M5.Mic.end();
-        M5.Speaker.begin();
-        M5.Speaker.playRaw((int16_t *)replyBuf, replyLen / 2, SAMPLE_RATE, false);
-        speakStartMs = millis();
-        uiState = UI_SPEAKING;
+      replyEnded = true;
+      if (replyAborted) {
+        // interrupted mid-reply; nothing left to play or show
+      } else if (replyLen > 0) {
+        // pumpPlayback() in loop() starts (or finishes queuing) the audio
       } else if (lastReplyWasError) {
         showTransient(UI_ERROR, 900);
       } else {
@@ -891,6 +910,33 @@ void setup() {
   connectNetwork();
 }
 
+// Hands newly arrived reply audio to the speaker, starting playback once
+// PLAY_PREBUFFER_BYTES are in (or the reply has ended). Two speaker slots exist
+// per channel -- playing and next -- so this only queues when the next slot is
+// free, which keeps it from ever blocking inside playRaw().
+static void pumpPlayback() {
+  if (replyAborted) return;
+  size_t pending = replyLen - queuedOff;
+  if (!playbackStarted) {
+    if (pending == 0 || (pending < PLAY_PREBUFFER_BYTES && !replyEnded)) return;
+    if (recState != REC_IDLE) {  // the user started talking over the reply
+      replyAborted = true;
+      receivingReply = false;
+      return;
+    }
+    M5.Mic.end();
+    M5.Speaker.begin();
+    playbackStarted = true;
+    speakStartMs = millis();
+    uiState = UI_SPEAKING;
+  }
+  if (pending >= 2 && M5.Speaker.isPlaying(0) < 2) {
+    size_t n = pending & ~(size_t)1;
+    M5.Speaker.playRaw((const int16_t *)(replyBuf + queuedOff), n / 2, SAMPLE_RATE, false, 1, 0, false);
+    queuedOff += n;
+  }
+}
+
 void loop() {
   M5.update();
 
@@ -937,6 +983,7 @@ void loop() {
   if (uiState == UI_SPEAKING && M5.BtnA.wasPressed()) {
     M5.Speaker.stop();
     receivingReply = false;
+    replyAborted = true;  // the rest of the reply may still be in flight
     speakLevel = 0.0f;
     showTransient(UI_INTERRUPTED, 300);
   } else {
@@ -995,8 +1042,20 @@ void loop() {
     }
   }
 
+  pumpPlayback();
+
   if (uiState == UI_SPEAKING) {
-    if (M5.Speaker.isPlaying()) {
+    bool moreComing = !replyEnded || queuedOff + 1 < replyLen;
+    if (!M5.Speaker.isPlaying() && moreComing) {
+      // Between sentences: the next one is still being synthesized. Keep the
+      // "speaking" state, unless the stream has clearly died.
+      speakLevel = 0.0f;
+      if (!replyEnded && millis() - lastAudioMs > UNDERRUN_GIVEUP_MS) {
+        receivingReply = false;
+        replyAborted = true;
+        showTransient(UI_ERROR, 900);
+      }
+    } else if (M5.Speaker.isPlaying()) {
       uint32_t elapsedMs = millis() - speakStartMs;
       size_t totalSamples = replyLen / 2;
       size_t sampleIdx = (size_t)((uint64_t)elapsedMs * SAMPLE_RATE / 1000);
