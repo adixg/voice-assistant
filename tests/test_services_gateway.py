@@ -4,6 +4,7 @@ speaker gate) and handle_client() (the start/binary/stop/reset framing) --
 mirrors tests/test_bridge_server.py's structure closely, since this is the
 same protocol over HTTP-backed stages instead of in-process ones.
 """
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -493,3 +494,70 @@ class TestSpeakerVerdictsAreRecorded:
         for verdict in ("accepted", "rejected", "too_short", "check_failed", "unverified"):
             assert REGISTRY.get_sample_value("aicompanion_gateway_speaker_checks_total",
                                              {"verdict": verdict}) is not None
+
+
+class TestSpeakPipelining:
+    """_speak() sends a sentence's audio before the next sentence is done."""
+
+    async def test_first_sentence_audio_is_sent_before_second_synth_finishes(self, monkeypatch):
+        import base64
+        monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+        second_may_finish = asyncio.Event()
+        synth_calls = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            text = json.loads(request.content)["text"]
+            synth_calls.append(text)
+            if text.startswith("Second"):
+                await second_may_finish.wait()
+            return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"wav").decode()]})
+
+        async with make_client(handler) as client:
+            session = make_session(client=client)
+            ws = FakeWebSocket()
+            task = asyncio.create_task(session._speak(
+                ws, "First sentence is long enough. Second sentence is long enough."))
+
+            for _ in range(200):
+                if ws.sent:
+                    break
+                await asyncio.sleep(0.01)
+
+            assert ws.sent == [b"\x01\x02"]          # first audio out...
+            assert len(synth_calls) == 2               # ...while the second synth is in flight
+            assert not task.done()
+
+            second_may_finish.set()
+            await task
+            assert ws.sent == [b"\x01\x02", b"\x01\x02"]
+            assert synth_calls[0].startswith("First") and synth_calls[1].startswith("Second")
+
+    async def test_second_synth_failure_keeps_the_first_sentence_audio(self, monkeypatch):
+        import base64
+        monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if json.loads(request.content)["text"].startswith("Second"):
+                return httpx.Response(500, text="boom")
+            return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"wav").decode()]})
+
+        async with make_client(handler) as client:
+            session = make_session(client=client)
+            ws = FakeWebSocket()
+            with pytest.raises(httpx.HTTPStatusError):
+                await session._speak(ws, "First sentence is long enough. Second sentence is long enough.")
+            assert ws.sent == [b"\x01\x02"]
+
+    async def test_first_audio_metric_recorded(self, monkeypatch):
+        import base64
+        from prometheus_client import REGISTRY
+        monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+        name, labels = "aicompanion_gateway_stage_duration_seconds_count", {"stage": "first_audio"}
+        before = REGISTRY.get_sample_value(name, labels) or 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"wav").decode()]})
+
+        async with make_client(handler) as client:
+            await make_session(client=client)._speak(FakeWebSocket(), "One sentence that is long enough.")
+        assert REGISTRY.get_sample_value(name, labels) == before + 1

@@ -47,6 +47,36 @@ def chunks(text, limit=DEFAULT_LIMIT):
     return parts or [text.strip()]
 
 
+MIN_SENTENCE_CHARS = 24
+
+
+def sentences(text, min_chars=MIN_SENTENCE_CHARS):
+    """Split `text` into sentences for speaking one at a time.
+
+    Unlike chunks(), which re-packs sentences into big pieces, this keeps them
+    small so the first one can be synthesized and played while the rest are
+    still being made. A fragment under `min_chars` ("Hi.", "Dr.") is merged
+    into the next sentence, since a tiny synthesis call costs nearly as much
+    as a normal one. Decimals like "3.8" have no whitespace after the dot, so
+    they never split. Always returns at least one element.
+    """
+    parts, buf = [], ""
+    for sentence in _SENTENCE_END.split(text.strip()):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        buf = f"{buf} {sentence}".strip()
+        if len(buf) >= min_chars:
+            parts.append(buf)
+            buf = ""
+    if buf:
+        if parts and len(buf) < min_chars:
+            parts[-1] = f"{parts[-1]} {buf}"  # a short tail joins the sentence before it
+        else:
+            parts.append(buf)
+    return parts or [text.strip()]
+
+
 def one_line(text):
     """Collapse newlines: the worker protocols below are line-oriented, so a
     reply containing a newline would otherwise be read as two requests."""

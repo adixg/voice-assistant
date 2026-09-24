@@ -52,6 +52,7 @@ from voicepipe.speaker import (
     ACCEPTED, CHECK_FAILED, ERROR_POLICIES, ERROR_REJECT, REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT,
     check_failed_line, rejection_line, too_short_line,
 )
+from voicepipe.text import sentences
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
                               install_http_metrics, record_speaker_check, set_speaker_gate_state)
@@ -182,23 +183,51 @@ class GatewaySession:
         await ws.send_text(f"reply:{text}")
         await self._speak(ws, text)
 
-    async def _speak(self, ws, text):
-        """TTS `text` over HTTP and stream the resampled PCM to the Stick."""
-        if self.args.no_voice:
-            return
+    async def _synth(self, text):
         resp = await self.client.post(f"{self.urls['tts']}/synth", json={"text": text})
         resp.raise_for_status()
-        for chunk_b64 in resp.json()["chunks_b64"]:
-            tmp_path = tempfile.mktemp(suffix=".wav")
-            try:
-                with open(tmp_path, "wb") as f:
-                    f.write(base64.b64decode(chunk_b64))
-                pcm_out = await resample_to_pcm16(tmp_path, self.normalize)
-            finally:
-                with suppress(FileNotFoundError):
-                    os.unlink(tmp_path)
-            for off in range(0, len(pcm_out), SEND_CHUNK):
-                await ws.send_bytes(pcm_out[off:off + SEND_CHUNK])
+        return resp.json()["chunks_b64"]
+
+    async def _speak(self, ws, text):
+        """TTS `text` over HTTP and stream the resampled PCM to the Stick.
+
+        The reply is spoken a sentence at a time: the first sentence's audio
+        goes out as soon as it is synthesized, and the next sentence is
+        already being synthesized while that audio is resampled and sent. One
+        sentence of lookahead, not all of them at once -- the tts backend runs
+        on the same CPU-bound node, so parallel synths would only slow each
+        other down.
+        """
+        if self.args.no_voice:
+            return
+        parts = sentences(text)
+        started = perf_counter()
+        first_audio = True
+        pending = asyncio.create_task(self._synth(parts[0]))
+        try:
+            for i in range(len(parts)):
+                chunks_b64 = await pending
+                pending = (asyncio.create_task(self._synth(parts[i + 1]))
+                           if i + 1 < len(parts) else None)
+                for chunk_b64 in chunks_b64:
+                    tmp_path = tempfile.mktemp(suffix=".wav")
+                    try:
+                        with open(tmp_path, "wb") as f:
+                            f.write(base64.b64decode(chunk_b64))
+                        pcm_out = await resample_to_pcm16(tmp_path, self.normalize)
+                    finally:
+                        with suppress(FileNotFoundError):
+                            os.unlink(tmp_path)
+                    for off in range(0, len(pcm_out), SEND_CHUNK):
+                        await ws.send_bytes(pcm_out[off:off + SEND_CHUNK])
+                        if first_audio:
+                            first_audio = False
+                            GATEWAY_STAGE_DURATION.labels("first_audio").observe(perf_counter() - started)
+        finally:
+            if pending is not None and not pending.done():
+                pending.cancel()
+                with suppress(asyncio.CancelledError):
+                    await pending
 
     async def announce(self, text):
         """Say something unprompted. Returns False when no Stick is connected."""

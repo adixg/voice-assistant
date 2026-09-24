@@ -1,6 +1,6 @@
 """voicepipe.text — the sentence-aware chunking every TTS backend shares
 (pure string logic; no model, no torch)."""
-from voicepipe.text import chunks, one_line
+from voicepipe.text import chunks, one_line, sentences
 
 
 class TestChunks:
@@ -59,6 +59,30 @@ class TestChunks:
     def test_default_limit_is_200(self):
         text = "word " * 5  # well under 200 chars
         assert chunks(text) == [text.strip()]
+
+
+class TestSentences:
+    def test_splits_on_sentence_ends(self):
+        text = "The moon is drifting away from us slowly. Tides are the reason for it."
+        assert sentences(text) == ["The moon is drifting away from us slowly.", "Tides are the reason for it."]
+
+    def test_decimals_do_not_split(self):
+        text = "It moves about 3.8 cm each year, which is really quite small."
+        assert sentences(text) == [text]
+
+    def test_short_fragment_merges_into_the_next_sentence(self):
+        assert sentences("Hi. It is really nice to see you again today.") == [
+            "Hi. It is really nice to see you again today."]
+
+    def test_short_tail_joins_the_sentence_before(self):
+        assert sentences("It is really nice to see you again today. Yes!") == [
+            "It is really nice to see you again today. Yes!"]
+
+    def test_only_a_short_fragment_is_returned_whole(self):
+        assert sentences("Okay.") == ["Okay."]
+
+    def test_empty_text_still_returns_one_element(self):
+        assert sentences("  ") == [""]
 
 
 class TestOneLine:

@@ -15,7 +15,7 @@ class TestPersonas:
     def test_every_persona_keeps_replies_short(self):
         """The Stick's caption is three lines; a persona that rambles overflows
         it and makes every spoken reply long."""
-        assert all("one or two" in p or "brief" in p for p in PERSONAS.values())
+        assert all("short sentence" in p and "words" in p for p in PERSONAS.values())
 
     def test_every_persona_bans_stage_directions_and_emojis(self):
         """Both get read aloud by the TTS, which sounds absurd."""
