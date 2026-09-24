@@ -240,3 +240,41 @@ def test_mcp_tool_error_is_normalized():
 
     with pytest.raises(OpenAICompatibleUnavailable, match="chat completion failed"):
         OpenAICompatibleLLM(client=client, mcp_client=FakeMCP()).ask([])
+
+
+def test_tool_loop_streams_a_status_before_each_tool_call():
+    """The Stick shows it ("status:" frame) instead of a frozen thinking screen."""
+    client = Mock()
+    client.post.side_effect = [
+        _response({"choices": [{"message": {"content": None, "tool_calls": [{
+            "id": "call-1", "function": {"name": "get_weather",
+                                         "arguments": '{"location": "Atlanta, Georgia"}'}
+        }]}}]}),
+        _response({"choices": [{"message": {"content": "No umbrella needed."}}]}),
+    ]
+    calls = []
+
+    class FakeMCP:
+        def openai_tools(self):
+            return []
+
+        def call(self, name, arguments):
+            calls.append(name)
+            return "{}"
+
+    llm = OpenAICompatibleLLM(url="http://llama:8080/v1", model="qwen", client=client,
+                              mcp_client=FakeMCP())
+    events = []
+    for kind, text in stream_reply(llm, [{"role": "user", "content": "umbrella?"}]):
+        events.append((kind, text, list(calls)))
+
+    assert events[0] == ("status", "checking the weather in Atlanta", [])  # before the tool ran
+    assert events[-1][:2] == ("final", "No umbrella needed.")
+    assert len(events) == 2
+
+
+def test_tool_status_names_the_search_and_falls_back_for_unknown_tools():
+    from voicepipe.backends.openai_compatible import tool_status
+    assert tool_status("search_web", {"query": "falcons score"}) == "searching the web: falcons score"
+    assert tool_status("get_time", {}) == "checking the time"
+    assert tool_status("mystery_tool", {}) == "using mystery_tool"

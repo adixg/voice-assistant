@@ -7,12 +7,37 @@ vLLM, LM Studio, LiteLLM, or a hosted OpenAI-compatible endpoint.
 import json
 import os
 
-from ..registry import DELTA, FINAL, LLM
+from ..registry import DELTA, FINAL, LLM, STATUS
 from ..text import strip_think
 
 DEFAULT_URL = "http://localhost:8080/v1"
 DEFAULT_MODEL = "local-model"
 DEFAULT_TIMEOUT = 120
+
+
+# What the Stick shows while a tool runs (a STATUS event, forwarded by the
+# gateway as "status:"). Without one, a tool turn looks like a frozen
+# "thinking" screen for the several seconds the extra model round and the tool
+# itself take. Short: the Stick's caption area is three lines.
+TOOL_STATUS = {
+    "get_weather": "checking the weather",
+    "search_web": "searching the web",
+    "get_time": "checking the time",
+    "get_service_health": "checking the services",
+    "get_gpu_status": "checking the GPUs",
+    "get_agent_status": "checking the agent",
+    "get_model_status": "checking the model",
+}
+
+
+def tool_status(name, arguments):
+    """The progress line for one tool call, e.g. "checking the weather in Atlanta"."""
+    text = TOOL_STATUS.get(name, f"using {name}")
+    if name == "get_weather" and isinstance(arguments.get("location"), str):
+        text += f" in {arguments['location'].split(',')[0].strip()}"
+    elif name == "search_web" and isinstance(arguments.get("query"), str):
+        text += f": {arguments['query'][:60]}"
+    return text
 
 
 class OpenAICompatibleUnavailable(RuntimeError):
@@ -99,8 +124,15 @@ class OpenAICompatibleLLM:
         return request
 
     def ask(self, messages, think=None):
-        # Reasoning tags, if a model still emits them inline, are removed at
-        # the common text boundary just as they are for Ollama.
+        for kind, text in self._tool_loop(messages, think):
+            if kind == FINAL:
+                return text
+        return ""
+
+    def _tool_loop(self, messages, think):
+        """Run the MCP tool loop, yielding a STATUS before each tool call and one
+        FINAL with the answer. Reasoning tags, if a model still emits them
+        inline, are removed at the common text boundary as for Ollama."""
         try:
             working = list(messages)
             tools = self.mcp.openai_tools() if self.mcp else None
@@ -120,6 +152,7 @@ class OpenAICompatibleLLM:
                     function = call.get("function", {})
                     name = function.get("name")
                     arguments = json.loads(function.get("arguments") or "{}")
+                    yield STATUS, tool_status(name, arguments)
                     result = self.mcp.call(name, arguments)
                     working.append({"role": "tool", "tool_call_id": call.get("id", name), "content": result})
             else:
@@ -127,15 +160,16 @@ class OpenAICompatibleLLM:
         except Exception as e:  # noqa: BLE001 - normalize endpoint failures
             raise OpenAICompatibleUnavailable(
                 f"OpenAI-compatible chat completion failed at {self.url}: {e}") from e
-        return strip_think(content or "")
+        yield FINAL, strip_think(content or "")
 
     def ask_stream(self, messages, think=None):
         # Tool calls require a complete response so the MCP loop can execute
-        # them and replay the result.  Keep the streaming API functional by
-        # returning the completed answer as one final event for MCP-enabled
-        # sessions; ordinary no-tool sessions retain token streaming below.
+        # them and replay the result, so MCP-enabled sessions don't stream the
+        # reply's text; they do stream a STATUS per tool call ("checking the
+        # weather in Atlanta"), then the answer as one FINAL. Ordinary no-tool
+        # sessions keep token streaming below.
         if self.mcp is not None:
-            yield FINAL, self.ask(messages, think)
+            yield from self._tool_loop(messages, think)
             return
         request = self._request(messages, think, stream=True)
         try:
