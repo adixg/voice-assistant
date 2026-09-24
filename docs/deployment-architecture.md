@@ -196,9 +196,12 @@ What this says about the machine: real peaks of the voice pipeline (`tts` up to
 ~2.8 GiB, LLM ~1.06 GiB anon, `stt` ~0.4 GiB) plus k3s (~0.7 GiB), the small
 pods (~1 GiB) and the desktop do not fit 7.6 GiB together in the worst case, so
 it leans on swap. The standby `llama-cpp-gtx1650` costs ~0.7-1 GiB of RAM (and
-3.4 GiB of VRAM) while the agent points at the laptop; scaling it to 0 while the
-4060 is up would recover that at the price of a slower failover. The second RAM
-stick remains the real fix.
+3.4 GiB of VRAM) while the agent points at the laptop; since 2026-09-24 the
+gpu_scheduler scales it to 0 while the 4060 is up (61s cold start on failover).
+Swap: zram (3.8 GiB, zstd, measured 3.3:1, priority 100) plus a 4 GiB disk
+`/swapfile` at priority 10 as a last resort before the OOM killer (added
+2026-09-24, in `/etc/fstab`). Growing zram to `ram` is pending (`TODO.md`). The
+second RAM stick remains the real fix.
 
 - **Every workload here has a memory limit and a priority class**
   (`tests/test_deployment_manifests.py` enforces it). `voice-critical`
