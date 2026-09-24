@@ -34,6 +34,11 @@ spec:
             # 0.6 rejected the owner (0.536 on 2026-09-24; through the Stick they
             # score 0.54-0.66). Strangers score 0.07-0.28, so 0.5 keeps a wide gap.
             - "--speaker-threshold=0.5"
+            # Keep the newest 50 utterances (any verdict) on the node so real Stick
+            # audio can be added to the voiceprint: tools/voiceprint_add.py. It is
+            # biometric data, kept local, bounded and pruned; delete this line and
+            # the volume below to stop keeping it.
+            - "--keep-utterances=/utterances"
           env: [{name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}]
           ports:
             - {containerPort: 8000, name: metrics}
@@ -47,7 +52,12 @@ spec:
             - name: personal-data
               mountPath: /app/memory
               readOnly: true
+            - {name: utterances, mountPath: /utterances}
       volumes:
+        - name: utterances
+          hostPath:
+            path: /var/lib/aicompanion/utterances
+            type: DirectoryOrCreate
         - name: personal-data
           secret:
             secretName: aicompanion-personal-data

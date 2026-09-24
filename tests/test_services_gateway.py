@@ -255,6 +255,29 @@ class TestSpeakerGate:
             assert ws.sent[-1] == "end"
             assert session.rejection_streak == 1
 
+    async def test_keeps_the_utterance_named_with_verdict_and_score_when_asked(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"chunks_b64": []})
+
+        async with make_client(handler) as client:
+            gate = self.make_gate(gateway_app.REJECTED, score=0.536)
+            session = make_session(client=client, gate=gate,
+                                   args=make_args(keep_utterances=str(tmp_path), keep_max=5))
+
+            await session.handle_utterance(FakeWebSocket(), LOUD_PCM)
+
+            kept = [p.name for p in tmp_path.iterdir()]
+            assert len(kept) == 1 and kept[0].endswith("_rejected_0.536.wav")
+
+    async def test_keeps_nothing_by_default(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"chunks_b64": []})
+
+        async with make_client(handler) as client:
+            session = make_session(client=client, gate=self.make_gate(gateway_app.REJECTED))
+            await session.handle_utterance(FakeWebSocket(), LOUD_PCM)
+        assert list(tmp_path.iterdir()) == []
+
     async def test_too_short_asks_to_repeat_and_skips_stt(self):
         def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path == "/synth":

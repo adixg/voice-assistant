@@ -216,3 +216,26 @@ roughly 6K tokens total, so `load_profile()` warns above 4000 chars.
 This is the static half of memory. The other halves — things she learns and
 writes back, and searchable notes — need the agent loop and do not exist yet
 Keep them out of the profile: it is the always-resident slice, not a store.
+
+
+## Adding samples to the voiceprint without re-enrolling (2026-09-24)
+
+The 10 enrolled samples (2026-09-05) agree with each other (0.77-0.90 leave-one-out)
+but real Stick utterances score only 0.54-0.66 against them, and scoring is
+best-of, so what helps is samples that sound like how the owner actually talks to
+it now. `bridge_server.py --enroll` doesn't exist in the cluster gateway, so:
+
+1. The gateway runs with `--keep-utterances /utterances` (a node hostPath,
+   `/var/lib/aicompanion/utterances`, newest 50, any verdict), naming each clip
+   `<time>_<verdict>_<score>.wav`.
+2. `tools/voiceprint_add.py list` scores every kept clip against the current
+   voiceprint; `add <clip>...` appends the chosen ones (backing up
+   `voiceprint.json`, keeping the audio in `memory/voiceprint_samples/`);
+   `apply --yes` updates the `aicompanion-personal-data` Secret and restarts the
+   gateway.
+3. `add` refuses clips under 2s or scoring under 0.4 against the current
+   voiceprint unless `--force`: best-of scoring means one sample that isn't the
+   owner lets that voice in.
+
+The clips are biometric data: they stay on the node, are pruned to 50, and are
+not in git (`memory/voiceprint_samples/` is gitignored).

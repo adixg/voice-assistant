@@ -53,6 +53,7 @@ from voicepipe.speaker import (
     check_failed_line, rejection_line, too_short_line,
 )
 from voicepipe.text import sentences, speakable
+from voicepipe.utterances import DEFAULT_MAX_KEEP, keep as keep_utterance
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
                               install_http_metrics, record_speaker_check, set_speaker_gate_state)
@@ -111,6 +112,12 @@ def build_parser():
     ap.add_argument("--speaker-on-error", default=ERROR_REJECT, choices=ERROR_POLICIES,
                     help="when the speaker check itself fails (model missing, embedding crashed): "
                          "'reject' (default) refuses the utterance, 'allow' answers anyone")
+    ap.add_argument("--keep-utterances", default=None, metavar="DIR",
+                    help="keep the newest utterances (any verdict) in DIR, named with the gate's "
+                         "verdict and score, so real Stick audio can be added to the voiceprint "
+                         "with tools/voiceprint_add.py; off by default")
+    ap.add_argument("--keep-max", type=int, default=DEFAULT_MAX_KEEP,
+                    help=f"how many utterances --keep-utterances retains (default: {DEFAULT_MAX_KEEP})")
     ap.add_argument("--no-speaker-check", action="store_true",
                     help="answer anyone, even with a voiceprint enrolled")
     SV.add_arguments(ap)
@@ -306,6 +313,10 @@ class GatewaySession:
             print(f"  speaker verdict={label} score={'-' if score is None else f'{score:.3f}'} "
                   f"threshold={self.gate.threshold} audio={seconds:.2f}s{streak}", flush=True)
             record_speaker_check(label, score, self.gate)
+            keep_dir = getattr(self.args, "keep_utterances", None)
+            if keep_dir:
+                await asyncio.to_thread(keep_utterance, self.wav_in, keep_dir, label, score,
+                                        getattr(self.args, "keep_max", DEFAULT_MAX_KEEP))
             if verdict == TOO_SHORT:
                 await self._say(ws, too_short_line())
                 return
