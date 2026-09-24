@@ -103,6 +103,13 @@ class TestVoiceprintAdd:
         assert len(Voiceprint.load(path)) == 1
         assert "under 2.0s" in capsys.readouterr().out
 
+    def test_a_clip_already_in_the_voiceprint_is_not_added_twice(self, setup, capsys):
+        path, clips, Voiceprint = setup
+        self.run_add(clips, "mine.wav", "mine.wav")
+        self.run_add(clips, "mine.wav")
+        assert len(Voiceprint.load(path)) == 2
+        assert "already in the voiceprint" in capsys.readouterr().out
+
     def test_force_overrides_the_refusal(self, setup):
         path, clips, Voiceprint = setup
         self.run_add(clips, "stranger.wav", force=True)

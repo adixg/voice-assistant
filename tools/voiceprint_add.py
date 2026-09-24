@@ -85,6 +85,9 @@ def cmd_add(args):
         secs = wav_seconds(path) or 0
         embedding = backend.embed(path)
         score = voiceprint.score(embedding)
+        if score is not None and score > 0.9999:
+            print(f"  skip {name}: already in the voiceprint")
+            continue
         problems = []
         if secs < MIN_SECONDS:
             problems.append(f"only {secs:.1f}s (under {MIN_SECONDS}s)")

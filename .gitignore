@@ -22,6 +22,7 @@ __pycache__/
 # enrollment audio + voiceprint: personal biometric data, stays local
 /memory/voiceprint_samples/
 /memory/voiceprint.json
+/memory/voiceprint.json.*.bak
 
 # stray nohup log from launching the bridge by hand
 /nohup.out
