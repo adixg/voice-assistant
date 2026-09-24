@@ -14,6 +14,9 @@ Panels (each has --NAME / --no-NAME, all on by default):
     gpu      per-GPU utilisation, VRAM, temperature and power (DCGM)
     pods     per-pod readiness, restarts, OOM kills, and memory vs its limit
     latency  gateway turn and per-stage latency, and HTTP latency by route
+    speaker  the speaker-verification gate: is the checker working, how many
+             utterances were accepted / rejected / too short / let through
+             unchecked, how close to the threshold acceptances land, last score
     traces   the last few real Stick turns from Tempo, split into stt / agent
              (LLM) / tts. Off by default, because Tempo is normally paused:
              run `tools/lean-mode.sh traces` first, then `--traces`.
@@ -41,7 +44,7 @@ from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-PANELS = ("memory", "gpu", "pods", "latency", "traces")
+PANELS = ("memory", "gpu", "pods", "latency", "speaker", "traces")
 OPT_IN = ("traces",)  # off unless asked for; needs Tempo, which lean-mode pauses
 # process_resident_memory_bytes is only scraped from these Python services.
 RSS_SERVICES = ("gateway", "agent", "stt", "tts")
@@ -84,10 +87,11 @@ def prom(base, expr, get_json=fetch_json):
     return out
 
 
-def prom_range(base, expr, seconds, get_json=fetch_json, now=time.time):
+def prom_range(base, expr, seconds, get_json=fetch_json, now=time.time, step=None):
     """Range query -> list of (labels, [floats]) oldest first, NaN samples dropped."""
     end = now()
-    query = urlencode({"query": expr, "start": end - seconds, "end": end, "step": max(15, seconds // 60)})
+    query = urlencode({"query": expr, "start": end - seconds, "end": end,
+                       "step": step or max(15, seconds // 60)})
     payload = get_json(f"{base.rstrip('/')}/api/v1/query_range?{query}")
     if payload.get("status") != "success":
         raise PromError(str(payload.get("error", "query failed")))
@@ -347,6 +351,93 @@ def panel_latency(style, base, window, get_json=fetch_json):
     return lines
 
 
+# ----------------------------------------------------------------- speaker
+# Copy of services/metrics.py's SPEAKER_SCORE_BUCKETS (this tool is standard
+# library only and can't import it); tests keep the two in step.
+SPEAKER_BUCKETS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0)
+THIN_MARGIN = 0.1  # an acceptance this close to the threshold is one bad day from a lock-out
+VERDICT_ORDER = (("accepted", "g", "accepted"), ("rejected", "r", "rejected"),
+                 ("too_short", "y", "too short"), ("check_failed", "r", "check failed"),
+                 ("unverified", "y", "unchecked"))
+
+
+def thin_bound(threshold):
+    """Smallest histogram bucket at or above threshold + THIN_MARGIN, else None."""
+    return next((b for b in SPEAKER_BUCKETS if b >= threshold + THIN_MARGIN - 1e-9), None)
+
+
+def _ago(seconds):
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{seconds / size:.0f}{unit} ago"
+    return f"{seconds:.0f}s ago"
+
+
+def panel_speaker(style, base, window, get_json=fetch_json, graph=True, now=time.time):
+    lines = heading(style, "speaker gate", f"(last {window})")
+
+    def one(expr):
+        rows = prom(base, expr, get_json)
+        return rows[0][1] if rows else None
+    enabled = one("max(aicompanion_gateway_speaker_gate_enabled)")
+    if enabled is None:
+        return lines + [style("d", "  no speaker metrics yet: the gateway exports them once it is running the "
+                                   "build that added them, and Prometheus has scraped it")]
+    ready, threshold = one("max(aicompanion_gateway_speaker_gate_ready)"), one("max(aicompanion_gateway_speaker_threshold)")
+    if not enabled:
+        lines.append("  gate    " + style("y", "OFF") + style("d", "  no voiceprint or --no-speaker-check, so everyone is answered"))
+    elif not ready:
+        lines.append("  gate    " + style("r", "NOT READY") + style("d", "  the checker cannot run, so every utterance is being refused"))
+    else:
+        lines.append("  gate    " + style("g", "ready") + style("d", f"  threshold {threshold:.2f}"))
+
+    counts = {m["verdict"]: v for m, v in prom(
+        base, f"sum by (verdict) (increase(aicompanion_gateway_speaker_checks_total[{window}]))", get_json)}
+    total = sum(counts.values())
+    if total < 0.5:
+        lines.append(style("d", f"  checks  none in the last {window}"))
+    else:
+        parts = "  ".join(f"{style(code, f'{counts.get(v, 0):.0f}')} {label}"
+                          for v, code, label in VERDICT_ORDER if counts.get(v, 0) >= 0.5 or v in ("accepted", "rejected"))
+        lines.append(f"  checks  {total:.0f}   {parts}")
+
+        avg = {m["verdict"]: v for m, v in prom(
+            base, "sum by (verdict) (increase(aicompanion_gateway_speaker_score_sum[%s])) / "
+                  "sum by (verdict) (increase(aicompanion_gateway_speaker_score_count[%s]))" % (window, window), get_json)}
+        bits = [f"{label} avg {avg[v]:.2f}" for v, _, label in VERDICT_ORDER if v in avg]
+        accepted_scored = one('sum(increase(aicompanion_gateway_speaker_score_count{verdict="accepted"}[%s]))' % window) or 0
+        bound = thin_bound(threshold) if threshold is not None else None
+        thin = None
+        if bound is not None and accepted_scored >= 0.5:
+            thin = one('sum(increase(aicompanion_gateway_speaker_score_bucket{verdict="accepted",le="%s"}[%s]))'
+                       % (bound, window)) or 0
+            bits.append(f"{thin:.0f} of {accepted_scored:.0f} accepted scored under {bound:g}")
+        if bits:
+            lines.append("  scores  " + "   ".join(bits))
+        if thin is not None and accepted_scored >= 2 and thin / accepted_scored >= 0.5:
+            lines.append(style("y", f"  ! most acceptances are within {THIN_MARGIN:g} of the threshold: a slightly "
+                                    "worse take would lock you out. Re-enrolling through the Stick or a lower "
+                                    "threshold widens the margin."))
+        if counts.get("unverified", 0) >= 0.5:
+            lines.append(style("y", f"  ! {counts['unverified']:.0f} utterance(s) were answered WITHOUT being checked "
+                                    "(gate off, or a short clip let through by --short-utterances allow)"))
+        if graph:
+            seconds = window_seconds(window)
+            step = max(60, seconds // 24)
+            series = graph_data(lambda: prom_range(
+                base, f"sum(increase(aicompanion_gateway_speaker_checks_total[{step}s]))", seconds, get_json, step=step))
+            values = series[0][1] if series else []
+            if len(values) >= 2:
+                lines.append("  trend   " + spark(style, values, hi=None) + style("d", f" {peak(values, ' checks')} per {step // 60}m"))
+
+    score, stamp = one("max(aicompanion_gateway_speaker_last_score)"), one("max(aicompanion_gateway_speaker_last_check_timestamp_seconds)")
+    if score is not None and stamp:
+        margin = f"{score - threshold:+.3f} vs threshold" if threshold is not None else ""
+        lines.append(f"  last    {style('g' if threshold is None or score >= threshold else 'r', f'{score:.3f}')}  "
+                     f"{style('d', margin)}  {style('d', _ago(now() - stamp))}")
+    return lines
+
+
 # ------------------------------------------------------------------ traces
 # Server-side span names, one per pipeline stage. The gateway's own client span
 # for a streaming call closes when the response *starts* (5ms for the agent),
@@ -439,6 +530,7 @@ def build_frame(args, style, get_json=fetch_json, cache=None, trail=None, **over
         "gpu": lambda: panel_gpu(style, base, get_json, history=history),
         "pods": lambda: panel_pods(style, base, get_json, history=history),
         "latency": lambda: panel_latency(style, base, args.window, get_json),
+        "speaker": lambda: panel_speaker(style, base, args.speaker_window, get_json, graph=args.graphs),
         "traces": lambda: panel_traces(style, args.tempo, args.window, args.turns, get_json),
     }
     frame = [style("b", "aicompanion") + style("d", f"  {time.strftime('%H:%M:%S')}  "
@@ -472,6 +564,8 @@ def parse_args(argv=None):
     ap.add_argument("--only", metavar="LIST", help="comma list of panels to show, "
                     f"turning all others off (from: {', '.join(PANELS)})")
     ap.add_argument("--prometheus", default=os.environ.get("PROMETHEUS_URL", "http://localhost:9090"))
+    ap.add_argument("--speaker-window", default="24h",
+                    help="how far back the speaker-gate panel counts (default: 24h, since checks are sparse)")
     ap.add_argument("--tempo", default=os.environ.get("TEMPO_URL", "http://localhost:3200"),
                     help="Tempo URL for the traces panel (env TEMPO_URL)")
     ap.add_argument("--turns", type=int, default=5, help="how many recent turns the traces panel shows")
@@ -490,9 +584,9 @@ def parse_args(argv=None):
             ap.error(f"--only: unknown panel(s) {', '.join(sorted(unknown))}; choose from {', '.join(PANELS)}")
         for name in PANELS:
             setattr(args, name, name in wanted)
-    for flag in ("window", "history"):
+    for flag in ("window", "history", "speaker_window"):
         if not WINDOW_RE.match(getattr(args, flag)):
-            ap.error(f"--{flag} must look like 30s, 15m, 1h or 1d")
+            ap.error(f"--{flag.replace('_', '-')} must look like 30s, 15m, 1h or 1d")
     if args.interval <= 0:
         ap.error("--interval must be positive")
     if not any(getattr(args, n) for n in PANELS):

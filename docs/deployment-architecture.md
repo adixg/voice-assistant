@@ -191,7 +191,10 @@ the most valuable remaining RAM lever.
 - **`tools/obs_tui.py`** is a terminal dashboard that replaces opening Grafana
   in a browser day to day: host RAM/swap/memory-pressure (from `/proc`), GPU
   util/VRAM/temp/power, per-pod readiness/restarts/OOM kills/memory vs limit,
-  and gateway turn + per-stage + per-route latency, each toggled with
+  the speaker-verification gate (state, accepted / rejected / too-short /
+  unchecked counts, average scores, how many acceptances sit within 0.1 of the
+  threshold, last score; `--speaker-window`, default 24h), and gateway turn +
+  per-stage + per-route latency, each toggled with
   `--NAME`/`--no-NAME` or `--only a,b`, with sparkline trend graphs beside the
   bars (`--history 15m`, `--no-graphs`): GPU util/VRAM and service memory from
   Prometheus history, host RAM/swap from live samples. Latency has none, since

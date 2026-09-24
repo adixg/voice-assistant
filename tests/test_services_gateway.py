@@ -234,6 +234,7 @@ class TestSpeakerGate:
         gate = Mock()
         gate.check = Mock(return_value=(verdict, score))
         gate.threshold = 0.6
+        gate.status = Mock(return_value={"enabled": True, "ready": True, "on_error": "reject", "error": None})
         return gate
 
     async def test_rejected_speaks_the_rejection_line_and_skips_stt(self):
@@ -411,3 +412,84 @@ class TestHealthReportsWhetherTheGateActuallyWorks:
         monkeypatch.setattr(gateway_app, "_urls", {})
         body = TestClient(gateway_app.app).get("/health").json()
         assert body["gate"] is False and body["speaker_gate"] is None
+
+
+# ------------------------------------------------- speaker verdicts are recorded
+from prometheus_client import REGISTRY  # noqa: E402
+
+
+def sample(name, **labels):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+class TestSpeakerVerdictsAreRecorded:
+    """Every verdict is logged and counted, so acceptances are on the record and
+    the "let through unchecked" hole shows up as its own series."""
+
+    def gate(self, verdict, score, ready=True):
+        gate = Mock()
+        gate.check = Mock(return_value=(verdict, score))
+        gate.threshold = 0.6
+        gate.status = Mock(return_value={"enabled": True, "ready": ready, "on_error": "reject",
+                                         "error": None if ready else "no model"})
+        return gate
+
+    async def run_turn(self, gate):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/transcribe":
+                return httpx.Response(200, json={"text": "hi"})
+            if request.url.path == "/ask_stream":
+                return httpx.Response(200, content=json.dumps({"kind": "final", "text": "ok"}) + "\n")
+            return httpx.Response(200, json={"chunks_b64": []})
+        async with make_client(handler) as client:
+            await make_session(client=client, gate=gate).handle_utterance(FakeWebSocket(), LOUD_PCM)
+
+    async def test_a_scored_acceptance_is_counted_scored_and_logged(self, capsys):
+        before = sample("aicompanion_gateway_speaker_checks_total", verdict="accepted")
+        n_before = sample("aicompanion_gateway_speaker_score_count", verdict="accepted")
+        await self.run_turn(self.gate("accepted", 0.61))
+
+        assert sample("aicompanion_gateway_speaker_checks_total", verdict="accepted") == before + 1
+        assert sample("aicompanion_gateway_speaker_score_count", verdict="accepted") == n_before + 1
+        assert sample("aicompanion_gateway_speaker_last_score") == 0.61
+        assert "speaker verdict=accepted score=0.610 threshold=0.6" in capsys.readouterr().out
+
+    async def test_an_acceptance_without_a_score_is_counted_as_unverified_not_accepted(self, capsys):
+        """Gate off, or a short clip let through by --short-utterances allow."""
+        accepted = sample("aicompanion_gateway_speaker_checks_total", verdict="accepted")
+        unverified = sample("aicompanion_gateway_speaker_checks_total", verdict="unverified")
+        await self.run_turn(self.gate("accepted", None))
+
+        assert sample("aicompanion_gateway_speaker_checks_total", verdict="unverified") == unverified + 1
+        assert sample("aicompanion_gateway_speaker_checks_total", verdict="accepted") == accepted
+        assert "verdict=unverified score=-" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("verdict", ["rejected", "too_short", "check_failed"])
+    async def test_every_other_verdict_is_counted_and_logged(self, verdict, capsys):
+        before = sample("aicompanion_gateway_speaker_checks_total", verdict=verdict)
+        await self.run_turn(self.gate(verdict, 0.08 if verdict == "rejected" else None))
+
+        assert sample("aicompanion_gateway_speaker_checks_total", verdict=verdict) == before + 1
+        assert f"verdict={verdict}" in capsys.readouterr().out
+
+    async def test_the_gate_state_gauges_follow_the_gate(self):
+        await self.run_turn(self.gate("check_failed", None, ready=False))
+        assert sample("aicompanion_gateway_speaker_gate_enabled") == 1
+        assert sample("aicompanion_gateway_speaker_gate_ready") == 0      # enabled but cannot run
+        assert sample("aicompanion_gateway_speaker_threshold") == 0.6
+
+        await self.run_turn(self.gate("accepted", 0.9, ready=True))
+        assert sample("aicompanion_gateway_speaker_gate_ready") == 1
+
+    async def test_no_verdict_is_recorded_when_there_is_no_gate(self):
+        total = lambda: sum(sample("aicompanion_gateway_speaker_checks_total", verdict=v)  # noqa: E731
+                            for v in ("accepted", "rejected", "too_short", "check_failed", "unverified"))
+        before = total()
+        await self.run_turn(None)
+        assert total() == before
+
+    def test_every_verdict_series_exists_at_zero_from_the_start(self):
+        """Otherwise increase() over a window misses the very first event."""
+        for verdict in ("accepted", "rejected", "too_short", "check_failed", "unverified"):
+            assert REGISTRY.get_sample_value("aicompanion_gateway_speaker_checks_total",
+                                             {"verdict": verdict}) is not None

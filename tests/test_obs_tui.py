@@ -55,7 +55,7 @@ def test_only_turns_everything_else_off():
     ["--only", "bogus"],
     ["--window", "5x"],
     ["--interval", "0"],
-    ["--no-memory", "--no-gpu", "--no-pods", "--no-latency"],
+    ["--no-memory", "--no-gpu", "--no-pods", "--no-latency", "--no-speaker"],
 ])
 def test_bad_arguments_are_rejected(argv):
     with pytest.raises(SystemExit):
@@ -77,7 +77,7 @@ def test_disabled_panels_do_not_appear_and_are_not_queried():
 def test_prometheus_down_does_not_blank_the_memory_panel():
     frame = "\n".join(obs_tui.build_frame(parse(), PLAIN, down, **MEM))
     assert "RAM" in frame and "swap" in frame                      # host panel survived
-    assert frame.count("prometheus unreachable") == 3              # gpu, pods, latency
+    assert frame.count("prometheus unreachable") == 4              # gpu, pods, latency, speaker
     assert "port-forwards.sh" in frame                             # says how to fix it
 
 
@@ -481,3 +481,103 @@ def test_memory_trail_is_bounded_by_history_over_interval():
 def test_history_must_be_a_valid_window():
     with pytest.raises(SystemExit):
         parse("--history", "soon")
+
+
+# ----------------------------------------------------------------- speaker
+def speaker_routes(**over):
+    routes = {
+        "gate_enabled": [({}, 1)], "gate_ready": [({}, 1)], "speaker_threshold": [({}, 0.6)],
+        "speaker_checks_total[": [({"verdict": "accepted"}, 9), ({"verdict": "rejected"}, 2), ({"verdict": "too_short"}, 1)],
+        "speaker_score_sum": [({"verdict": "accepted"}, 0.66), ({"verdict": "rejected"}, 0.09)],
+        'speaker_score_count{verdict="accepted"}': [({}, 9)],
+        'le="0.7"': [({}, 7)],
+        "last_score": [({}, 0.61)], "last_check_timestamp": [({}, NOW - 180)],
+    }
+    routes.update(over)
+    return routes
+
+
+def speaker(routes=None, **kw):
+    return "\n".join(obs_tui.panel_speaker(PLAIN, "http://p", "24h", fake_prom(speaker_routes() if routes is None else routes),
+                                           graph=False, now=lambda: NOW, **kw))
+
+
+def test_speaker_panel_shows_gate_state_counts_scores_and_the_last_check():
+    text = speaker()
+    assert "ready" in text and "threshold 0.60" in text
+    assert "12" in text and "9 accepted" in text and "2 rejected" in text and "1 too short" in text
+    assert "accepted avg 0.66" in text and "rejected avg 0.09" in text
+    assert "0.610" in text and "+0.010 vs threshold" in text and "3m ago" in text
+
+
+def test_speaker_panel_warns_when_acceptances_hug_the_threshold():
+    text = speaker()          # 7 of 9 accepted scored under 0.7
+    assert "7 of 9 accepted scored under 0.7" in text
+    assert "within 0.1 of the threshold" in text and "lock you out" in text
+
+
+def test_speaker_panel_stays_quiet_when_acceptances_have_a_comfortable_margin():
+    text = speaker(speaker_routes(**{'le="0.7"': [({}, 1)]}))
+    assert "1 of 9" in text and "within 0.1" not in text
+
+
+def test_a_gate_that_cannot_run_is_called_out_loudly():
+    text = speaker(speaker_routes(gate_ready=[({}, 0)]))
+    assert "NOT READY" in text and "refused" in text
+
+
+def test_a_disabled_gate_says_everyone_is_answered():
+    text = speaker(speaker_routes(gate_enabled=[({}, 0)]))
+    assert "OFF" in text and "everyone is answered" in text
+
+
+def test_utterances_let_through_unchecked_are_flagged():
+    routes = speaker_routes()
+    routes["speaker_checks_total["] = [({"verdict": "accepted"}, 5), ({"verdict": "unverified"}, 3)]
+    text = speaker(routes)
+    assert "3 unchecked" in text and "WITHOUT being checked" in text
+
+
+def test_before_the_gateway_exports_speaker_metrics_the_panel_explains_why():
+    text = speaker({})
+    assert "no speaker metrics yet" in text
+
+
+def test_a_quiet_window_says_no_checks_rather_than_showing_zeros():
+    text = speaker(speaker_routes(**{"speaker_checks_total[": []}))
+    assert "none in the last 24h" in text and "ready" in text
+
+
+def test_speaker_trend_is_drawn_from_a_range_query_over_the_window():
+    ranges = {"speaker_checks_total": [({}, [0, 0, 2, 5, 1, 0, 3])]}
+    text = "\n".join(obs_tui.panel_speaker(PLAIN, "http://p", "24h", with_history(speaker_routes(), ranges),
+                                           graph=True, now=lambda: NOW))
+    trend = next(l for l in text.splitlines() if "trend" in l)
+    assert "peak 5 checks" in trend and "per 60m" in trend
+
+
+def test_speaker_window_and_panel_flags():
+    args = parse("--only", "speaker", "--speaker-window", "6h")
+    assert args.speaker is True and args.gpu is False and args.speaker_window == "6h"
+    with pytest.raises(SystemExit):
+        parse("--speaker-window", "yesterday")
+
+
+def test_thin_margin_bucket_is_the_first_bound_at_or_above_threshold_plus_a_tenth():
+    assert obs_tui.thin_bound(0.6) == 0.7 and obs_tui.thin_bound(0.5) == 0.6
+    assert obs_tui.thin_bound(0.55) == 0.65 and obs_tui.thin_bound(0.95) is None
+
+
+def test_the_dashboards_bucket_copy_matches_the_gateways():
+    """tools/obs_tui.py can't import services.metrics (standard library only), so
+    the bounds are duplicated; if they drift, the 'thin margin' count would query
+    a bucket that doesn't exist."""
+    from services.metrics import SPEAKER_SCORE_BUCKETS
+    assert tuple(obs_tui.SPEAKER_BUCKETS) == tuple(SPEAKER_SCORE_BUCKETS)
+    for threshold in (0.5, 0.55, 0.6, 0.65, 0.7):
+        bound = obs_tui.thin_bound(threshold)
+        assert bound is None or bound in SPEAKER_SCORE_BUCKETS
+
+
+def test_ago_formats_recent_and_old_checks():
+    assert [obs_tui._ago(s) for s in (5, 180, 7200, 200000)] == ["5s ago", "3m ago", "2h ago", "2d ago"]

@@ -49,12 +49,12 @@ from voicepipe import cli, encouragement
 from voicepipe.personas import DEFAULT_PERSONA, PERSONAS
 from voicepipe.registry import FINAL, STATUS, SV
 from voicepipe.speaker import (
-    CHECK_FAILED, ERROR_POLICIES, ERROR_REJECT, REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT,
+    ACCEPTED, CHECK_FAILED, ERROR_POLICIES, ERROR_REJECT, REJECTED, SHORT_ASK, SHORT_POLICIES, TOO_SHORT,
     check_failed_line, rejection_line, too_short_line,
 )
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
-                              install_http_metrics)
+                              install_http_metrics, record_speaker_check, set_speaker_gate_state)
 from services.telemetry import install_tracing
 
 app = FastAPI(title="aicompanion-gateway")
@@ -264,10 +264,16 @@ class GatewaySession:
         # the same reason -- a stranger costs one embedding, not a whole turn.
         if self.gate is not None:
             verdict, score = await asyncio.to_thread(self.gate.check, self.wav_in)
-            if score is not None:
-                streak = f", rejection #{self.rejection_streak + 1}" if verdict == REJECTED else ""
-                print(f"  speaker score: {score:.3f} "
-                      f"({verdict}, threshold {self.gate.threshold}{streak})")
+            # One line per verdict, whatever it was, so acceptances are on the
+            # record too (a scored acceptance used to be the only one that was).
+            # An accepted verdict with no score was let through unchecked (gate
+            # off, or a short clip allowed by --short-utterances allow).
+            label = "unverified" if verdict == ACCEPTED and score is None else verdict
+            seconds = len(pcm) / (SAMPLE_RATE * 2)
+            streak = f" rejection_streak={self.rejection_streak + 1}" if verdict == REJECTED else ""
+            print(f"  speaker verdict={label} score={'-' if score is None else f'{score:.3f}'} "
+                  f"threshold={self.gate.threshold} audio={seconds:.2f}s{streak}", flush=True)
+            record_speaker_check(label, score, self.gate)
             if verdict == TOO_SHORT:
                 await self._say(ws, too_short_line())
                 return
@@ -442,6 +448,7 @@ def main():
         # (and in /health) instead of on the first utterance.
         if gate is not None:
             await asyncio.to_thread(gate.warm)
+            set_speaker_gate_state(gate)
         app.state.announcer = await announce_server(_session, args.announce_socket)
         app.state.cheerleader = None
         if args.encourage:
