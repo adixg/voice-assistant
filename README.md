@@ -14,6 +14,10 @@ swappable (`--tts-backend kitten` (the deployed default), `kokoro-onnx`,
 
 ## What the M5Stick does today
 
+- **Hands-free listening** — hold BtnB, let go, and just talk: the Stick
+  detects when you start and stop speaking (on-device, `vad.h`) and sends only
+  the speech. Saying nothing cancels quietly; BtnA ends it early. The same
+  mode is what a future wake word will trigger.
 - **Voice chatbot** — hold BtnA to talk, release to send; STT → LLM → TTS →
   speaker, same pipeline as the desktop entrypoint.
 - **Speaker verification** ("voice recognition") — replies are gated to the

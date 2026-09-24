@@ -27,6 +27,10 @@
 //   pomodoro timer -> back to Rina. A tap and a hold look identical at the
 //   instant of the press, so recording waits out TALK_HOLD_MS before it
 //   starts; see clock_face.h and pomodoro_face.h for the two alt screens.
+// BtnB hold        -> hands-free listening (vad.h): no need to keep holding;
+//   the turn starts when speech is heard and ends after ~0.8 s of quiet.
+//   Nothing is sent until speech starts, so saying nothing cancels cleanly.
+//   BtnA ends it early. The future wake word will start this same mode.
 // BtnB click       -> reset conversation history (tells the server) on
 //   Rina's face or the clock; starts/pauses the countdown on the pomodoro
 //   screen instead, since there is no conversation in view there to reset
@@ -53,6 +57,7 @@
 #include <M5GFX.h>
 #include <math.h>
 #include "sprites.h"
+#include "vad.h"
 
 static const uint32_t SAMPLE_RATE = 16000;
 static const size_t MIC_CHUNK_SAMPLES = 512;  // ~32ms/chunk
@@ -135,8 +140,17 @@ static float levelHist[HIST_N] = {0};  // recent amplitude, fed by the mic and b
 static int histPos = 0;
 static uint32_t lastSpeakSampleMs = 0;
 
-enum RecState { REC_IDLE, RECORDING };
+enum RecState { REC_IDLE, RECORDING, HANDSFREE };
 static RecState recState = REC_IDLE;
+
+// Hands-free listening: the endpointer decides when speech starts and stops.
+// Until it hears speech nothing is sent; the last PREROLL_CHUNKS chunks are
+// kept so the start of the first word, heard before the onset was confirmed,
+// still goes out with the turn.
+static Vad::Endpointer vad;
+static const int PREROLL_CHUNKS = 8;  // ~256 ms
+static int16_t preroll[PREROLL_CHUNKS][512];
+static int prerollNext = 0, prerollCount = 0;
 static int16_t micBuf[MIC_CHUNK_SAMPLES];
 
 static uint8_t *replyBuf = nullptr;
@@ -1056,6 +1070,18 @@ void loop() {
   }
   bool btnBLive = (int32_t)(millis() - swallowBtnBUntil) >= 0;
 
+  if (M5.BtnB.wasHold() && recState == REC_IDLE && uiState != UI_SPEAKING && bleReadyNow) {
+    recState = HANDSFREE;
+    uiState = UI_LISTENING;
+    currentScreen = SCREEN_RINA;
+    captionText = "";
+    vad.reset();
+    prerollNext = prerollCount = 0;
+    M5.Speaker.end();
+    M5.Mic.begin();
+    setStatus("hands-free: listening");
+  }
+
   if (!btnBLive) {
     // swallowed: this tap woke the screen
   } else if (currentScreen == SCREEN_POMODORO) {
@@ -1142,6 +1168,66 @@ void loop() {
       micLevel = 0.0f;
       BleTransport::sendStop();
       setStatus("Processing");
+    }
+  }
+
+  if (recState == HANDSFREE) {
+    const size_t bytes = MIC_CHUNK_SAMPLES * sizeof(int16_t);
+    bool finished = false, cancelled = false;
+    if (M5.Mic.record(micBuf, MIC_CHUNK_SAMPLES, SAMPLE_RATE)) {
+      micLevel = rms16(micBuf, MIC_CHUNK_SAMPLES);
+      levelHist[histPos] = micLevel;
+      histPos = (histPos + 1) % HIST_N;
+      bool wasStarted = vad.started();
+      Vad::Decision d = vad.feed(micBuf, MIC_CHUNK_SAMPLES);
+      if (!wasStarted) {
+        memcpy(preroll[prerollNext], micBuf, bytes);
+        prerollNext = (prerollNext + 1) % PREROLL_CHUNKS;
+        if (prerollCount < PREROLL_CHUNKS) prerollCount++;
+      }
+      switch (d) {
+        case Vad::SPEECH_START:
+          Serial.printf("[vad] speech (rms %.0f, floor %.0f)\n", vad.lastRms(), vad.noiseFloor());
+          BleTransport::sendStart();
+          for (int i = 0; i < prerollCount; i++) {  // oldest first; includes this chunk
+            int idx = (prerollNext - prerollCount + i + PREROLL_CHUNKS) % PREROLL_CHUNKS;
+            BleTransport::sendAudioChunk((const uint8_t *)preroll[idx], bytes);
+          }
+          setStatus("hands-free: speech");
+          break;
+        case Vad::CONTINUE:
+          BleTransport::sendAudioChunk((const uint8_t *)micBuf, bytes);
+          break;
+        case Vad::END:
+        case Vad::MAX_LENGTH:
+          BleTransport::sendAudioChunk((const uint8_t *)micBuf, bytes);
+          Serial.printf("[vad] %s (floor %.0f)\n", d == Vad::END ? "end of speech" : "max length",
+                        vad.noiseFloor());
+          finished = true;
+          break;
+        case Vad::NO_SPEECH:
+          Serial.printf("[vad] nothing said (floor %.0f)\n", vad.noiseFloor());
+          cancelled = true;
+          break;
+        case Vad::WAITING:
+          break;
+      }
+    }
+    if (M5.BtnA.wasPressed()) {  // end it early; don't let the release cycle screens
+      btnAArmed = false;
+      if (vad.started()) finished = true; else cancelled = true;
+    }
+    if (finished) {
+      recState = REC_IDLE;
+      uiState = UI_THINKING;
+      micLevel = 0.0f;
+      BleTransport::sendStop();
+      setStatus("Processing");
+    } else if (cancelled) {  // nothing was ever sent, so there's nothing to cancel upstream
+      recState = REC_IDLE;
+      uiState = UI_IDLE;
+      micLevel = 0.0f;
+      setStatus("hands-free: nothing heard");
     }
   }
 

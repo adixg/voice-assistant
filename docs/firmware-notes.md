@@ -424,3 +424,28 @@ About 30 s for the ~2.27 MB image (~75 KB/s, measured on the device 2026-09-24).
 
 Then a clean `a36b55d` went back on over OTA, and volume/brightness were reset
 to 255/39.
+
+
+## Hands-free listening: on-device endpointing (2026-09-24)
+
+**BtnB hold** starts it (from any screen; BtnB's tap and the pomodoro screen's
+single/double clicks are unaffected). `src/vad.h` is the endpointer: plain C++,
+host-tested by `tests/test_firmware_vad.py` (g++):
+
+- Per 32 ms mic chunk: RMS vs. a noise floor learned from the first ~130 ms and
+  then tracked slowly on non-speech chunks only. Speech = louder than 3.2x the
+  floor (~+10 dB) *and* above an absolute 250 RMS.
+- ~100 ms of consecutive speech confirms the start; 800 ms of quiet after speech
+  ends the turn; nothing said in 5 s cancels; 20 s is a hard cap.
+- **Nothing is sent before speech is confirmed.** The last 8 chunks (~256 ms) are
+  kept as pre-roll and sent right after `start`, so the first word isn't
+  clipped. A cancel therefore never reaches the gateway: no "didn't catch
+  that", no speaker-gate rejection of a silent clip. No protocol change.
+- BtnA ends it early (sends the turn if speech started, otherwise cancels).
+- Serial logs `[vad] speech (rms …, floor …)`, `[vad] end of speech`, `[vad]
+  nothing said` for tuning.
+
+**Not yet tuned on the device.** The thresholds are educated guesses for the
+ES8311 mic's levels; watch the serial log on the first tries and adjust
+`Vad::Config` (`speechRatio`, `minSpeechRms`, `hangoverMs`). This is the
+groundwork for a wake word (see `TODO.md`), which would start the same mode.
