@@ -194,6 +194,11 @@ class RelayService : Service() {
             FrameType.SETTINGS -> onStickSettings(payload)
             FrameType.OTA_STATUS -> onOtaStatus(payload)
             FrameType.BATTERY -> onStickBattery(payload)
+            FrameType.EVENT -> {
+                val text = String(payload, Charsets.UTF_8)
+                log("stick: $text")
+                sendWsText("event:$text")
+            }
             else -> log("unexpected TX frame type=0x%02X len=%d".format(type, payload.size))
         }
     }

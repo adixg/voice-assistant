@@ -225,6 +225,10 @@ static void setFastLink(bool fast) {
   Serial.printf("[ble] asking for the %s link\n", fast ? "fast" : "idle");
 }
 
+static void sendEvent(const char *text) {
+  sendFrame(BleEnvelope::FRAME_EVENT, (const uint8_t *)text, strnlen(text, 200));
+}
+
 static void sendStart() { sendFrame(BleEnvelope::FRAME_START, nullptr, 0); }
 static void sendStop() { sendFrame(BleEnvelope::FRAME_STOP, nullptr, 0); }
 static void sendReset() { sendFrame(BleEnvelope::FRAME_RESET, nullptr, 0); }

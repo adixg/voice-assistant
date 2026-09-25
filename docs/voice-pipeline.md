@@ -224,6 +224,31 @@ write one notes file, `~/rina/notes.md` on arch-ssd, which the owner edits too
 Searchable memory doesn't exist yet. Keep all of that out of the profile: it is
 the always-resident slice, not a store.
 
+## False wake-ups: letting her stay silent (2026-09-25)
+
+On the first evening of wake-word use, Rina answered six fragments in 16
+minutes that nobody had said to her ("Prani", "All.", "Then g-f is one of the
+other g-f is one"): the wake word firing on nearby talk, then hands-free
+recording whatever followed. Two changes:
+
+- **Stick events.** The Stick now reports what it decides on its own
+  (`FRAME_EVENT`, app 1.6, relayed as `event:…`): `wake fired <mean>`,
+  `turn wake|button|btnb` just before a turn's start, `wake near peak <p>
+  mean <m>` for a ~2 s window that got to half the cutoff without firing, and
+  `vad nothing heard after wake|btnb`. The gateway prints them (`[stick] …`),
+  writes them to `events-YYYY-MM-DD.jsonl` beside the conversation log, and
+  puts `trigger` (and `wake_score`) on the turn's line. "Why didn't that go
+  through?" and "how often does it false-trigger?" are now answerable from
+  the server.
+- **Silence.** On a wake-word turn only (a button press is meant), the user
+  message sent to the model carries a note: if this is a fragment, garbled,
+  or clearly someone talking to somebody else, reply with exactly
+  `[silent]`. The note is on a copy, not in the history, and not a
+  mid-conversation system message (some chat templates reject those). A
+  `[silent]` reply is never spoken, on any turn: the gateway sends only
+  `end` (the Stick goes back to idle), drops the fragment from the history,
+  and logs the turn with `silent: true`.
+
 ## Conversation log (2026-09-25)
 
 `--conversation-log DIR` keeps every turn the gateway handled, for analysis:

@@ -27,6 +27,9 @@ object FrameType {
     const val OTA_STATUS: Byte = 0x0F
     // Stick -> phone, once a minute: see firmware/.../battery_report.h.
     const val BATTERY: Byte = 0x10
+    // Stick -> phone: a line about what the Stick decided (wake word fired,
+    // what started a turn, nothing heard), passed on as "event:" text.
+    const val EVENT: Byte = 0x11
 }
 
 private const val CONT: Byte = 0xFF.toByte()

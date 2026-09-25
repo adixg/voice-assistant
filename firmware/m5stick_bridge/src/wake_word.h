@@ -49,6 +49,11 @@ static int ignoreSlices = -MIN_SLICES_BEFORE_DETECTION;
 static int strideStep = 0;
 static uint8_t lastProbability = 0;
 static uint32_t lastInvokeUs = 0;
+// For main.cpp to report: the windowed mean that fired, and the last ~2 s
+// window's peaks when they got to half the cutoff without firing.
+static uint8_t detectedMean = 0;
+static bool nearMissDue = false;
+static uint8_t nearMissPeak = 0, nearMissMean = 0;
 
 static void reset() {
   memset(probs, 0, sizeof(probs));
@@ -155,6 +160,11 @@ static bool pushFeature(const int8_t features[FEATURE_SIZE]) {
   peakProb = max(peakProb, lastProbability);
   peakMean = max(peakMean, (uint8_t)(sum / WAKE_WORD_SLIDING_WINDOW));
   if (++sinceReport >= 66) {
+    if (peakMean >= WAKE_WORD_PROBABILITY_CUTOFF / 2) {
+      nearMissDue = true;
+      nearMissPeak = peakProb;
+      nearMissMean = peakMean;
+    }
     if (peakProb >= 64) {
       Serial.printf("[wake] peak %u/255, mean-of-%d %u/255 (cutoff %u), invoke %lu us\n", peakProb,
                     WAKE_WORD_SLIDING_WINDOW, peakMean, (unsigned)WAKE_WORD_PROBABILITY_CUTOFF,
@@ -167,6 +177,8 @@ static bool pushFeature(const int8_t features[FEATURE_SIZE]) {
   if (sum > (uint32_t)WAKE_WORD_PROBABILITY_CUTOFF * WAKE_WORD_SLIDING_WINDOW) {
     Serial.printf("[wake] \"%s\" detected (mean %u/255, last invoke %lu us)\n", WAKE_WORD_NAME,
                   (unsigned)(sum / WAKE_WORD_SLIDING_WINDOW), (unsigned long)lastInvokeUs);
+    detectedMean = (uint8_t)(sum / WAKE_WORD_SLIDING_WINDOW);
+    nearMissDue = false;  // this window fired; it wasn't a near miss
     reset();
     return true;
   }

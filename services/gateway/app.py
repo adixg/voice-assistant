@@ -254,6 +254,22 @@ async def delete_reminder(reminder_id: str, authorization: str | None = Header(N
     return store.describe(reminder)
 
 
+# A wake-word turn can be a false trigger that caught someone talking nearby,
+# so for those (and only those: a button press is meant) the model may choose
+# not to answer. The note rides on a copy of the user message, not in the
+# history, and isn't a mid-conversation system message, which some chat
+# templates reject.
+SILENT = "[silent]"
+SILENCE_NOTE = (
+    "(Heard hands-free after your wake word, which sometimes fires by mistake. If this "
+    "is a fragment, garbled, or clearly someone talking to somebody else rather than to "
+    f"you, reply with exactly {SILENT} and nothing else. Otherwise answer normally.)\n")
+
+
+def is_silent(reply):
+    return reply.strip().strip(".").lower() in (SILENT, SILENT.strip("[]"))
+
+
 class GatewaySession:
     """One M5StickS3's conversation state -- ported from bridge_server.py's
     Session, adapted to call stt/agent/tts over HTTP instead of in-process.
@@ -285,6 +301,11 @@ class GatewaySession:
         self._device_changed = asyncio.Condition()
         # The Stick's last battery report (on_battery_report), or None.
         self.battery = None
+        # What started the next turn ("wake", "button", "btnb"), from the
+        # Stick's "turn …" event just before its start, and the wake word's
+        # score if it was that.
+        self.next_trigger = None
+        self.wake_score = None
 
     def on_battery_report(self, text):
         """A "battery:PERCENT,CHARGING,MILLIVOLTS" report from the relay (empty
@@ -307,6 +328,21 @@ class GatewaySession:
         if battery["charging"] is not None:
             STICK_CHARGING.set(int(battery["charging"]))
         STICK_BATTERY_REPORT_TIME.set(battery["reported_at"])
+
+    def on_device_event(self, text):
+        """An "event:…" line from the Stick (firmware sendEvent): logged, and
+        a "turn …" one says what started the turn about to arrive."""
+        print(f"  [stick] {text}", flush=True)
+        if text.startswith("turn "):
+            self.next_trigger = text[len("turn "):].strip()
+        elif text.startswith("wake fired "):
+            try:
+                self.wake_score = int(text.split()[-1])
+            except ValueError:
+                pass
+        log_dir = getattr(self.args, "conversation_log", None)
+        if log_dir:
+            conversation_log.record_event(log_dir, text)
 
     async def on_device_report(self, text):
         """A "settings:V,B[,FIRMWARE]" report from the relay."""
@@ -442,7 +478,11 @@ class GatewaySession:
         # backend decide" (None), and its absence means "force it off" --
         # not the other way around, since a reasoning model defaults to on.
         think = None if self.args.think else False
-        payload = {"messages": self.messages, "think": think}
+        messages = self.messages
+        if self.turn_log.get("trigger") == "wake" and messages and messages[-1]["role"] == "user":
+            messages = messages[:-1] + [{"role": "user",
+                                         "content": SILENCE_NOTE + messages[-1]["content"]}]
+        payload = {"messages": messages, "think": think}
         async with self.client.stream("POST", f"{self.urls['agent']}/ask_stream", json=payload) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
@@ -466,6 +506,11 @@ class GatewaySession:
         # This turn's record for --conversation-log, filled in as it goes.
         self.turn_log = conversation_log.new_turn()
         self.turn_log["audio_seconds"] = round(len(pcm) / (SAMPLE_RATE * 2), 2)
+        if self.next_trigger:
+            self.turn_log["trigger"] = self.next_trigger
+            if self.next_trigger == "wake" and self.wake_score is not None:
+                self.turn_log["wake_score"] = self.wake_score
+        self.next_trigger = self.wake_score = None
         try:
             await self._turn_inner(ws, pcm)
             outcome = "success"
@@ -554,6 +599,15 @@ class GatewaySession:
             print(f"  ! llm error: {e}")
             await ws.send_text(f"reply:(llm error: {e})")
             return
+        if is_silent(reply) and not tool_messages:
+            # Judged not meant for her: say nothing (handle_utterance still
+            # sends "end", which puts the Stick back to idle) and keep the
+            # fragment out of the history. Only wake-word turns are told they
+            # may do this, but the token is never read out on any turn.
+            self.messages.pop()
+            self.turn_log["silent"] = True
+            print("  Rina: (stayed silent: not meant for her)", flush=True)
+            return
         # The tool calls go into the history ahead of the reply (registry.TOOLS):
         # without them the model learns that just saying "done" is enough.
         self.messages.extend(tool_messages)
@@ -626,6 +680,8 @@ async def _client_loop(ws, session, turns):
             await session.on_device_report(msg[len("settings:"):])
         elif msg.startswith("battery:"):
             session.on_battery_report(msg[len("battery:"):])
+        elif msg.startswith("event:"):
+            session.on_device_event(msg[len("event:"):])
         else:
             print(f"  ? unexpected control message: {msg!r}")
 

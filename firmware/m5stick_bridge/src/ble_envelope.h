@@ -82,6 +82,11 @@ enum FrameType : uint8_t {
   // and when the link comes up. [format=1][percent 0-100, 255 unknown]
   // [charging 0/1, 255 unknown][millivolts, 2 bytes little-endian].
   FRAME_BATTERY     = 0x10,
+  // Added 2026-09-25: Stick -> phone only, a short UTF-8 line about what the
+  // Stick decided on its own ("turn wake 253", "wake near 201/170", "vad
+  // nothing heard"), so the gateway's log can say why a turn did or didn't
+  // happen without the serial port.
+  FRAME_EVENT       = 0x11,
 };
 
 constexpr uint8_t CONT = 0xFF;  // continuation marker -- never a real logical frame type

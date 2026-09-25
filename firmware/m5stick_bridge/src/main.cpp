@@ -1029,8 +1029,14 @@ static void pumpPlayback() {
   }
 }
 
+// What started the current hands-free session ("wake" or "btnb"), reported
+// with the turn's start so the gateway knows (it only lets Rina stay silent
+// on wake-word turns, which can be false triggers; a button press is meant).
+static const char *handsFreeTrigger = "btnb";
+
 // Hands-free turn (vad.h ends it): started by a BtnB hold or the wake word.
 static void startHandsFree(const char *why) {
+  handsFreeTrigger = strcmp(why, "wake word") == 0 ? "wake" : "btnb";
   recState = HANDSFREE;
   uiState = UI_LISTENING;
   currentScreen = SCREEN_RINA;
@@ -1144,6 +1150,9 @@ void loop() {
   if (wakeIdle) {
     if (listenForWakeWord()) {
       wakeListening = false;
+      char ev[40];
+      snprintf(ev, sizeof ev, "wake fired %u", WakeWord::detectedMean);
+      BleTransport::sendEvent(ev);
       startHandsFree("wake word");
     }
   } else {
@@ -1173,6 +1182,15 @@ void loop() {
   }
 
   maybeCheckBattery();
+
+  // A wake-word window that got to half the cutoff without firing: reported so
+  // the cutoff can be tuned from real near-misses (wake_word.h).
+  if (WakeWord::nearMissDue) {
+    WakeWord::nearMissDue = false;
+    char ev[48];
+    snprintf(ev, sizeof ev, "wake near peak %u mean %u", WakeWord::nearMissPeak, WakeWord::nearMissMean);
+    BleTransport::sendEvent(ev);
+  }
 
   // interrupt: stop playback cleanly rather than switching mic/speaker mid-stream
   if (uiState == UI_SPEAKING && M5.BtnA.wasPressed()) {
@@ -1204,6 +1222,7 @@ void loop() {
       captionText = "";
       M5.Speaker.end();
       M5.Mic.begin();  // _cfg survives the speaker cycle; no re-config needed
+      BleTransport::sendEvent("turn button");
       BleTransport::sendStart();
       setStatus("listening...");
     }
@@ -1256,6 +1275,7 @@ void loop() {
       switch (d) {
         case Vad::SPEECH_START:
           Serial.printf("[vad] speech (rms %.0f, floor %.0f)\n", vad.lastRms(), vad.noiseFloor());
+          BleTransport::sendEvent(handsFreeTrigger[0] == 'w' ? "turn wake" : "turn btnb");
           BleTransport::sendStart();
           for (int i = 0; i < prerollCount; i++) {  // oldest first; includes this chunk
             int idx = (prerollNext - prerollCount + i + PREROLL_CHUNKS) % PREROLL_CHUNKS;
@@ -1275,6 +1295,8 @@ void loop() {
           break;
         case Vad::NO_SPEECH:
           Serial.printf("[vad] nothing said (floor %.0f)\n", vad.noiseFloor());
+          BleTransport::sendEvent(handsFreeTrigger[0] == 'w' ? "vad nothing heard after wake"
+                                                             : "vad nothing heard after btnb");
           cancelled = true;
           break;
         case Vad::WAITING:

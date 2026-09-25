@@ -826,3 +826,68 @@ def test_battery_reports_are_parsed_exported_and_kept_after_a_disconnect(monkeyp
     body = TestClient(gateway_app.app).get("/device/settings",
                                            headers={"Authorization": "Bearer t0k"}).json()
     assert body["battery"]["percent"] == 80 and body["battery"]["charging"] is True
+
+
+def _asking_handler(text, reply, seen):
+    import base64
+
+    def handler(request):
+        if request.url.path == "/transcribe":
+            return httpx.Response(200, json={"text": text})
+        if request.url.path == "/ask_stream":
+            seen.append(json.loads(request.content))
+            return httpx.Response(200, content=json.dumps({"kind": "final", "text": reply}) + "\n")
+        if request.url.path == "/synth":
+            return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"x").decode()]})
+        raise AssertionError(request.url.path)
+    return handler
+
+
+async def test_a_wake_word_turn_may_stay_silent(monkeypatch, tmp_path):
+    monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+    seen = []
+    async with make_client(_asking_handler("Prani", "[silent]", seen)) as client:
+        session = make_session(client=client, args=make_args(conversation_log=str(tmp_path)))
+        before = list(session.messages)
+        session.on_device_event("wake fired 253")
+        session.on_device_event("turn wake")
+        ws = FakeWebSocket()
+        await session.handle_utterance(ws, LOUD_PCM)
+
+    assert ws.sent == ["heard:Prani", "end"]  # nothing said, straight back to idle
+    assert session.messages == before  # the fragment is kept out of the history
+    sent_user = seen[0]["messages"][-1]["content"]
+    assert sent_user.startswith("(Heard hands-free after your wake word") and sent_user.endswith("Prani")
+    [turn] = [json.loads(l) for l in (tmp_path / next(p.name for p in tmp_path.glob("2*.jsonl"))).read_text().splitlines()]
+    assert turn["trigger"] == "wake" and turn["wake_score"] == 253 and turn["silent"] is True
+    events = [json.loads(l)["event"] for f in tmp_path.glob("events-*.jsonl") for l in f.read_text().splitlines()]
+    assert events == ["wake fired 253", "turn wake"]
+
+
+async def test_a_button_turn_gets_no_silence_note_and_the_trigger_is_used_once(monkeypatch):
+    monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+    seen = []
+    async with make_client(_asking_handler("what time is it", "It's noon.", seen)) as client:
+        session = make_session(client=client)
+        session.on_device_event("turn button")
+        ws = FakeWebSocket()
+        await session.handle_utterance(ws, LOUD_PCM)
+        assert seen[0]["messages"][-1]["content"] == "what time is it"
+        assert ws.sent[:2] == ["heard:what time is it", "reply:It's noon."]
+        assert session.next_trigger is None
+        await session.handle_utterance(FakeWebSocket(), LOUD_PCM)  # no event: no note either
+        assert seen[1]["messages"][-1]["content"] == "what time is it"
+
+
+def test_silent_replies_are_recognized():
+    for reply in ("[silent]", " [SILENT] ", "silent.", "[silent]."):
+        assert gateway_app.is_silent(reply)
+    for reply in ("I'll be silent now.", "Silently waiting", ""):
+        assert not gateway_app.is_silent(reply)
+
+
+def test_events_arrive_over_the_socket():
+    session = make_session()
+    ws = FakeWebSocket(["event:vad nothing heard after wake", "event:turn wake"])
+    asyncio.run(gateway_app.handle_client(ws, session))
+    assert session.next_trigger == "wake"

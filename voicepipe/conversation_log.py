@@ -57,3 +57,18 @@ def prune(audio_dir, max_bytes):
             total -= sizes[old]
         except OSError:
             pass
+
+
+def record_event(directory, text):
+    """One line from the Stick about what it decided on its own (the wake word
+    fired, what started a turn, nothing heard, a near miss), in
+    DIR/events-YYYY-MM-DD.jsonl next to the turns."""
+    try:
+        os.makedirs(directory, exist_ok=True)
+        now = time.localtime()
+        with open(os.path.join(directory, time.strftime("events-%Y-%m-%d.jsonl", now)), "a",
+                  encoding="utf-8") as f:
+            f.write(json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%S%z", now), "event": text},
+                               ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"  (couldn't log the event: {e})", flush=True)
