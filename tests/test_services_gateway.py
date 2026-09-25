@@ -767,7 +767,8 @@ def test_reminder_api_sets_lists_and_cancels(monkeypatch, tmp_path):
     assert made["text"] == "stretch" and made["repeat"] == "none"
     assert client.post("/reminders", json={"text": "x", "at": "whenever"}, headers=auth).status_code == 422
     assert [r["id"] for r in client.get("/reminders", headers=auth).json()["reminders"]] == [made["id"]]
-    assert client.delete(f"/reminders/{made['id']}", headers=auth).status_code == 200
+    cancelled = client.delete(f"/reminders/{made['id']}", headers=auth)
+    assert cancelled.status_code == 200 and cancelled.json()["when"] == made["when"]
     assert client.delete(f"/reminders/{made['id']}", headers=auth).status_code == 404
 
 

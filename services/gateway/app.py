@@ -242,12 +242,13 @@ async def post_reminder(body: NewReminder, authorization: str | None = Header(No
 @app.delete("/reminders/{reminder_id}")
 async def delete_reminder(reminder_id: str, authorization: str | None = Header(None)):
     _check_control_token(authorization)
+    store = _reminder_store()
     try:
-        reminder = _reminder_store().cancel(reminder_id)
+        reminder = store.cancel(reminder_id)
     except KeyError:
         raise HTTPException(404, f"no reminder with id {reminder_id}") from None
     print(f"  [reminder] cancelled {reminder_id}: {reminder['text']}", flush=True)
-    return reminder
+    return store.describe(reminder)
 
 
 class GatewaySession:
