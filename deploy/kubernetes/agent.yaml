@@ -76,6 +76,23 @@ spec:
               value: claude-sonnet-5
             - name: COMPANION_CONTROL_CLAUDE_DAILY_LIMIT
               value: "100"
+            # For a key not scoped to a workspace (the API then demands one):
+            #   kubectl -n aicompanion patch secret anthropic-api --type=merge \
+            #     -p '{"stringData":{"workspace-id":"wrkspc_..."}}'
+            - name: ANTHROPIC_WORKSPACE_ID
+              valueFrom:
+                secretKeyRef: {name: anthropic-api, key: workspace-id, optional: true}
+            # One JSON line per answered question (tokens and estimated cost,
+            # never the question), on the node; exported as
+            # aicompanion_claude_* by this pod's /metrics.
+            - name: COMPANION_CONTROL_CLAUDE_USAGE_FILE
+              value: /claude-usage/usage.jsonl
+            # USD per million tokens, for the estimate only: set them to the
+            # model's list prices (anthropic.com/pricing).
+            - name: COMPANION_CONTROL_CLAUDE_PRICE_INPUT
+              value: "3"
+            - name: COMPANION_CONTROL_CLAUDE_PRICE_OUTPUT
+              value: "15"
           ports:
             - {containerPort: 8002, name: metrics}
           readinessProbe:
@@ -83,7 +100,12 @@ spec:
             initialDelaySeconds: 5
           volumeMounts:
             - {name: notes, mountPath: /rina}
+            - {name: claude-usage, mountPath: /claude-usage}
       volumes:
+        - name: claude-usage
+          hostPath:
+            path: /var/lib/aicompanion/claude-usage
+            type: DirectoryOrCreate
         # The directory, not the file: editors save by renaming a new file
         # over the old one, and a single-file mount would keep the old inode.
         # Nothing else of the home directory is mounted.

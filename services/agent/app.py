@@ -26,9 +26,35 @@ from pydantic import BaseModel
 
 from voicepipe import backends  # noqa: F401 - registers backends as a side effect
 from voicepipe.registry import LLM, stream_reply
+from prometheus_client import REGISTRY
+from prometheus_client.core import CounterMetricFamily
+
 from services.metrics import install_http_metrics, set_agent_llm_target
+from tools.companion_control_mcp import claude_usage_summary, read_claude_usage
 from services.telemetry import install_tracing
 
+class ClaudeUsageCollector:
+    """ask_claude's usage ledger (tools/companion_control_mcp.py writes it) as
+    Prometheus counters, read on each scrape: the ledger is the one record, so
+    these survive restarts of either process and can't drift from it."""
+
+    def collect(self):
+        try:
+            totals = claude_usage_summary(read_claude_usage())
+        except Exception:  # noqa: BLE001 - a bad ledger must not break /metrics
+            return
+        yield CounterMetricFamily("aicompanion_claude_calls", "Questions answered by Claude",
+                                  value=totals["calls"])
+        tokens = CounterMetricFamily("aicompanion_claude_tokens", "Claude API tokens", labels=["direction"])
+        tokens.add_metric(["input"], totals["input_tokens"])
+        tokens.add_metric(["output"], totals["output_tokens"])
+        yield tokens
+        yield CounterMetricFamily("aicompanion_claude_cost_usd",
+                                  "Estimated Claude API cost (USD, from token counts and configured prices)",
+                                  value=totals["estimated_cost_usd"])
+
+
+REGISTRY.register(ClaudeUsageCollector())
 app = FastAPI(title="aicompanion-agent")
 install_http_metrics(app, "agent")
 install_tracing(app, "agent")

@@ -190,6 +190,21 @@ data:
           ],
           "title": "Stick battery",
           "type": "timeseries"
+        },
+        {
+          "description": "ask_claude's usage ledger: questions and estimated cost (token counts are exact; the cost uses the prices set in agent.yaml, so check the Anthropic console for the billed amount).",
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "unit": "short"}, "overrides": [{"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [{"id": "unit", "value": "currencyUSD"}, {"id": "decimals", "value": 3}]}, {"matcher": {"id": "byFrameRefID", "options": "D"}, "properties": [{"id": "unit", "value": "currencyUSD"}, {"id": "decimals", "value": 3}]}]},
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 64},
+          "id": 23,
+          "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "targets": [
+            {"expr": "sum(increase(aicompanion_claude_calls_total[24h]))", "legendFormat": "questions (24h)", "refId": "A"},
+            {"expr": "sum(increase(aicompanion_claude_cost_usd_total[24h]))", "legendFormat": "cost (24h)", "refId": "B"},
+            {"expr": "sum(aicompanion_claude_calls_total)", "legendFormat": "questions (all time)", "refId": "C"},
+            {"expr": "sum(aicompanion_claude_cost_usd_total)", "legendFormat": "cost (all time)", "refId": "D"}
+          ],
+          "title": "Claude API usage (estimated)",
+          "type": "stat"
         }
       ],
       "schemaVersion": 41,

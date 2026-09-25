@@ -31,7 +31,7 @@ def test_tools_list_is_read_only_except_the_sticks_settings_notes_reminders_and_
         "get_time", "search_web", "get_weather",
         "get_stick_settings", "set_stick_volume", "set_stick_brightness",
         "read_notes", "add_note", "write_notes",
-        "set_reminder", "list_reminders", "cancel_reminder", "ask_claude"]
+        "set_reminder", "list_reminders", "cancel_reminder", "ask_claude", "get_claude_usage"]
 
 
 def test_current_time_returns_requested_timezone(monkeypatch):
@@ -471,3 +471,65 @@ def test_ask_claude_without_a_key_is_a_tool_error_not_a_crash(monkeypatch):
                                    "params": {"name": "ask_claude", "arguments": {"question": "hi"}}})
     assert response["result"]["isError"] is True
     assert "ANTHROPIC_API_KEY" in response["result"]["content"][0]["text"]
+
+
+def _claude_reply(tokens_in=1000, tokens_out=100):
+    return lambda body: {"model": "claude-test", "content": [{"type": "text", "text": "ok"}],
+                         "usage": {"input_tokens": tokens_in, "output_tokens": tokens_out}}
+
+
+def test_ask_claude_records_each_call_and_its_estimated_cost(monkeypatch, tmp_path):
+    ledger = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_USAGE_FILE", str(ledger))
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_PRICE_INPUT", "3")
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_PRICE_OUTPUT", "15")
+    result = mcp.ask_claude({"question": "q"}, request=_claude_reply(), today=lambda: "2026-09-25")
+    assert result["estimated_cost_usd"] == 0.0045  # 1000 * 3/M + 100 * 15/M
+    mcp.ask_claude({"question": "q"}, request=_claude_reply(2000, 0), today=lambda: "2026-10-01")
+    [first, second] = mcp.read_claude_usage()
+    assert first["date"] == "2026-09-25" and first["input_tokens"] == 1000 and first["cost_usd"] == 0.0045
+    assert "q" not in json.dumps(first)  # tokens and cost only, never the question
+
+    usage = mcp.claude_usage(today=lambda: "2026-10-01")
+    assert usage["today"] == {"calls": 1, "input_tokens": 2000, "output_tokens": 0, "estimated_cost_usd": 0.006}
+    assert usage["all_time"]["calls"] == 2 and usage["all_time"]["estimated_cost_usd"] == 0.0105
+    assert usage["this_month"]["calls"] == 1
+
+
+def test_the_daily_cap_counts_from_the_ledger_so_a_restart_does_not_reset_it(monkeypatch, tmp_path):
+    ledger = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_USAGE_FILE", str(ledger))
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_DAILY_LIMIT", "2")
+    ledger.write_text("\n".join(json.dumps({"date": "2026-09-25", "input_tokens": 1}) for _ in range(2)) + "\n")
+    monkeypatch.setattr(mcp, "_claude_calls", {})  # a fresh process
+    with pytest.raises(mcp.ControlPlaneError, match="daily limit"):
+        mcp.ask_claude({"question": "q"}, request=_claude_reply(), today=lambda: "2026-09-25")
+    assert mcp.claude_usage(today=lambda: "2026-09-25")["left_today"] == 0
+
+
+def test_the_workspace_header_is_sent_when_set(monkeypatch):
+    sent = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"content": []}'
+
+    def fake_urlopen(request, timeout):
+        sent.update({k.lower(): v for k, v in request.header_items()})
+        return Response()
+
+    monkeypatch.setattr(mcp, "urlopen", fake_urlopen)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_123")
+    mcp.claude_request({"model": "m"})
+    assert sent["anthropic-workspace-id"] == "wrkspc_123" and sent["x-api-key"] == "sk-ant-test"
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID")
+    sent.clear()
+    mcp.claude_request({"model": "m"})
+    assert "anthropic-workspace-id" not in sent

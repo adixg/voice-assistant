@@ -97,3 +97,17 @@ class TestLlmTargetMetric:
             "aicompanion_agent_llm_target_info", {"host": host, "model": "qwen3-8b" if "4060" in host else "qwen3.5-4b"})
         assert get("http://llama-cpp-rtx4060:8080/v1") == 1
         assert get("http://llama-cpp-gtx1650:8080/v1") is None
+
+
+def test_claude_usage_ledger_is_exported_as_counters(monkeypatch, tmp_path):
+    ledger = tmp_path / "usage.jsonl"
+    ledger.write_text(
+        json.dumps({"date": "2026-09-25", "input_tokens": 1000, "output_tokens": 100, "cost_usd": 0.0045}) + "\n"
+        + json.dumps({"date": "2026-09-25", "input_tokens": 500, "output_tokens": 50, "cost_usd": 0.00225}) + "\n"
+        + "not json\n")
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_USAGE_FILE", str(ledger))
+    body = TestClient(agent_app.app).get("/metrics").text
+    assert "aicompanion_claude_calls_total 2.0" in body
+    assert 'aicompanion_claude_tokens_total{direction="input"} 1500.0' in body
+    assert 'aicompanion_claude_tokens_total{direction="output"} 150.0' in body
+    assert "aicompanion_claude_cost_usd_total 0.00675" in body

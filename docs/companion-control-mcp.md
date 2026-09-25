@@ -140,6 +140,27 @@ history, then restart the agent:
         --from-literal=api-key="$KEY"; unset KEY
     kubectl -n aicompanion rollout restart deployment agent
 
+**Workspace**: a key not scoped to a workspace gets HTTP 400 ("must include
+the anthropic-workspace-id header"), as the first live call did. Add the
+workspace ID to the Secret (`workspace-id`, below) and it is sent as that
+header.
+
+    kubectl -n aicompanion patch secret anthropic-api --type=merge \
+        -p '{"stringData":{"workspace-id":"wrkspc_..."}}'
+
+**Cost tracking**: every answered question appends one line to a ledger,
+`/var/lib/aicompanion/claude-usage/usage.jsonl` on arch-ssd (time, model,
+input/output tokens from the API's `usage` field, estimated cost; never the
+question). The daily cap counts from it, so a restart no longer resets it.
+The agent's `/metrics` reads it on every scrape and exports
+`aicompanion_claude_calls_total`, `aicompanion_claude_tokens_total{direction}`
+and `aicompanion_claude_cost_usd_total`, which Grafana's "Claude API usage"
+panel shows for 24 h and all time; `get_claude_usage` lets Rina answer "how
+much has Claude cost?". Token counts are exact; the cost is an estimate from
+`COMPANION_CONTROL_CLAUDE_PRICE_INPUT`/`_OUTPUT` (USD per million tokens, 3 and
+15 as placeholders): set them to the model's list prices. The billed amount is
+in the Anthropic console.
+
 Privacy: whatever the question contains leaves the house for Anthropic's API,
 unlike the rest of the pipeline. With the speaker check off, anyone near the
 Stick can cause a call (bounded by the daily limit).

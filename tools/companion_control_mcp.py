@@ -176,9 +176,80 @@ CLAUDE_SYSTEM = (
     "something you can't see, say so briefly.")
 CLAUDE_LIMITS = {"short": ("three short sentences, about 60 words", 300),
                  "detailed": ("about 150 words", 600)}
-# Calls since the MCP server started today (it lives as long as the agent pod),
-# so a model stuck calling it can't run up a bill.
+# Calls today, so a model stuck calling it can't run up a bill. Counted from
+# the usage ledger when there is one (so a restart doesn't reset it), else in
+# this process.
 _claude_calls: dict[str, int] = {}
+# Assumed list prices in USD per million tokens, used only for the cost
+# estimate; set the real ones for the model in use from Anthropic's pricing
+# page (the token counts themselves are exact, from the API's usage field).
+CLAUDE_DEFAULT_PRICE_INPUT = 3.0
+CLAUDE_DEFAULT_PRICE_OUTPUT = 15.0
+
+
+def _claude_prices() -> tuple[float, float]:
+    def price(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, default))
+        except ValueError:
+            return default
+    return (price("COMPANION_CONTROL_CLAUDE_PRICE_INPUT", CLAUDE_DEFAULT_PRICE_INPUT),
+            price("COMPANION_CONTROL_CLAUDE_PRICE_OUTPUT", CLAUDE_DEFAULT_PRICE_OUTPUT))
+
+
+def _usage_file() -> str:
+    return os.environ.get("COMPANION_CONTROL_CLAUDE_USAGE_FILE", "")
+
+
+def read_claude_usage() -> list[Json]:
+    """Every call in the usage ledger (one JSON line per successful call)."""
+    path = _usage_file()
+    if not path:
+        return []
+    entries = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(entry, dict):
+                    entries.append(entry)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise ControlPlaneError(f"can't read the Claude usage ledger: {exc.strerror}") from exc
+    return entries
+
+
+def _record_claude_usage(entry: Json) -> None:
+    path = _usage_file()
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as exc:
+        # The answer was paid for already; losing the record is worse than
+        # reporting it, but not worth failing the turn over.
+        print(f"couldn't record Claude usage: {exc}", file=sys.stderr, flush=True)
+
+
+def claude_usage_summary(entries: list[Json], since: str = "") -> Json:
+    """Totals of the ledger entries whose date (YYYY-MM-DD) starts with `since`."""
+    chosen = [e for e in entries if str(e.get("date", "")).startswith(since)]
+    def total(key: str) -> Any:
+        return sum(e.get(key) or 0 for e in chosen)
+    return {"calls": len(chosen), "input_tokens": total("input_tokens"),
+            "output_tokens": total("output_tokens"),
+            "estimated_cost_usd": round(total("cost_usd"), 6)}
+
+
+def _calls_today(day: str) -> int:
+    if _usage_file():
+        return sum(1 for e in read_claude_usage() if e.get("date") == day)
+    return _claude_calls.get(day, 0)
 
 
 def _claude_daily_limit() -> int:
@@ -193,8 +264,12 @@ def claude_request(body: Json) -> Json:
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
         raise ControlPlaneError("Claude isn't set up (no ANTHROPIC_API_KEY)")
-    request = Request(CLAUDE_URL, data=json.dumps(body).encode("utf-8"), method="POST", headers={
-        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    # A key that isn't scoped to a workspace has to name one on every request.
+    workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+    if workspace:
+        headers["anthropic-workspace-id"] = workspace
+    request = Request(CLAUDE_URL, data=json.dumps(body).encode("utf-8"), method="POST", headers=headers)
     try:
         timeout = float(os.environ.get("COMPANION_CONTROL_CLAUDE_TIMEOUT_SECONDS", "45"))
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 -- fixed Anthropic URL
@@ -223,7 +298,7 @@ def ask_claude(arguments: Json, request: Callable[[Json], Json] = claude_request
     if detail not in CLAUDE_LIMITS:
         raise ControlPlaneError("detail must be short or detailed")
     day = today()
-    used = _claude_calls.get(day, 0)
+    used = _calls_today(day)
     if used >= _claude_daily_limit():
         raise ControlPlaneError(f"Claude's daily limit of {_claude_daily_limit()} questions is used up")
     _claude_calls.clear()
@@ -240,10 +315,32 @@ def ask_claude(arguments: Json, request: Callable[[Json], Json] = claude_request
     if not text.strip():
         raise ControlPlaneError("Claude returned no text")
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    tokens_in, tokens_out = usage.get("input_tokens") or 0, usage.get("output_tokens") or 0
+    price_in, price_out = _claude_prices()
+    cost = (tokens_in * price_in + tokens_out * price_out) / 1_000_000
+    _record_claude_usage({"time": datetime.now(timezone.utc).isoformat(timespec="seconds"), "date": day,
+                          "model": payload.get("model", model), "detail": detail,
+                          "input_tokens": tokens_in, "output_tokens": tokens_out,
+                          "cost_usd": round(cost, 6)})
     return {"answer": text.strip(), "model": payload.get("model", model),
             "truncated": payload.get("stop_reason") == "max_tokens",
-            "tokens": {"in": usage.get("input_tokens"), "out": usage.get("output_tokens")},
+            "tokens": {"in": tokens_in, "out": tokens_out}, "estimated_cost_usd": round(cost, 5),
             "note": "Tell the owner this answer in your own words and voice."}
+
+
+def claude_usage(_args: Json | None = None,
+                 today: Callable[[], str] = lambda: datetime.now(timezone.utc).date().isoformat()) -> Json:
+    entries = read_claude_usage()
+    day = today()
+    price_in, price_out = _claude_prices()
+    return {"today": claude_usage_summary(entries, day),
+            "this_month": claude_usage_summary(entries, day[:7]),
+            "all_time": claude_usage_summary(entries),
+            "daily_limit": _claude_daily_limit(),
+            "left_today": max(0, _claude_daily_limit() - _calls_today(day)),
+            "prices_usd_per_million_tokens": {"input": price_in, "output": price_out},
+            "note": "Costs are estimates from token counts and the configured prices; "
+                    "Anthropic's console has the billed amount."}
 
 
 # Reminders live in the gateway, which says each one through the Stick when
@@ -869,6 +966,13 @@ TOOLS += [
         },
     },
 ]
+TOOLS += [
+    {
+        "name": "get_claude_usage",
+        "description": "How much ask_claude has been used and roughly what it cost (today, this month, all time), and how many questions are left today.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+]
 TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_service_health": lambda _args: service_health(),
     "get_gpu_status": lambda _args: gpu_status(),
@@ -887,9 +991,10 @@ TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "list_reminders": lambda _args: list_reminders(),
     "cancel_reminder": cancel_reminder,
     "ask_claude": ask_claude,
+    "get_claude_usage": lambda _args: claude_usage(),
 }
 NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
-                     "get_stick_settings", "read_notes", "list_reminders"}
+                     "get_stick_settings", "read_notes", "list_reminders", "get_claude_usage"}
 
 
 def _tool_result(payload: Json, is_error: bool = False) -> Json:
