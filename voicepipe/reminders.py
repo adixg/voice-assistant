@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 REPEATS = ("none", "daily", "weekdays", "weekly")
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 MAX_REMINDERS = 50
 MAX_TEXT = 200
 # Said late by more than this, the reminder says when it was for.
@@ -75,10 +76,21 @@ class ReminderStore:
         return datetime.now(timezone.utc).astimezone(self.tz)
 
     def parse_when(self, at=None, in_minutes=None, now=None):
-        """`at` is a local "YYYY-MM-DDTHH:MM" (or with an offset), or just
-        "HH:MM", meaning the next time the clock shows it; `in_minutes` is
-        relative. Exactly one of them."""
+        """`at` is a local "HH:MM" (the next time the clock shows it), a day
+        and a time ("tomorrow 09:30", "monday 09:30"), or "YYYY-MM-DDTHH:MM";
+        `in_minutes` is relative. Exactly one of them.
+
+        The day words exist because the model doesn't know today's date: asked
+        for "tomorrow at 9:30" it wrote 2023-10-03T09:30 (2026-09-25). For the
+        same reason every error says what the time is now."""
         now = now or self.now()
+        try:
+            return self._parse_when(at, in_minutes, now)
+        except ReminderError as e:
+            raise ReminderError(f"{e} (it is now {now.strftime('%A')} {now.date().isoformat()} "
+                                f"{now.strftime('%H:%M')})") from None
+
+    def _parse_when(self, at, in_minutes, now):
         if (at is None) == (in_minutes is None):
             raise ReminderError("give exactly one of at or in_minutes")
         if in_minutes is not None:
@@ -88,20 +100,31 @@ class ReminderStore:
             return (now + timedelta(minutes=in_minutes)).replace(microsecond=0)
         if not isinstance(at, str):
             raise ReminderError("at must be a string")
-        text = at.strip()
-        clock = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+        text = at.strip().lower()
+        clock = re.fullmatch(r"(?:(today|tomorrow|[a-z]+day)\s+)?(\d{1,2}):(\d{2})", text)
         if clock:
-            hour, minute = int(clock[1]), int(clock[2])
+            day, hour, minute = clock[1], int(clock[2]), int(clock[3])
             if hour > 23 or minute > 59:
                 raise ReminderError(f"not a time of day: {at}")
-            due = self._local(now.date(), hour, minute)
-            if due <= now:
-                due = self._local(now.date() + timedelta(days=1), hour, minute)
-            return due
+            if day is None:
+                due = self._local(now.date(), hour, minute)
+                return due if due > now else self._local(now.date() + timedelta(days=1), hour, minute)
+            if day in ("today", "tomorrow"):
+                due = self._local(now.date() + timedelta(days=day == "tomorrow"), hour, minute)
+                if due <= now:
+                    raise ReminderError(f"{self.describe_time(due, now)} is in the past")
+                return due
+            if day not in WEEKDAYS:
+                raise ReminderError(f"not a day: {clock[1]}")
+            # The next such day, a week on if that time today has passed.
+            ahead = (WEEKDAYS.index(day) - now.weekday()) % 7
+            due = self._local(now.date() + timedelta(days=ahead), hour, minute)
+            return due if due > now else due + timedelta(days=7)
         try:
             due = datetime.fromisoformat(text)
         except ValueError:
-            raise ReminderError(f"at must look like 2026-09-26T15:00 or 15:00, not {at!r}") from None
+            raise ReminderError(f"at must look like 15:00, tomorrow 15:00, monday 15:00 or "
+                                f"2026-09-26T15:00, not {at!r}") from None
         due = due.replace(tzinfo=self.tz) if due.tzinfo is None else due.astimezone(self.tz)
         if due <= now - timedelta(minutes=1):
             raise ReminderError(f"{self.describe_time(due, now)} is in the past")

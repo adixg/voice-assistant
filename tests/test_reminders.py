@@ -22,6 +22,23 @@ def test_a_clock_time_means_the_next_time_the_clock_shows_it(store):
     assert store.parse_when(at="9:00", now=NOW) == datetime(2026, 9, 26, 9, 0, tzinfo=NY)
 
 
+def test_day_words_so_the_model_never_needs_the_date(store):
+    assert store.parse_when(at="tomorrow 09:30", now=NOW) == datetime(2026, 9, 26, 9, 30, tzinfo=NY)
+    assert store.parse_when(at="Today 19:00", now=NOW) == datetime(2026, 9, 25, 19, 0, tzinfo=NY)
+    assert store.parse_when(at="monday 8:00", now=NOW) == datetime(2026, 9, 28, 8, 0, tzinfo=NY)
+    # Friday 17:00 has passed on this Friday: next week's.
+    assert store.parse_when(at="friday 17:00", now=NOW) == datetime(2026, 10, 2, 17, 0, tzinfo=NY)
+    for at in ("today 17:00", "someday 10:00", "funday 10:00"):
+        with pytest.raises(ReminderError):
+            store.parse_when(at=at, now=NOW)
+
+
+def test_errors_say_what_the_date_is_so_a_retry_can_get_it_right(store):
+    """The model wrote 2023-10-03T09:30 for "tomorrow at 9:30" (2026-09-25)."""
+    with pytest.raises(ReminderError, match=r"in the past \(it is now Friday 2026-09-25 18:00\)"):
+        store.parse_when(at="2023-10-03T09:30", now=NOW)
+
+
 def test_dates_minutes_and_bad_input(store):
     assert store.parse_when(at="2026-09-28T08:15", now=NOW) == datetime(2026, 9, 28, 8, 15, tzinfo=NY)
     assert (store.parse_when(in_minutes=20, now=NOW) - NOW).total_seconds() == 1200

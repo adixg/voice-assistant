@@ -61,7 +61,8 @@ Stick can read or rewrite the notes: don't keep secrets there.
 Since 0.4 (2026-09-25) it sets **reminders** that Rina says through the Stick:
 
 - `set_reminder`: `text`, plus exactly one of `at` (local `HH:MM`, meaning the
-  next time the clock shows it, or `YYYY-MM-DDTHH:MM`) or `in_minutes`, and
+  next time the clock shows it, `tomorrow HH:MM`, `monday HH:MM`, or
+  `YYYY-MM-DDTHH:MM`) or `in_minutes`, and
   `repeat` (`none`, `daily`, `weekdays`, `weekly`). Returns when it will go off
   ("3:00 PM today"), which is what she confirms out loud.
 - `list_reminders`: soonest first, with ids and the current time.
@@ -78,6 +79,11 @@ and is said on reconnect, with the time it was for when it's more than 3
 minutes late; a repeating one then moves to its next time in the future, so
 missed days aren't replayed, and keeps its wall-clock time across DST. At most
 50, 200 characters each.
+
+The day words are there because the model doesn't know the date: its first
+live try, "remind me tomorrow at 9:30", became `2023-10-03T09:30`, and it
+retried the "in the past" error until the tool loop gave up. Errors now also
+say the current date and time.
 
 Beyond that one file it still has no subprocess, filesystem or Kubernetes API
 access: a voice-triggered model must not receive generic cluster or shell control.

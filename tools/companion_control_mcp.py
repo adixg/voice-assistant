@@ -719,7 +719,7 @@ TOOLS += [
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "What to remind about, short, e.g. 'call the dentist'."},
-                "at": {"type": "string", "description": "Local time: 'HH:MM' (24-hour) for the next time the clock shows it, or 'YYYY-MM-DDTHH:MM' for a specific day. Call get_time first if you need today's date."},
+                "at": {"type": "string", "description": "Local 24-hour time: 'HH:MM' for the next time the clock shows it, 'tomorrow HH:MM', a weekday like 'monday HH:MM' (the next one), or 'YYYY-MM-DDTHH:MM' only for dates further away (call get_time first for today's date). Prefer the day words: you don't know today's date."},
                 "in_minutes": {"type": "number", "minimum": 1, "description": "Minutes from now."},
                 "repeat": {"type": "string", "enum": ["none", "daily", "weekdays", "weekly"], "default": "none"},
             },
