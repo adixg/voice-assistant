@@ -449,3 +449,37 @@ host-tested by `tests/test_firmware_vad.py` (g++):
 ES8311 mic's levels; watch the serial log on the first tries and adjust
 `Vad::Config` (`speechRatio`, `minSpeechRms`, `hangoverMs`). This is the
 groundwork for a wake word (see `TODO.md`), which would start the same mode.
+
+
+## Wake word "Rina-chan" (2026-09-25)
+
+`src/wake_word.h` mirrors ESPHome's `micro_wake_word`: the TFLM microfrontend
+(40 channels, 30 ms window, 10 ms step; the same C code the model was trained
+on, from pymicro-features) turns idle-mic audio into int8 features, a
+microWakeWord streaming model takes 3 frames per inference, and a detection is
+the mean of the last 5 probabilities over the cutoff (252/255), ignoring the
+first 100 slices after a (re)start. On detection `main.cpp` starts the same
+hands-free turn a BtnB hold does. It only listens while idle and connected
+(never while a reply is arriving or playing, since mic and speaker share one
+codec).
+
+- Runtime: `lib/tflm_esp`, vendored by `scripts/vendor_tflm.sh` (esp-tflite-micro
+  v1.3.3, the version ESPHome pins, plus esp-nn v1.1.2's ESP32-S3 kernels and
+  the microfrontend). PlatformIO's Arduino build can't pull ESP-IDF components.
+  Built with `-fno-exceptions`, and the project must define
+  `TF_LITE_STATIC_MEMORY` like the library does: without it `TfLiteTensor`'s
+  layout differed between the two and the first flash crash-looped
+  (IntegerDivideByZero on a garbage input stride). `begin()` now refuses a
+  model whose input shape isn't `1 x N x 40` int8.
+- Audio: two buffers queued with `M5.Mic.record()`, each fed to the model only
+  once full, so every sample is seen once and in order.
+- Model: `models/rina_chan.tflite` (62 KB) + manifest, compiled in by
+  `scripts/tflite_to_header.py`. Flash 74.2% of a 3.2 MB slot, 20.6 KB tensor
+  arena.
+- Measured on the device: 2.5-3.1 ms per inference every 30 ms (~9% of a
+  core); 12 of ~12 spoken "Rina-chan"s detected and no false triggers during a
+  minute of normal speech (first test, cable-connected serial log). The log
+  prints a `[wake] peak ...` line every ~2 s the model passes 25%, for tuning.
+- Not yet measured: battery drain of the always-on mic. Hands-free STT on the
+  test turns was poor ("what's the time" -> "Is the shine right now"): likely
+  clipped starts or mic level in that mode, not the wake word.

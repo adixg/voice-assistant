@@ -1,0 +1,100 @@
+diff --git a/microwakeword/audio/clips.py b/microwakeword/audio/clips.py
+index 84feba2..056ab34 100644
+--- a/microwakeword/audio/clips.py
++++ b/microwakeword/audio/clips.py
+@@ -27,6 +27,33 @@ from pathlib import Path
+ from microwakeword.audio.audio_utils import remove_silence_webrtc
+ 
+ 
++class _LazyClips:
++    """A list of wav paths that loads each clip as {"audio": {"array"}} at 16 kHz."""
++
++    def __init__(self, paths):
++        self.paths = list(paths)
++
++    def __len__(self):
++        return len(self.paths)
++
++    def __getitem__(self, index):
++        import soundfile as sf
++        from math import gcd
++        from scipy.signal import resample_poly
++
++        data, rate = sf.read(self.paths[index], dtype="float32")
++        if data.ndim > 1:
++            data = data.mean(axis=1)
++        if rate != 16000:
++            g = gcd(rate, 16000)
++            data = resample_poly(data, 16000 // g, rate // g).astype(np.float32)
++        return {"audio": {"array": data, "sampling_rate": 16000, "path": self.paths[index]}}
++
++    def __iter__(self):
++        for i in range(len(self.paths)):
++            yield self[i]
++
++
+ class Clips:
+     """Class for loading audio clips from the specified directory. The clips can first be filtered by their duration using the `min_clip_duration_s` and `max_clip_duration_s` parameters. Clips are retrieved as numpy float arrays via the `get_random_clip` method or via the `audio_generator` or `random_audio_generator` generators. Before retrieval, the audio clip can trim non-voice activiity. Before retrieval, the audio clip can be repeated until it is longer than a specified minimum duration.
+ 
+@@ -132,29 +159,20 @@ class Clips:
+                         ):
+                             filtered_paths.append(audio_file)
+ 
+-        # Load all filtered clips
+-        audio_dataset = datasets.Dataset.from_dict(
+-            {"audio": [str(i) for i in filtered_paths]}
+-        ).cast_column("audio", datasets.Audio())
+-
+-        # Convert all clips to 16 kHz sampling rate when accessed
+-        audio_dataset = audio_dataset.cast_column(
+-            "audio", datasets.Audio(sampling_rate=16000)
+-        )
++        # Load all filtered clips. Local patch: read wavs with soundfile and
++        # resample with scipy instead of datasets.Audio, whose torchcodec
++        # decoder segfaults when loaded alongside TensorFlow.
++        audio_dataset = _LazyClips(sorted(str(i) for i in filtered_paths))
+ 
+         if random_split_seed is not None:
+-            train_testvalid = audio_dataset.train_test_split(
+-                test_size=2 * split_count, seed=random_split_seed
+-            )
+-            test_valid = train_testvalid["test"].train_test_split(test_size=0.5)
+-            split_dataset = datasets.DatasetDict(
+-                {
+-                    "train": train_testvalid["train"],
+-                    "test": test_valid["test"],
+-                    "validation": test_valid["train"],
+-                }
+-            )
+-            self.split_clips = split_dataset
++            order = np.random.default_rng(random_split_seed).permutation(len(audio_dataset))
++            n_test = int(round(split_count * len(order))) if isinstance(split_count, float) else split_count
++            paths = audio_dataset.paths
++            self.split_clips = {
++                "train": _LazyClips([paths[i] for i in order[2 * n_test:]]),
++                "test": _LazyClips([paths[i] for i in order[:n_test]]),
++                "validation": _LazyClips([paths[i] for i in order[n_test:2 * n_test]]),
++            }
+ 
+         self.clips = audio_dataset
+ 
+diff --git a/microwakeword/data.py b/microwakeword/data.py
+index d1b2992..216372b 100644
+--- a/microwakeword/data.py
++++ b/microwakeword/data.py
+@@ -573,7 +573,14 @@ class FeatureHandler(object):
+                     mode, features_length, truncation_strategy
+                 )
+ 
+-                for spectrogram in generator:
++                # Local patch: cap how many spectrograms each set contributes to an
++                # evaluation pass (MWW_MAX_EVAL_PER_SET, default 10000). Without it the
++                # split ambient set alone expanded to several GB and the evaluation
++                # at step 500 OOM-killed WSL on a 12 GB machine.
++                cap = int(os.environ.get("MWW_MAX_EVAL_PER_SET", "10000"))
++                for count, spectrogram in enumerate(generator):
++                    if count >= cap:
++                        break
+                     data.append(spectrogram)
+                     labels.append(provider.label)
+                     weights.append(provider.penalty_weight)

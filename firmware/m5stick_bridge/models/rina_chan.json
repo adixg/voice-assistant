@@ -1,0 +1,15 @@
+{
+  "type": "micro",
+  "wake_word": "Rina-chan",
+  "author": "aicompanion (trained locally with microWakeWord, 2026-09-25)",
+  "model": "rina_chan.tflite",
+  "trained_languages": ["en"],
+  "version": 2,
+  "micro": {
+    "probability_cutoff": 0.99,
+    "feature_step_size": 10,
+    "sliding_window_size": 5,
+    "tensor_arena_size": 30000,
+    "minimum_esphome_version": "2024.7.0"
+  }
+}

@@ -58,6 +58,7 @@
 #include <math.h>
 #include "sprites.h"
 #include "vad.h"
+#include "wake_word.h"
 
 static const uint32_t SAMPLE_RATE = 16000;
 static const size_t MIC_CHUNK_SAMPLES = 512;  // ~32ms/chunk
@@ -972,6 +973,7 @@ void setup() {
   // avoid an excessive-draw brownout reboot; lower it from the app if reboots
   // start happening during loud playback on battery.
   StickSettings::load();
+  WakeWord::begin();  // logs and stays off if the model can't load
   OtaUpdate::begin();
 
   // A whole reply must fit: once playback starts the buffer can't move (the
@@ -1026,6 +1028,49 @@ static void pumpPlayback() {
   }
 }
 
+// Hands-free turn (vad.h ends it): started by a BtnB hold or the wake word.
+static void startHandsFree(const char *why) {
+  recState = HANDSFREE;
+  uiState = UI_LISTENING;
+  currentScreen = SCREEN_RINA;
+  captionText = "";
+  vad.reset();
+  prerollNext = prerollCount = 0;
+  M5.Speaker.end();
+  M5.Mic.begin();
+  setStatus("hands-free: listening", why);
+}
+
+// Wake word on the idle microphone (wake_word.h). Two buffers, queued with
+// M5.Mic.record(), which fills them in the background; each is handed to the
+// model only once it is full, so the feature frontend sees every sample once
+// and in order. Returns true when the wake word fired.
+static int16_t wakeBufs[2][MIC_CHUNK_SAMPLES];
+static uint8_t wakeHead = 0, wakeQueued = 0;
+static bool wakeListening = false;
+
+static bool listenForWakeWord() {
+  if (!wakeListening) {
+    M5.Speaker.end();  // mic and speaker share one codec
+    M5.Mic.begin();
+    WakeWord::reset();  // and ignore the first ~1 s, as ESPHome does
+    wakeHead = wakeQueued = 0;
+    wakeListening = true;
+  }
+  while (wakeQueued < 2) {
+    M5.Mic.record(wakeBufs[(wakeHead + wakeQueued) % 2], MIC_CHUNK_SAMPLES, SAMPLE_RATE);
+    wakeQueued++;
+  }
+  bool fired = false;
+  size_t busy = M5.Mic.isRecording();
+  while (wakeQueued > busy) {
+    if (WakeWord::feed(wakeBufs[wakeHead], MIC_CHUNK_SAMPLES)) fired = true;
+    wakeHead ^= 1;
+    wakeQueued--;
+  }
+  return fired;
+}
+
 void loop() {
   M5.update();
 
@@ -1071,15 +1116,22 @@ void loop() {
   bool btnBLive = (int32_t)(millis() - swallowBtnBUntil) >= 0;
 
   if (M5.BtnB.wasHold() && recState == REC_IDLE && uiState != UI_SPEAKING && bleReadyNow) {
-    recState = HANDSFREE;
-    uiState = UI_LISTENING;
-    currentScreen = SCREEN_RINA;
-    captionText = "";
-    vad.reset();
-    prerollNext = prerollCount = 0;
-    M5.Speaker.end();
-    M5.Mic.begin();
-    setStatus("hands-free: listening");
+    wakeListening = false;
+    startHandsFree("BtnB");
+  }
+
+  // Wake word: only while nothing else uses the mic or speaker (no turn in
+  // progress, no reply arriving or playing) and there's a link to send to.
+  bool wakeIdle = WakeWord::ready && bleReadyNow && recState == REC_IDLE && !receivingReply &&
+                  !M5.Speaker.isPlaying() && uiState != UI_SPEAKING && uiState != UI_THINKING &&
+                  uiState != UI_LISTENING;
+  if (wakeIdle) {
+    if (listenForWakeWord()) {
+      wakeListening = false;
+      startHandsFree("wake word");
+    }
+  } else {
+    wakeListening = false;
   }
 
   if (!btnBLive) {
