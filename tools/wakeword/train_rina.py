@@ -18,6 +18,11 @@ import yaml
 ROOT = Path(__file__).parent
 os.chdir(ROOT)
 
+# Which wake word: "rina_chan" (the original, unsuffixed dirs) or another id
+# whose clips live in positives_<id>/ and adversarial_<id>/.
+WAKE = os.environ.get("WAKE", "rina_chan")
+SUFFIX = "" if WAKE == "rina_chan" else f"_{WAKE}"
+
 
 def augmenter():
     from microwakeword.audio.augmentation import Augmentation
@@ -62,10 +67,10 @@ def config():
                 "truth": truth, "truncation_strategy": strategy, "type": "mmap"}
     cfg = {
         "window_step_ms": 10,
-        "train_dir": "trained_models/rina_chan",
+        "train_dir": f"trained_models/{WAKE}",
         "features": [
-            mmap("generated_augmented_features", 2.0, True, "truncate_start"),
-            mmap("adversarial_augmented_features", 3.0, False, "truncate_start"),
+            mmap(f"generated_augmented_features{SUFFIX}", 2.0, True, "truncate_start"),
+            mmap(f"adversarial_augmented_features{SUFFIX}", 3.0, False, "truncate_start"),
             mmap("negative_datasets/speech", 10.0, False, "random"),
             mmap("negative_datasets/dinner_party", 10.0, False, "random"),
             mmap("negative_datasets/no_speech", 5.0, False, "random"),
@@ -84,13 +89,13 @@ def config():
         "minimization_metric": None,
         "maximization_metric": "average_viable_recall",
     }
-    Path("training_parameters.yaml").write_text(yaml.dump(cfg))
+    Path(f"training_parameters{SUFFIX}.yaml").write_text(yaml.dump(cfg))
 
 
 def train():
     config()
     subprocess.run([sys.executable, "-m", "microwakeword.model_train_eval",
-                    "--training_config=training_parameters.yaml", "--train", "1",
+                    f"--training_config=training_parameters{SUFFIX}.yaml", "--train", "1",
                     "--restore_checkpoint", "1", "--test_tf_nonstreaming", "0",
                     "--test_tflite_nonstreaming", "0", "--test_tflite_nonstreaming_quantized", "0",
                     "--test_tflite_streaming", "0", "--test_tflite_streaming_quantized", "1",
@@ -104,8 +109,8 @@ def train():
 if __name__ == "__main__":
     step = sys.argv[1] if len(sys.argv) > 1 else "features"
     if step == "features":
-        features("positives", "generated_augmented_features")
-        features("adversarial", "adversarial_augmented_features")
+        features(f"positives{SUFFIX}", f"generated_augmented_features{SUFFIX}")
+        features(f"adversarial{SUFFIX}", f"adversarial_augmented_features{SUFFIX}")
     elif step == "train":
         train()
     else:

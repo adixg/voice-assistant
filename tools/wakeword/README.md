@@ -1,4 +1,4 @@
-# "Rina-chan" wake word — training pipeline
+# On-device wake words — training pipeline
 
 The on-device wake word (`firmware/m5stick_bridge/src/wake_word.h`) runs a
 microWakeWord streaming model trained with these scripts. Everything here runs
@@ -28,6 +28,27 @@ Then copy `trained_models/rina_chan/tflite_stream_state_internal_quant/stream_st
 to `firmware/m5stick_bridge/models/rina_chan.tflite` and run
 `python scripts/tflite_to_header.py models/rina_chan.tflite models/rina_chan.json`
 in `firmware/m5stick_bridge/`.
+
+## Wake words
+
+The firmware compiles in one model, `src/wake_word_model.h`, generated from a
+`models/*.tflite` + manifest pair. Two are trained:
+
+- **"Assistant"** (current): `models/assistant.tflite`, cutoff 0.90.
+  `WAKE=assistant` selects `positives_assistant/`, `adversarial_assistant/`
+  and `trained_models/assistant/` in the scripts; samples from
+  `gen_samples_assistant.sh`.
+- **"Rina-chan"**: `models/rina_chan.tflite`, cutoff 0.99 (`WAKE` unset).
+
+Switch with, in `firmware/m5stick_bridge/`:
+`python scripts/tflite_to_header.py models/rina_chan.tflite models/rina_chan.json`
+(or the assistant pair), then build and flash.
+
+"Assistant" is an everyday word, so it also fires when said mid-sentence;
+look-alikes (assist, assistance, insistent, resistant, a sister, instant, …)
+are trained as negatives, but containing phrases ("assistant manager",
+"assistants") were deliberately left out: labelling them negative would
+contradict the positives.
 
 ## Memory: read this before running
 
@@ -59,3 +80,7 @@ ambient test set, so a rough figure). The firmware uses cutoff 252/255 with a
 detected, no false triggers during a minute of normal talk, 2.8 ms per
 inference every 30 ms. The data is non-commercial personal use only (mixed
 licenses of the negative and background sets).
+
+"Assistant" (2026-09-25), same recipe, 20k steps: cutoff 0.91 → 13.3% false
+rejections, 0 false accepts/hour; 0.90 → 12.6%, 0.19/hour; 0.86 → 10.7%,
+0.56/hour. A short first test on the Stick: 2 of 2 detected (249 and 251/255).
