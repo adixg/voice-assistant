@@ -695,7 +695,7 @@ _PERCENT_OR_CHANGE = {
 TOOLS += [
     {
         "name": "get_stick_settings",
-        "description": "Read the M5Stick's current speaker volume and screen brightness (percent), whether the screen is off, its battery level, whether it's charging, and its firmware version.",
+        "description": "Read the M5Stick's current speaker volume and screen brightness (percent), whether the screen is off, its battery level and voltage, whether it's charging, and its firmware version. The Stick is the device you speak through: questions about your battery, volume, screen or firmware mean the Stick, so call this rather than guess.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
