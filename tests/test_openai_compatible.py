@@ -310,3 +310,55 @@ def test_tool_status_names_the_search_and_falls_back_for_unknown_tools():
     assert tool_status("search_web", {"query": "falcons score"}) == "searching the web: falcons score"
     assert tool_status("get_time", {}) == "checking the time"
     assert tool_status("mystery_tool", {}) == "using mystery_tool"
+
+
+def _gpu_mcp():
+    mcp = Mock()
+    mcp.openai_tools.return_value = [{"type": "function", "function": {"name": "get_gpu_status"}}]
+    mcp.call.return_value = '{"sensors": [{"temperature_c": 48}]}'
+    return mcp
+
+
+def test_a_reply_that_promises_to_check_is_sent_back_to_actually_check():
+    """"Let me check the GPU temperatures for you. One moment..." ended the
+    turn with nothing checked (2026-09-25): the reply is the end of the turn."""
+    import json as _json
+    from voicepipe.backends.openai_compatible import PROMISE_NUDGE
+    client = Mock()
+    client.post.side_effect = [
+        _response({"choices": [{"message": {"content": "Let me check the GPU temperatures. One moment..."}}]}),
+        _response({"choices": [{"message": {"content": None, "tool_calls": [{
+            "id": "call-1", "type": "function", "function": {"name": "get_gpu_status", "arguments": "{}"}}]}}]}),
+        _response({"choices": [{"message": {"content": "The 1650 is at 48 C."}}]}),
+    ]
+    events = dict(stream_reply(OpenAICompatibleLLM(client=client, mcp_client=_gpu_mcp()),
+                               [{"role": "user", "content": "how hot are my GPUs?"}]))
+    assert events["final"] == "The 1650 is at 48 C."
+    # (the mock keeps a reference to the growing message list, hence [1:3])
+    sent = client.post.call_args_list[1].kwargs["json"]["messages"]
+    assert sent[1:3] == [{"role": "assistant", "content": "Let me check the GPU temperatures. One moment..."},
+                         {"role": "user", "content": PROMISE_NUDGE}]
+    # The history keeps the tool call, not the broken promise or the note.
+    kept = _json.loads(events["tools"])
+    assert [m["role"] for m in kept] == ["assistant", "tool"] and kept[0]["tool_calls"]
+
+
+def test_a_second_promise_is_let_through_rather_than_looping():
+    client = Mock()
+    client.post.side_effect = [
+        _response({"choices": [{"message": {"content": "Hold on, let me look."}}]}),
+        _response({"choices": [{"message": {"content": "I'll check on that."}}]}),
+    ]
+    llm = OpenAICompatibleLLM(client=client, mcp_client=_gpu_mcp())
+    assert llm.ask([{"role": "user", "content": "x"}]) == "I'll check on that."
+    assert client.post.call_count == 2
+
+
+@pytest.mark.parametrize("reply", ["Let me know if you need anything else!",
+                                   "I checked, it's fine.", "Sure, see you tomorrow."])
+def test_ordinary_replies_are_not_mistaken_for_promises(reply):
+    client = Mock()
+    client.post.return_value = _response({"choices": [{"message": {"content": reply}}]})
+    llm = OpenAICompatibleLLM(client=client, mcp_client=_gpu_mcp())
+    assert llm.ask([{"role": "user", "content": "x"}]) == reply
+    assert client.post.call_count == 1

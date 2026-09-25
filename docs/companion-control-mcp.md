@@ -110,6 +110,21 @@ WebSocket (app 1.4+) -> BLE `SETTINGS` -> Stick, and the Stick's report back the
 same way. The gateway keeps reading the relay's socket while a turn runs, so a
 change requested mid-reply is confirmed without waiting for the turn to end.
 
+## Promises without a tool call
+
+A reply ends the turn, so "let me check that, one moment" with no tool call
+just stops there: live on 2026-09-25, "Let me check the GPU temperatures for
+you. One moment..." ended a turn with nothing checked, although the persona
+prompt already forbids it. Two fixes:
+
+- `get_gpu_status` now returns `sensors` (temperature, power, SM clock and the
+  GPU's name, from gpu-exporter), so that question has a tool to answer it.
+- The tool loop (`voicepipe/backends/openai_compatible.py`, `PROMISE`) spots a
+  reply that promises to check or look something up, and sends it back once
+  with a note: call a tool now, or say plainly that none can do it. A second
+  promise is let through. Neither the promise nor the note is kept in the
+  history; the agent logs `(promised without a tool call, asking again: …)`.
+
 ## Agent configuration
 
 The Kubernetes agent launches this server over stdio:

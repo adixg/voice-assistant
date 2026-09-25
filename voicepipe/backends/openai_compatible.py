@@ -6,6 +6,7 @@ vLLM, LM Studio, LiteLLM, or a hosted OpenAI-compatible endpoint.
 """
 import json
 import os
+import re
 
 from ..registry import DELTA, FINAL, LLM, STATUS, TOOLS
 from ..text import strip_think
@@ -52,6 +53,22 @@ def tool_status(name, arguments):
 # A tool result kept in the conversation history is cut to this: enough for
 # the model to see what the call did, not a whole weather forecast per turn.
 HISTORY_TOOL_RESULT_CHARS = 400
+
+# A reply that promises to go and check something. The reply ends the turn,
+# so there is no later: "Let me check the GPU temperatures for you. One
+# moment..." with no tool call (2026-09-25) just stopped there, even though
+# the persona prompt already forbids it.
+PROMISE = re.compile(
+    r"\b(let me (check|look|see|find|search|pull|grab)|i'?ll (check|look|find|search|pull)"
+    r"|i will (check|look|find|search)|one (moment|sec(ond)?)|just a (moment|sec(ond)?)"
+    r"|give me a (moment|sec(ond)?)|hold on|checking (that|now|on it))\b", re.IGNORECASE)
+# Sent back once, as a user turn, when a reply promises without a tool call.
+# Neither it nor the promise is kept in the history (history_tool_messages).
+PROMISE_NUDGE = (
+    "[Automatic note, not from the user: your reply said you would check or look "
+    "something up, but your turn ends when you reply, so nothing happens later. If one "
+    "of your tools can do it, call it now. If none can, say so plainly. Don't mention "
+    "this note.]")
 
 
 def history_tool_messages(messages):
@@ -169,6 +186,7 @@ class OpenAICompatibleLLM:
         try:
             working = list(messages)
             tools = self.mcp.openai_tools() if self.mcp else None
+            nudged = False
             for _ in range(self.max_tool_rounds + 1):
                 request = self._request(working, think)
                 if tools:
@@ -179,6 +197,14 @@ class OpenAICompatibleLLM:
                 tool_calls = message.get("tool_calls") or []
                 if not tool_calls or not self.mcp:
                     content = message.get("content") or ""
+                    if tools and not nudged and PROMISE.search(strip_think(content)):
+                        # Once: a second promise is let through rather than looping.
+                        print(f"  (promised without a tool call, asking again: {content[:80]!r})",
+                              flush=True)
+                        nudged = True
+                        working.append({"role": "assistant", "content": content})
+                        working.append({"role": "user", "content": PROMISE_NUDGE})
+                        continue
                     break
                 working.append(message)
                 for call in tool_calls:

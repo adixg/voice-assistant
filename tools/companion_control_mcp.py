@@ -356,6 +356,21 @@ def gpu_status(get_json: FetchJson = fetch_json) -> Json:
 
     utilization = series(util, "utilization_percent")
     vram_utilization = series(vram, "vram_percent")
+    # Temperature, power and clock per GPU (and its name), so "how hot are my
+    # GPUs?" has an answer: without them the model promised to check and didn't.
+    sensors: dict[tuple[str, str], Json] = {}
+    for query, field in (("DCGM_FI_DEV_GPU_TEMP", "temperature_c"),
+                         ("DCGM_FI_DEV_POWER_USAGE", "power_w"),
+                         ('aicompanion_gpu_clock_mhz{clock="sm"}', "sm_clock_mhz")):
+        for sample in prometheus_query(query, get_json):
+            labels = sample.get("metric", {})
+            if not isinstance(labels, dict):
+                continue
+            host = labels.get("hostname", labels.get("instance", "unknown"))
+            entry = sensors.setdefault((host, labels.get("gpu", "unknown")), {
+                "host": host, "gpu": labels.get("gpu", "unknown"), "name": labels.get("modelName")})
+            value = _sample_value(sample)
+            entry[field] = None if value is None else round(value, 1)
     # Reasons the clocks are being held down right now (gpu-exporter), minus
     # "gpu_idle", which only means there is nothing to do.
     throttled = prometheus_query('aicompanion_gpu_throttle{reason!="gpu_idle"} == 1', get_json)
@@ -365,6 +380,7 @@ def gpu_status(get_json: FetchJson = fetch_json) -> Json:
     return {
         "utilization": utilization,
         "vram_utilization": vram_utilization,
+        "sensors": list(sensors.values()),
         "throttling": throttling,
         "message": None if utilization else "No DCGM GPU samples are available yet.",
     }
@@ -606,7 +622,7 @@ TOOLS: list[Json] = [
     },
     {
         "name": "get_gpu_status",
-        "description": "Read NVIDIA GPU utilization and VRAM utilization collected by DCGM. Read-only.",
+        "description": "Read each NVIDIA GPU's utilization, VRAM use, temperature (C), power draw (W), clock speed and any throttling. Read-only.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {

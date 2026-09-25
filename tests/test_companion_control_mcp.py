@@ -230,6 +230,21 @@ def test_gpu_status_normalizes_labels_and_vram(monkeypatch):
     assert result["vram_utilization"] == [{"host": "10.42.1.92:9400", "gpu": "0", "vram_percent": 88.0}]
 
 
+def test_gpu_status_reports_temperature_power_and_clock_per_gpu(monkeypatch):
+    monkeypatch.setenv("COMPANION_CONTROL_PROMETHEUS_URL", "http://prometheus.test")
+    labels = {"hostname": "arch-ssd", "gpu": "0", "modelName": "NVIDIA GeForce GTX 1650"}
+    values = {"DCGM_FI_DEV_GPU_TEMP": 48, "DCGM_FI_DEV_POWER_USAGE": 12.345,
+              'aicompanion_gpu_clock_mhz{clock="sm"}': 300}
+
+    def get_json(url):
+        query = parse_qs(urlparse(url).query)["query"][0]
+        return prom_result([sample(labels, values[query])] if query in values else [])
+
+    assert mcp.gpu_status(get_json)["sensors"] == [
+        {"host": "arch-ssd", "gpu": "0", "name": "NVIDIA GeForce GTX 1650",
+         "temperature_c": 48.0, "power_w": 12.3, "sm_clock_mhz": 300.0}]
+
+
 def test_service_health_wraps_prometheus_failure():
     def fail(_url):
         raise mcp.ControlPlaneError("Prometheus unavailable")
