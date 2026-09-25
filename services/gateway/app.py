@@ -54,6 +54,7 @@ from voicepipe.speaker import (
     check_failed_line, rejection_line, too_short_line,
 )
 from voicepipe.text import sentences, speakable
+from voicepipe import conversation_log
 from voicepipe.utterances import DEFAULT_MAX_KEEP, keep as keep_utterance
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (DEVICE_SETTINGS_CHANGES, GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
@@ -119,6 +120,12 @@ def build_parser():
                          "with tools/voiceprint_add.py; off by default")
     ap.add_argument("--keep-max", type=int, default=DEFAULT_MAX_KEEP,
                     help=f"how many utterances --keep-utterances retains (default: {DEFAULT_MAX_KEEP})")
+    ap.add_argument("--conversation-log", default=None, metavar="DIR",
+                    help="log every turn (recording, transcript, reply, tool calls, timings) "
+                         "in DIR for later analysis; off by default")
+    ap.add_argument("--conversation-log-max-gb", type=float,
+                    default=conversation_log.DEFAULT_MAX_AUDIO_BYTES / 1024**3,
+                    help="delete the oldest logged recordings past this size (default: 2)")
     ap.add_argument("--no-speaker-check", action="store_true",
                     help="answer anyone, even with a voiceprint enrolled")
     SV.add_arguments(ap)
@@ -207,6 +214,7 @@ class GatewaySession:
         # The currently connected Stick, or None -- held so announce()/
         # encourage_loop can speak without a turn in progress.
         self.ws = None
+        self.turn_log = conversation_log.new_turn()
         self.rejection_streak = 0
         # Same reasoning as bridge_server.py's Session.speaking: a turn is a
         # reply/audio/end frame sequence, not one message, so an announcement
@@ -370,12 +378,24 @@ class GatewaySession:
     async def _turn(self, ws, pcm):
         turn_started = perf_counter()
         outcome = "error"
+        # This turn's record for --conversation-log, filled in as it goes.
+        self.turn_log = conversation_log.new_turn()
+        self.turn_log["audio_seconds"] = round(len(pcm) / (SAMPLE_RATE * 2), 2)
         try:
             await self._turn_inner(ws, pcm)
             outcome = "success"
+        except Exception as e:
+            self.turn_log["error"] = f"{type(e).__name__}: {e}"
+            raise
         finally:
             GATEWAY_TURNS.labels(outcome).inc()
             GATEWAY_TURN_DURATION.observe(perf_counter() - turn_started)
+            log_dir = getattr(self.args, "conversation_log", None)
+            if log_dir:
+                self.turn_log["seconds"] = round(perf_counter() - turn_started, 2)
+                max_bytes = int(getattr(self.args, "conversation_log_max_gb", 2) * 1024**3)
+                await asyncio.to_thread(conversation_log.record, log_dir, self.turn_log,
+                                        self.wav_in, max_bytes)
 
     async def _turn_inner(self, ws, pcm):
         with wave.open(self.wav_in, "wb") as w:
@@ -399,6 +419,8 @@ class GatewaySession:
             print(f"  speaker verdict={label} score={'-' if score is None else f'{score:.3f}'} "
                   f"threshold={self.gate.threshold} audio={seconds:.2f}s{streak}", flush=True)
             record_speaker_check(label, score, self.gate)
+            self.turn_log["speaker"] = {"verdict": label,
+                                        "score": None if score is None else round(score, 3)}
             keep_dir = getattr(self.args, "keep_utterances", None)
             if keep_dir:
                 await asyncio.to_thread(keep_utterance, self.wav_in, keep_dir, label, score,
@@ -427,6 +449,8 @@ class GatewaySession:
         stt_resp.raise_for_status()
         GATEWAY_STAGE_DURATION.labels("stt").observe(perf_counter() - stage_started)
         text = stt_resp.json()["text"]
+        self.turn_log["heard"] = text
+        self.turn_log.setdefault("stages", {})["stt"] = round(perf_counter() - stage_started, 2)
         print(f"  you said: {text or '(nothing heard)'}")
         if not text:
             await ws.send_text("reply:(didn't catch that)")
@@ -438,7 +462,9 @@ class GatewaySession:
             stage_started = perf_counter()
             reply, tool_messages = await self._ask(ws)
             GATEWAY_STAGE_DURATION.labels("agent").observe(perf_counter() - stage_started)
+            self.turn_log["stages"]["agent"] = round(perf_counter() - stage_started, 2)
         except Exception as e:  # noqa: BLE001
+            self.turn_log["error"] = f"llm error: {e}"
             self.messages.pop()  # don't leave a dangling user turn in the history
             print(f"  ! llm error: {e}")
             await ws.send_text(f"reply:(llm error: {e})")
@@ -448,11 +474,15 @@ class GatewaySession:
         self.messages.extend(tool_messages)
         self.messages.append({"role": "assistant", "content": reply})
         print(f"  Rina: {reply}")
+        self.turn_log["reply"] = reply
+        if tool_messages:
+            self.turn_log["tools"] = tool_messages
 
         await ws.send_text(f"reply:{reply}")
         stage_started = perf_counter()
         await self._speak(ws, reply)
         GATEWAY_STAGE_DURATION.labels("tts_and_wire_audio").observe(perf_counter() - stage_started)
+        self.turn_log["stages"]["tts_and_wire_audio"] = round(perf_counter() - stage_started, 2)
 
 
 class _AsgiWebSocketAdapter:

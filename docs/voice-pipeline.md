@@ -218,9 +218,32 @@ This matters: the profile is spent on *every* turn, and the 1650's model has a
 4096-token context (the 4060's has 40960), so `load_profile()` warns above 4000
 chars.
 
-This is the static half of memory. The other halves — things she learns and
-writes back, and searchable notes — need the agent loop and do not exist yet
-Keep them out of the profile: it is the always-resident slice, not a store.
+This is the static half of memory. Since 2026-09-25 she can also read and
+write one notes file, `~/rina/notes.md` on arch-ssd, which the owner edits too
+(`read_notes`/`add_note`/`write_notes`, see `docs/companion-control-mcp.md`).
+Searchable memory doesn't exist yet. Keep all of that out of the profile: it is
+the always-resident slice, not a store.
+
+## Conversation log (2026-09-25)
+
+`--conversation-log DIR` keeps every turn the gateway handled, for analysis:
+one JSON line per turn in `DIR/YYYY-MM-DD.jsonl` and that turn's recording in
+`DIR/audio/<id>.wav`. A line has `id`, `time`, `audio_seconds`, `speaker`
+(verdict and score), `heard` (the STT transcript), `reply`, `tools` (the tool
+call and result messages), `stages` (seconds for stt, agent, tts+wire),
+`seconds` for the whole turn, and `error` when something failed. Refused turns
+are logged too, with their verdict and no transcript.
+
+Only what the Stick sent is logged: the wake word and the end-of-speech
+detector run on the Stick, and it sends nothing until a turn starts (wake word
+or a button hold). Announcements and encouragement lines are not turns and
+aren't logged.
+
+The cluster writes to `/var/lib/aicompanion/conversations` on arch-ssd
+(`gateway.yaml`). Recordings past `--conversation-log-max-gb` (2) are deleted
+oldest first; the transcript lines stay. This is separate from
+`--keep-utterances` (the newest 50 clips, for the voiceprint). While the speaker
+check is off, it records anyone who speaks to the Stick, not only the owner.
 
 
 ## Adding samples to the voiceprint without re-enrolling (2026-09-24)

@@ -49,6 +49,13 @@ spec:
             # biometric data, kept local, bounded and pruned; delete this line and
             # the volume below to stop keeping it.
             - "--keep-utterances=/utterances"
+            # Every turn the Stick sent (wake word or button): its recording,
+            # what STT heard, the reply, tool calls, timings, errors, as one
+            # JSON line per turn in /var/lib/aicompanion/conversations/ on the
+            # node. Recordings past 2 GB are pruned oldest first; transcripts
+            # stay. Delete these lines and the volume below to stop.
+            - "--conversation-log=/conversations"
+            - "--conversation-log-max-gb=2"
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
             # Bearer token for /device/settings (the agent's volume/brightness
@@ -71,7 +78,12 @@ spec:
               mountPath: /app/memory
               readOnly: true
             - {name: utterances, mountPath: /utterances}
+            - {name: conversations, mountPath: /conversations}
       volumes:
+        - name: conversations
+          hostPath:
+            path: /var/lib/aicompanion/conversations
+            type: DirectoryOrCreate
         - name: utterances
           hostPath:
             path: /var/lib/aicompanion/utterances

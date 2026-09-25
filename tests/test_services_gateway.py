@@ -130,6 +130,53 @@ class TestHandleUtterance:
             assert session.messages[-4:] == [{"role": "user", "content": "dim it to five"}, *tool_msgs,
                                              {"role": "assistant", "content": "Dimmed it to 5%."}]
 
+    async def test_conversation_log_keeps_the_recording_transcript_reply_and_tools(
+            self, monkeypatch, tmp_path):
+        import base64
+        monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+        tool_msgs = [{"role": "tool", "tool_call_id": "c1", "content": '{"added": "milk"}'}]
+
+        def handler(request):
+            if request.url.path == "/transcribe":
+                return httpx.Response(200, json={"text": "note down milk"})
+            if request.url.path == "/ask_stream":
+                return httpx.Response(200, content="\n".join([
+                    json.dumps({"kind": "tools", "text": json.dumps(tool_msgs)}),
+                    json.dumps({"kind": "final", "text": "Noted."})]) + "\n")
+            if request.url.path == "/synth":
+                return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"x").decode()]})
+            raise AssertionError(request.url.path)
+
+        async with make_client(handler) as client:
+            session = make_session(client=client, args=make_args(conversation_log=str(tmp_path)))
+            await session.handle_utterance(FakeWebSocket(), LOUD_PCM)
+
+        [log] = list(tmp_path.glob("*.jsonl"))
+        [turn] = [json.loads(line) for line in log.read_text().splitlines()]
+        assert turn["heard"] == "note down milk" and turn["reply"] == "Noted."
+        assert turn["tools"] == tool_msgs and "error" not in turn
+        assert set(turn["stages"]) == {"stt", "agent", "tts_and_wire_audio"}
+        assert (tmp_path / turn["audio"]).read_bytes()[:4] == b"RIFF"
+
+    async def test_conversation_log_keeps_failed_turns_and_is_off_by_default(self, tmp_path):
+        def handler(request):
+            if request.url.path == "/transcribe":
+                return httpx.Response(200, json={"text": "hello"})
+            if request.url.path == "/ask_stream":
+                return httpx.Response(500)
+            raise AssertionError(request.url.path)
+
+        async with make_client(handler) as client:
+            await make_session(client=client).handle_utterance(FakeWebSocket(), LOUD_PCM)
+            assert list(tmp_path.iterdir()) == []
+            session = make_session(client=client, args=make_args(conversation_log=str(tmp_path)))
+            await session.handle_utterance(FakeWebSocket(), LOUD_PCM)
+
+        [turn] = [json.loads(line) for log in tmp_path.glob("*.jsonl")
+                  for line in log.read_text().splitlines()]
+        assert turn["heard"] == "hello" and turn["error"].startswith("llm error")
+        assert "reply" not in turn
+
     async def test_status_events_are_forwarded_before_the_reply(self):
         stream_handler = ndjson_stream_handler("done", statuses=["searching the web"])
 
@@ -295,6 +342,21 @@ class TestSpeakerGate:
 
             kept = [p.name for p in tmp_path.iterdir()]
             assert len(kept) == 1 and kept[0].endswith("_rejected_0.536.wav")
+
+    async def test_conversation_log_records_the_verdict_of_a_refused_turn(self, tmp_path):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"chunks_b64": []})
+
+        async with make_client(handler) as client:
+            gate = self.make_gate(gateway_app.REJECTED, score=0.12)
+            session = make_session(client=client, gate=gate,
+                                   args=make_args(conversation_log=str(tmp_path)))
+            await session.handle_utterance(FakeWebSocket(), LOUD_PCM)
+
+        [turn] = [json.loads(line) for log in tmp_path.glob("*.jsonl")
+                  for line in log.read_text().splitlines()]
+        assert turn["speaker"] == {"verdict": "rejected", "score": 0.12}
+        assert "heard" not in turn
 
     async def test_keeps_nothing_by_default(self, tmp_path):
         def handler(request: httpx.Request) -> httpx.Response:
