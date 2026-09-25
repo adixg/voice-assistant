@@ -1051,6 +1051,7 @@ static uint8_t wakeHead = 0, wakeQueued = 0;
 static bool wakeListening = false;
 
 static const uint32_t LINK_FAST_LINGER_MS = 5000;
+static uint32_t lastBusyMs = 0;  // last time a turn, reply, OTA or button kept the link fast
 
 static bool listenForWakeWord() {
   if (!wakeListening) {
@@ -1084,6 +1085,7 @@ void loop() {
   static bool bleWasReady = false;
   bool bleReadyNow = BleTransport::ready();
   if (bleReadyNow && !bleWasReady) {
+    lastBusyMs = millis();  // fast for a few seconds after connecting too
     M5.Mic.begin();
     if (uiState == UI_CONNECTING) uiState = UI_IDLE;
   }
@@ -1093,7 +1095,6 @@ void loop() {
   // dark by itself) and the link fast. The link stays fast a few seconds past
   // it, for the trailing frames and a quick follow-up; a pressed button also
   // asks for it, since a BtnA hold starts streaming mic audio.
-  static uint32_t lastBusyMs = 0;
   bool busy = recState != REC_IDLE || receivingReply || M5.Speaker.isPlaying() ||
               uiState == UI_LISTENING || uiState == UI_THINKING || uiState == UI_SPEAKING;
   if (busy || OtaUpdate::active() || M5.BtnA.isPressed() || M5.BtnB.isPressed()) lastBusyMs = millis();

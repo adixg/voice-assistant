@@ -502,7 +502,11 @@ Three changes, made together so they can be judged by one number:
   or a pressed button. Only the phone -> Stick direction waits (up to
   ~250 ms for the first frame of a reply or announcement); the Stick can
   still send at any event. Serial shows `[ble] link now … ms interval,
-  latency …` whenever the phone applies a change.
+  latency …` whenever the phone applies a change. The Stick compares what it
+  wants with what the phone last applied and asks again (idle every 3 s, fast
+  every 1 s) until they match: the first idle request, sent right after the
+  connect-time fast one, was silently dropped. Verified on the device: the
+  phone applies 30.0 ms / latency 4 idle and 15.0 ms / latency 0 fast.
 - **Screen auto-off** (`StickSettings::AUTO_OFF_MS`, 30 s). With nothing
   happening, the screen goes dark on its own; the first tap only wakes it
   (like the brightness-0 peek), and a turn, a reply or an announcement wakes

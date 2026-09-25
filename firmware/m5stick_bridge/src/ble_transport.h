@@ -57,9 +57,10 @@ static NimBLECharacteristic *txChar = nullptr;
 static volatile bool bleConnected = false;
 static volatile bool bleAuthed = false;
 static uint16_t gConnHandle = 0;
-// Which connection parameters were last asked for: fast while audio moves,
-// idle otherwise (setFastLink() below). Reset on every new connection.
-static bool linkFast = true;
+// The connection parameters the phone last applied (onConnect and
+// onConnParamsUpdate), which setFastLink() below compares with what it wants.
+static volatile uint16_t linkInterval = 0, linkLatency = 0;
+static uint32_t linkRequestMs = 0;
 
 // Hands each physical packet from BleEnvelope::encode() to a real notify()
 // call -- false on failure (no subscriber yet, stack's notify queue full)
@@ -138,6 +139,9 @@ class TxCharCB : public NimBLECharacteristicCallbacks {
 class ServerCB : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *server, NimBLEConnInfo &info) override {
     gConnHandle = info.getConnHandle();
+    linkInterval = info.getConnInterval();
+    linkLatency = info.getConnLatency();
+    linkRequestMs = 0;
     Serial.printf("[ble] connected, handle=%u\n", gConnHandle);
     // No link tuning here. A bonded phone starts encryption the instant it
     // connects, and firing PHY + data-length + connection-parameter updates
@@ -170,10 +174,12 @@ class ServerCB : public NimBLEServerCallbacks {
     // its own. Interval units are 1.25 ms, timeout units 10 ms: 7.5-15 ms
     // interval, 4 s supervision timeout -- carried over from Phase 2/3.
     // loop() drops to the idle parameters once nothing is happening.
-    linkFast = true;
+    linkRequestMs = millis();
     NimBLEDevice::getServer()->updateConnParams(info.getConnHandle(), 6, 12, 0, 400);
   }
   void onConnParamsUpdate(NimBLEConnInfo &info) override {
+    linkInterval = info.getConnInterval();
+    linkLatency = info.getConnLatency();
     Serial.printf("[ble] link now %.1f ms interval, latency %u\n", info.getConnInterval() * 1.25f,
                   info.getConnLatency());
   }
@@ -193,11 +199,24 @@ static bool sendFrame(uint8_t type, const uint8_t *payload, size_t len) {
 // 30-50 ms, and the Stick may skip up to 4 events in a row when it has nothing
 // to send, so the radio wakes every ~250 ms instead of every ~10 ms. The cost
 // is latency on the phone -> Stick side only (a frame can wait up to ~250 ms);
-// the Stick can still send at any event. Only asked for on a change: each
-// request is a link-layer procedure.
+// the Stick can still send at any event. Asked for only while what the phone
+// applied differs from what's wanted, and at most every LINK_RETRY_MS: each
+// request is a link-layer procedure, one sent while another is still running
+// is dropped (the first idle request, sent right after the fast one at
+// connect, never took: 2026-09-25), and the phone may settle on something
+// else, which isn't worth asking about more often than that.
+static const uint32_t LINK_RETRY_MS = 3000;
+
 static void setFastLink(bool fast) {
-  if (!ready() || fast == linkFast) return;
-  linkFast = fast;
+  if (!ready()) return;
+  bool isFast = linkLatency == 0 && linkInterval <= 12;
+  bool isIdle = linkLatency > 0;
+  if (fast ? isFast : isIdle) return;
+  // A fast request goes out at once (a turn is starting); an idle one waits
+  // out the retry interval, which also leaves the connect-time one in peace.
+  if (!fast && millis() - linkRequestMs < LINK_RETRY_MS) return;
+  if (fast && linkRequestMs && millis() - linkRequestMs < 1000) return;
+  linkRequestMs = millis();
   if (fast) {
     NimBLEDevice::getServer()->updateConnParams(gConnHandle, 6, 12, 0, 400);
   } else {
