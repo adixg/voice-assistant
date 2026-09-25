@@ -410,3 +410,17 @@ def test_reminder_tools_go_through_the_gateway_and_summarize():
                      ("GET", "/reminders", None), ("DELETE", "/reminders/a1b2c3", None)]
     with pytest.raises(mcp.ControlPlaneError):
         mcp.cancel_reminder({"id": "../device/settings"}, request=gateway)
+
+
+def test_stick_settings_include_the_battery_when_reported():
+    import time as _time
+
+    def gateway(method, path, body=None):
+        return {"volume": 128, "brightness": 38, "firmware": "fw",
+                "battery": {"percent": 76, "charging": False, "volts": 3.987,
+                            "reported_at": _time.time() - 120}}
+
+    result = mcp.stick_settings(request=gateway)
+    assert result["battery_percent"] == 76 and result["charging"] is False
+    assert result["battery_volts"] == 3.987
+    assert 1.9 <= result["battery_reported_minutes_ago"] <= 2.1

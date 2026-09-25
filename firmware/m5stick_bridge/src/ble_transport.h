@@ -57,6 +57,9 @@ static NimBLECharacteristic *txChar = nullptr;
 static volatile bool bleConnected = false;
 static volatile bool bleAuthed = false;
 static uint16_t gConnHandle = 0;
+// Which connection parameters were last asked for: fast while audio moves,
+// idle otherwise (setFastLink() below). Reset on every new connection.
+static bool linkFast = true;
 
 // Hands each physical packet from BleEnvelope::encode() to a real notify()
 // call -- false on failure (no subscriber yet, stack's notify queue full)
@@ -166,7 +169,13 @@ class ServerCB : public NimBLEServerCallbacks {
     // (RelayService's setPreferredPhy) and Android negotiates data length on
     // its own. Interval units are 1.25 ms, timeout units 10 ms: 7.5-15 ms
     // interval, 4 s supervision timeout -- carried over from Phase 2/3.
+    // loop() drops to the idle parameters once nothing is happening.
+    linkFast = true;
     NimBLEDevice::getServer()->updateConnParams(info.getConnHandle(), 6, 12, 0, 400);
+  }
+  void onConnParamsUpdate(NimBLEConnInfo &info) override {
+    Serial.printf("[ble] link now %.1f ms interval, latency %u\n", info.getConnInterval() * 1.25f,
+                  info.getConnLatency());
   }
 };
 
@@ -178,6 +187,23 @@ static bool ready() { return bleConnected && bleAuthed; }
 static bool sendFrame(uint8_t type, const uint8_t *payload, size_t len) {
   if (!ready()) return false;
   return BleEnvelope::encode(type, payload, len, notifySink);
+}
+
+// Fast (7.5-15 ms, every event) while audio or an OTA moves; idle otherwise:
+// 30-50 ms, and the Stick may skip up to 4 events in a row when it has nothing
+// to send, so the radio wakes every ~250 ms instead of every ~10 ms. The cost
+// is latency on the phone -> Stick side only (a frame can wait up to ~250 ms);
+// the Stick can still send at any event. Only asked for on a change: each
+// request is a link-layer procedure.
+static void setFastLink(bool fast) {
+  if (!ready() || fast == linkFast) return;
+  linkFast = fast;
+  if (fast) {
+    NimBLEDevice::getServer()->updateConnParams(gConnHandle, 6, 12, 0, 400);
+  } else {
+    NimBLEDevice::getServer()->updateConnParams(gConnHandle, 24, 40, 4, 400);
+  }
+  Serial.printf("[ble] asking for the %s link\n", fast ? "fast" : "idle");
 }
 
 static void sendStart() { sendFrame(BleEnvelope::FRAME_START, nullptr, 0); }

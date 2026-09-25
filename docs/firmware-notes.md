@@ -483,3 +483,31 @@ codec).
 - Not yet measured: battery drain of the always-on mic. Hands-free STT on the
   test turns was poor ("what's the time" -> "Is the shine right now"): likely
   clipped starts or mic level in that mode, not the wake word.
+
+## Power: battery reports, an idle BLE link, screen auto-off (2026-09-25)
+
+Three changes, made together so they can be judged by one number:
+
+- **Battery reports** (`battery_report.h`, `FRAME_BATTERY` 0x10): once a
+  minute and when the link comes up, the Stick sends its level, charging state
+  and voltage. The app (1.5) forwards them as `battery:PERCENT,CHARGING,MV`,
+  and the gateway exports `aicompanion_stick_battery_{percent,volts}`,
+  `aicompanion_stick_charging` and the report time, keeps the last report
+  across a disconnect, and hands it to the agent's `get_stick_settings`.
+  Grafana's "Stick battery" panel plots them with the drain in %/hour.
+- **An idle BLE link** (`BleTransport::setFastLink`). The link used to stay
+  at 7.5-15 ms, every event, for good. It now drops to 30-50 ms with a
+  peripheral latency of 4 once nothing has happened for 5 s, so the radio
+  wakes about every 250 ms, and goes back to fast on a turn, a reply, an OTA
+  or a pressed button. Only the phone -> Stick direction waits (up to
+  ~250 ms for the first frame of a reply or announcement); the Stick can
+  still send at any event. Serial shows `[ble] link now … ms interval,
+  latency …` whenever the phone applies a change.
+- **Screen auto-off** (`StickSettings::AUTO_OFF_MS`, 30 s). With nothing
+  happening, the screen goes dark on its own; the first tap only wakes it
+  (like the brightness-0 peek), and a turn, a reply or an announcement wakes
+  it by itself. A BtnA hold still talks while it's dark.
+
+Not measured yet: the gain from each. The report is there so it can be: note
+the drain %/hour on the dashboard over a few idle hours on battery, on this
+build and on the one before it (OTA makes switching cheap).

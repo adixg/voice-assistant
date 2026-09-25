@@ -96,7 +96,9 @@ class MainActivity : AppCompatActivity() {
             relay?.logListener = { line -> log(line) }
             relay?.settingsListener = { info -> showStickInfo(info) }
             relay?.otaListener = { message, percent -> showOta(message, percent) }
+            relay?.batteryListener = { battery -> showBattery(battery) }
             relay?.stickInfo?.let { showStickInfo(it) }
+            relay?.batteryInfo?.let { showBattery(it) }
             running = true
             updateButtons()
         }
@@ -205,6 +207,7 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
         relay?.logListener = null
         relay?.settingsListener = null
+        relay?.batteryListener = null
         relay?.otaListener = null
         if (isBound) {
             unbindService(connection)
@@ -244,6 +247,7 @@ class MainActivity : AppCompatActivity() {
     private fun stopRelay() {
         relay?.logListener = null
         relay?.settingsListener = null
+        relay?.batteryListener = null
         relay?.otaListener = null
         relay?.stopRelay()
         // stopSelf() cannot destroy a started service while this Activity is
@@ -283,9 +287,33 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private var shownFirmware: String? = null
+    private var shownBattery: RelayService.BatteryInfo? = null
+
+    private fun stickLine(): String {
+        val parts = mutableListOf("Stick firmware: ${shownFirmware ?: "?"}")
+        shownBattery?.let { b ->
+            val detail = listOfNotNull(
+                if (b.charging == true) "charging" else null,
+                b.millivolts?.let { "%.2f V".format(it / 1000.0) }
+            )
+            parts += "battery ${b.percent?.let { "$it%" } ?: "?"}" +
+                (if (detail.isEmpty()) "" else " (${detail.joinToString(", ")})")
+        }
+        return parts.joinToString(" · ")
+    }
+
+    private fun showBattery(info: RelayService.BatteryInfo) {
+        handler.post {
+            shownBattery = info
+            firmwareText.text = stickLine()
+        }
+    }
+
     private fun showStickInfo(info: RelayService.StickInfo) {
         handler.post {
-            firmwareText.text = "Stick firmware: ${info.firmware}"
+            shownFirmware = info.firmware
+            firmwareText.text = stickLine()
             volumeBar.progress = info.volume
             brightnessBar.progress = info.brightness
             volumeBar.isEnabled = true

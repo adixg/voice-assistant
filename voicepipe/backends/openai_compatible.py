@@ -28,7 +28,7 @@ TOOL_STATUS = {
     "get_gpu_status": "checking the GPUs",
     "get_agent_status": "checking the agent",
     "get_model_status": "checking the model",
-    "get_stick_settings": "checking my settings",
+    "get_stick_settings": "checking the Stick",
     "set_stick_volume": "changing the volume",
     "set_stick_brightness": "changing the brightness",
     "read_notes": "reading the notes",

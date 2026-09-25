@@ -111,6 +111,13 @@ class RelayService : Service() {
     var stickInfo: StickInfo? = null
         private set
     var settingsListener: ((StickInfo) -> Unit)? = null
+
+    /** The Stick's last battery report (BATTERY frame); null parts are unknown. */
+    data class BatteryInfo(val percent: Int?, val charging: Boolean?, val millivolts: Int?)
+
+    var batteryInfo: BatteryInfo? = null
+        private set
+    var batteryListener: ((BatteryInfo) -> Unit)? = null
     /** Firmware update progress: a message, and 0-100 (or -1 when it ended badly). */
     var otaListener: ((String, Int) -> Unit)? = null
 
@@ -186,6 +193,7 @@ class RelayService : Service() {
             FrameType.AUDIO_CHUNK -> sendWsBinary(payload)
             FrameType.SETTINGS -> onStickSettings(payload)
             FrameType.OTA_STATUS -> onOtaStatus(payload)
+            FrameType.BATTERY -> onStickBattery(payload)
             else -> log("unexpected TX frame type=0x%02X len=%d".format(type, payload.size))
         }
     }
@@ -208,6 +216,7 @@ class RelayService : Service() {
             // device-control API needs them); the Stick's own report may have
             // arrived before this socket opened.
             stickInfo?.let { sendSettingsReport(it) }
+            batteryInfo?.let { sendBatteryReport(it) }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -396,6 +405,30 @@ class RelayService : Service() {
         log("Stick: firmware ${info.firmware}, volume ${info.volume}, brightness ${info.brightness}")
         settingsListener?.invoke(info)
         sendSettingsReport(info)
+    }
+
+    private fun onStickBattery(payload: ByteArray) {
+        if (payload.size < 5 || payload[0].toInt() != 1) {
+            log("malformed BATTERY frame (${payload.size} bytes)")
+            return
+        }
+        val percent = payload[1].toInt() and 0xFF
+        val charging = payload[2].toInt() and 0xFF
+        val mv = (payload[3].toInt() and 0xFF) or ((payload[4].toInt() and 0xFF) shl 8)
+        val info = BatteryInfo(
+            percent = percent.takeIf { it <= 100 },
+            charging = when (charging) { 0 -> false; 1 -> true; else -> null },
+            millivolts = mv.takeIf { it > 0 }
+        )
+        batteryInfo = info
+        batteryListener?.invoke(info)
+        sendBatteryReport(info)
+    }
+
+    /** "battery:PERCENT,CHARGING,MILLIVOLTS" for the gateway; unknown parts are empty. */
+    private fun sendBatteryReport(info: BatteryInfo) {
+        val charging = info.charging?.let { if (it) "1" else "0" } ?: ""
+        if (ws != null) sendWsText("battery:${info.percent ?: ""},$charging,${info.millivolts ?: ""}")
     }
 
     private fun sendSettingsReport(info: StickInfo) {

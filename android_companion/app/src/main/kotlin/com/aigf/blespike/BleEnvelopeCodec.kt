@@ -25,6 +25,8 @@ object FrameType {
     const val OTA_DATA: Byte = 0x0D
     const val OTA_END: Byte = 0x0E
     const val OTA_STATUS: Byte = 0x0F
+    // Stick -> phone, once a minute: see firmware/.../battery_report.h.
+    const val BATTERY: Byte = 0x10
 }
 
 private const val CONT: Byte = 0xFF.toByte()

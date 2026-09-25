@@ -171,6 +171,25 @@ data:
           "targets": [{"expr": "sum(elevenlabs_credits_remaining_estimate)", "legendFormat": "estimated credits remaining", "refId": "A"}],
           "title": "ElevenLabs credits remaining (estimated)",
           "type": "stat"
+        },
+        {
+          "description": "The Stick's own battery report, once a minute while it is connected (gaps: it wasn't). Drain is the %/hour slope over 30 minutes: compare it across firmware builds.",
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "percent", "min": 0, "max": 100}, "overrides": [
+            {"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [{"id": "unit", "value": "volt"}, {"id": "custom.axisPlacement", "value": "right"}, {"id": "min", "value": 3.2}, {"id": "max", "value": 4.3}]},
+            {"matcher": {"id": "byFrameRefID", "options": "C"}, "properties": [{"id": "custom.drawStyle", "value": "bars"}, {"id": "unit", "value": "none"}, {"id": "max", "value": 1}]},
+            {"matcher": {"id": "byFrameRefID", "options": "D"}, "properties": [{"id": "unit", "value": "none"}, {"id": "custom.axisPlacement", "value": "right"}, {"id": "min", "value": null}, {"id": "max", "value": null}]}
+          ]},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 70},
+          "id": 22,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi"}},
+          "targets": [
+            {"expr": "aicompanion_stick_battery_percent", "legendFormat": "battery %", "refId": "A"},
+            {"expr": "aicompanion_stick_battery_volts", "legendFormat": "voltage", "refId": "B"},
+            {"expr": "aicompanion_stick_charging", "legendFormat": "charging", "refId": "C"},
+            {"expr": "-deriv(aicompanion_stick_battery_percent[30m]) * 3600 and aicompanion_stick_charging == 0", "legendFormat": "drain %/hour", "refId": "D"}
+          ],
+          "title": "Stick battery",
+          "type": "timeseries"
         }
       ],
       "schemaVersion": 41,

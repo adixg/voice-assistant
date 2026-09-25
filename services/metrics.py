@@ -22,6 +22,13 @@ GATEWAY_TURNS = Counter("aicompanion_gateway_turns_total", "Gateway turns comple
 # (volume/brightness, from the agent's MCP tools), by result: the audit count.
 DEVICE_SETTINGS_CHANGES = Counter("aicompanion_gateway_device_settings_changes_total",
                                   "Device settings changes requested", ("result",))
+# The Stick's battery, as it last reported it (once a minute while connected,
+# via the phone's "battery:" report). The report time shows when it went stale.
+STICK_BATTERY_PERCENT = Gauge("aicompanion_stick_battery_percent", "Stick battery level (%)")
+STICK_BATTERY_VOLTS = Gauge("aicompanion_stick_battery_volts", "Stick battery voltage (V)")
+STICK_CHARGING = Gauge("aicompanion_stick_charging", "1 while the Stick is charging")
+STICK_BATTERY_REPORT_TIME = Gauge("aicompanion_stick_battery_report_timestamp_seconds",
+                                  "When the Stick last reported its battery (unix time)")
 GATEWAY_TURN_DURATION = Histogram("aicompanion_gateway_turn_duration_seconds", "Gateway full turn duration")
 GATEWAY_STAGE_DURATION = Histogram("aicompanion_gateway_stage_duration_seconds", "Gateway downstream stage duration", ("stage",))
 

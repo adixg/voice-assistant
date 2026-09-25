@@ -800,3 +800,29 @@ def test_reminder_loop_says_due_ones_and_keeps_them_without_a_stick(monkeypatch,
     assert spoken == ["Reminder from Tuesday 31 December 7:00 PM: stretch"]  # once, and late
     assert store.list() == []
     assert session.messages[-1] == {"role": "assistant", "content": spoken[0]}
+
+
+def test_battery_reports_are_parsed_exported_and_kept_after_a_disconnect(monkeypatch):
+    from prometheus_client import REGISTRY
+    from fastapi.testclient import TestClient
+    session = make_session()
+    ws = FakeWebSocket(["battery:76,0,3987", "battery:x,y", "settings:128,38,fw"])
+    asyncio.run(gateway_app.handle_client(ws, session))
+    assert session.battery["percent"] == 76 and session.battery["charging"] is False
+    assert session.battery["volts"] == 3.987
+    assert REGISTRY.get_sample_value("aicompanion_stick_battery_percent") == 76
+    assert REGISTRY.get_sample_value("aicompanion_stick_battery_volts") == 3.987
+    assert REGISTRY.get_sample_value("aicompanion_stick_charging") == 0
+
+    session.on_battery_report(",,")  # all unknown: kept as unknown, gauges untouched
+    assert session.battery["percent"] is None
+    assert REGISTRY.get_sample_value("aicompanion_stick_battery_percent") == 76
+
+    session.on_battery_report("80,1,4100")
+    session.ws = FakeWebSocket()
+    session.device = {"volume": 128, "brightness": 38, "firmware": "fw"}
+    monkeypatch.setenv("GATEWAY_CONTROL_TOKEN", "t0k")
+    monkeypatch.setattr(gateway_app, "_session", session)
+    body = TestClient(gateway_app.app).get("/device/settings",
+                                           headers={"Authorization": "Bearer t0k"}).json()
+    assert body["battery"]["percent"] == 80 and body["battery"]["charging"] is True

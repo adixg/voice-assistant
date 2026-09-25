@@ -78,6 +78,10 @@ enum FrameType : uint8_t {
   FRAME_OTA_DATA    = 0x0D,
   FRAME_OTA_END     = 0x0E,
   FRAME_OTA_STATUS  = 0x0F,
+  // Added 2026-09-25 (battery_report.h): Stick -> phone only, once a minute
+  // and when the link comes up. [format=1][percent 0-100, 255 unknown]
+  // [charging 0/1, 255 unknown][millivolts, 2 bytes little-endian].
+  FRAME_BATTERY     = 0x10,
 };
 
 constexpr uint8_t CONT = 0xFF;  // continuation marker -- never a real logical frame type

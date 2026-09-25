@@ -27,6 +27,10 @@ static const uint8_t DEFAULT_BRIGHTNESS = 38;
 // wakes it ("peek") at the last brightness it was on at, for PEEK_MS, then it
 // goes dark again; the tap that wakes it does nothing else (main.cpp).
 static const uint32_t PEEK_MS = 10000;
+// With the screen on, it goes dark after this long with nothing happening (no
+// turn, no reply, no button), like a phone's: the first tap then only wakes
+// it, the same way a peek does. A turn or a reply wakes it by itself.
+static const uint32_t AUTO_OFF_MS = 30000;
 
 static uint8_t volume = DEFAULT_VOLUME;
 static uint8_t brightness = DEFAULT_BRIGHTNESS;
@@ -34,10 +38,12 @@ static uint8_t lastOnBrightness = DEFAULT_BRIGHTNESS;  // what a peek shows
 static uint32_t peekUntil = 0;       // 0 = not peeking
 static bool panelAsleep = false;
 static bool repaintDue = false;      // the screen just came back: redraw it all
+static bool autoOff = false;         // dark after AUTO_OFF_MS idle (brightness is still set)
+static uint32_t lastActivityMs = 0;
 
-static bool screenOff() { return brightness == 0; }
+static bool screenOff() { return brightness == 0 || autoOff; }
 // Whether anything should be drawn at all this loop.
-static bool screenVisible() { return brightness != 0 || peekUntil != 0; }
+static bool screenVisible() { return !screenOff() || peekUntil != 0; }
 
 static void setPanel(bool on, uint8_t level) {
   if (on) {
@@ -61,6 +67,12 @@ static void setPanel(bool on, uint8_t level) {
 // peeking, a tap acts normally and restarts the peek timer.
 static bool peek() {
   if (!screenOff()) return false;
+  if (autoOff) {  // back on for good (until the next AUTO_OFF_MS idle)
+    autoOff = false;
+    lastActivityMs = millis();
+    setPanel(true, brightness);
+    return true;
+  }
   bool wasDark = peekUntil == 0;
   peekUntil = millis() + PEEK_MS;
   if (peekUntil == 0) peekUntil = 1;
@@ -81,9 +93,11 @@ static volatile bool reportDue = false;
 
 static void apply() {
   M5.Speaker.setVolume(volume);
+  lastActivityMs = millis();
   if (brightness) {
     lastOnBrightness = brightness;
     peekUntil = 0;
+    autoOff = false;
     setPanel(true, brightness);
   } else if (!peekUntil) {
     setPanel(false, 0);
@@ -113,12 +127,30 @@ static void onFrame(const uint8_t *payload, size_t len) {
   pending = true;
 }
 
+// Something is happening (a turn, a reply, a button held): keeps the screen
+// on, and brings it back if it went dark by itself. A tap on a dark screen
+// goes through peek() instead, so the tap that wakes it does nothing else.
+static void touch(bool wake) {
+  lastActivityMs = millis();
+  if (wake && autoOff) {
+    autoOff = false;
+    setPanel(true, brightness);
+  }
+}
+
 // Called once per loop(). Applies a pending change, and sends the report when
-// one is due (after a change, or when the link comes up).
-static void tick(bool linkUp) {
+// one is due (after a change, or when the link comes up). `busy` is a turn or
+// reply in progress, which keeps the screen on.
+static void tick(bool linkUp, bool busy) {
   static bool wasUp = false;
   if (linkUp && !wasUp) reportDue = true;
   wasUp = linkUp;
+
+  if (busy) touch(true);
+  if (brightness && !autoOff && !peekUntil && millis() - lastActivityMs >= AUTO_OFF_MS) {
+    autoOff = true;
+    setPanel(false, 0);
+  }
 
   if (peekUntil && (int32_t)(millis() - peekUntil) >= 0) {
     peekUntil = 0;

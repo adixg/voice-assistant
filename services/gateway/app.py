@@ -37,6 +37,7 @@ import json
 import os
 import random
 import tempfile
+import time
 import wave
 from contextlib import suppress
 from time import perf_counter
@@ -59,7 +60,9 @@ from voicepipe.reminders import ReminderError, ReminderStore
 from voicepipe.utterances import DEFAULT_MAX_KEEP, keep as keep_utterance
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (DEVICE_SETTINGS_CHANGES, GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
-                              install_http_metrics, record_speaker_check, set_speaker_gate_state)
+                              STICK_BATTERY_PERCENT, STICK_BATTERY_REPORT_TIME, STICK_BATTERY_VOLTS,
+                              STICK_CHARGING, install_http_metrics, record_speaker_check,
+                              set_speaker_gate_state)
 from services.telemetry import install_tracing
 
 app = FastAPI(title="aicompanion-gateway")
@@ -181,7 +184,7 @@ def get_device_settings(authorization: str | None = Header(None)):
         raise HTTPException(503, "no Stick connected")
     if _session.device is None:
         raise HTTPException(503, "the Stick hasn't reported its settings yet")
-    return _session.device
+    return {**_session.device, "battery": _session.battery}
 
 
 @app.post("/device/settings")
@@ -280,6 +283,30 @@ class GatewaySession:
         # forwards each SETTINGS report as "settings:V,B,FIRMWARE"), or None.
         self.device = None
         self._device_changed = asyncio.Condition()
+        # The Stick's last battery report (on_battery_report), or None.
+        self.battery = None
+
+    def on_battery_report(self, text):
+        """A "battery:PERCENT,CHARGING,MILLIVOLTS" report from the relay (empty
+        parts are unknown). Kept after a disconnect, with its time, so the
+        last level before the Stick went away is still known."""
+        try:
+            percent, charging, millivolts = (part.strip() for part in text.split(",", 2))
+            battery = {"percent": int(percent) if percent else None,
+                       "charging": None if charging == "" else charging == "1",
+                       "volts": round(int(millivolts) / 1000, 3) if millivolts else None,
+                       "reported_at": time.time()}
+        except ValueError:
+            print(f"  ? malformed battery report: {text!r}", flush=True)
+            return
+        self.battery = battery
+        if battery["percent"] is not None:
+            STICK_BATTERY_PERCENT.set(battery["percent"])
+        if battery["volts"] is not None:
+            STICK_BATTERY_VOLTS.set(battery["volts"])
+        if battery["charging"] is not None:
+            STICK_CHARGING.set(int(battery["charging"]))
+        STICK_BATTERY_REPORT_TIME.set(battery["reported_at"])
 
     async def on_device_report(self, text):
         """A "settings:V,B[,FIRMWARE]" report from the relay."""
@@ -597,6 +624,8 @@ async def _client_loop(ws, session, turns):
             session.reset()
         elif msg.startswith("settings:"):
             await session.on_device_report(msg[len("settings:"):])
+        elif msg.startswith("battery:"):
+            session.on_battery_report(msg[len("battery:"):])
         else:
             print(f"  ? unexpected control message: {msg!r}")
 

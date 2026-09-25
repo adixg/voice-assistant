@@ -114,6 +114,15 @@ def _describe_stick(settings: Json) -> Json:
         "screen_off": brightness == 0,
         "firmware": settings.get("firmware"),
     }
+    battery = settings.get("battery")
+    if isinstance(battery, dict):
+        described["battery_percent"] = battery.get("percent")
+        described["charging"] = battery.get("charging")
+        described["battery_volts"] = battery.get("volts")
+        reported = battery.get("reported_at")
+        if isinstance(reported, (int, float)):
+            described["battery_reported_minutes_ago"] = round(
+                (datetime.now(timezone.utc).timestamp() - reported) / 60, 1)
     if volume > VOLUME_BROWNOUT_RAW:
         described["note"] = "Volume above 75% can make the Stick reboot when it runs on battery."
     return described
@@ -686,7 +695,7 @@ _PERCENT_OR_CHANGE = {
 TOOLS += [
     {
         "name": "get_stick_settings",
-        "description": "Read the M5Stick's current speaker volume and screen brightness (percent), whether the screen is off, and its firmware version.",
+        "description": "Read the M5Stick's current speaker volume and screen brightness (percent), whether the screen is off, its battery level, whether it's charging, and its firmware version.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {

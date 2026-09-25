@@ -854,6 +854,7 @@ void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
 #include "ble_transport.h"
 #include "stick_settings.h"
 #include "ota_update.h"
+#include "battery_report.h"
 
 static void onSettingsFrame(const uint8_t *payload, size_t len) { StickSettings::onFrame(payload, len); }
 static void onOtaFrame(uint8_t type, const uint8_t *payload, size_t len) { OtaUpdate::onFrame(type, payload, len); }
@@ -1049,6 +1050,8 @@ static int16_t wakeBufs[2][MIC_CHUNK_SAMPLES];
 static uint8_t wakeHead = 0, wakeQueued = 0;
 static bool wakeListening = false;
 
+static const uint32_t LINK_FAST_LINGER_MS = 5000;
+
 static bool listenForWakeWord() {
   if (!wakeListening) {
     M5.Speaker.end();  // mic and speaker share one codec
@@ -1086,7 +1089,19 @@ void loop() {
   }
   bleWasReady = bleReadyNow;
 
-  StickSettings::tick(bleReadyNow);
+  // A turn or reply in progress: keeps the screen on (and wakes it if it went
+  // dark by itself) and the link fast. The link stays fast a few seconds past
+  // it, for the trailing frames and a quick follow-up; a pressed button also
+  // asks for it, since a BtnA hold starts streaming mic audio.
+  static uint32_t lastBusyMs = 0;
+  bool busy = recState != REC_IDLE || receivingReply || M5.Speaker.isPlaying() ||
+              uiState == UI_LISTENING || uiState == UI_THINKING || uiState == UI_SPEAKING;
+  if (busy || OtaUpdate::active() || M5.BtnA.isPressed() || M5.BtnB.isPressed()) lastBusyMs = millis();
+  BleTransport::setFastLink(millis() - lastBusyMs < LINK_FAST_LINGER_MS);
+  if (M5.BtnA.isPressed() || M5.BtnB.isPressed()) StickSettings::touch(false);
+
+  StickSettings::tick(bleReadyNow, busy);
+  BatteryReport::tick(bleReadyNow);
   OtaUpdate::tick(bleReadyNow);
   static bool otaWasActive = false;
   if (OtaUpdate::active()) {
