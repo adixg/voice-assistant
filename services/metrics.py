@@ -29,6 +29,9 @@ STICK_BATTERY_VOLTS = Gauge("aicompanion_stick_battery_volts", "Stick battery vo
 STICK_CHARGING = Gauge("aicompanion_stick_charging", "1 while the Stick is charging")
 STICK_BATTERY_REPORT_TIME = Gauge("aicompanion_stick_battery_report_timestamp_seconds",
                                   "When the Stick last reported its battery (unix time)")
+# NaN, not 0, until the first report: 0 would plot as a flat battery.
+for _gauge in (STICK_BATTERY_PERCENT, STICK_BATTERY_VOLTS, STICK_CHARGING, STICK_BATTERY_REPORT_TIME):
+    _gauge.set(float("nan"))
 GATEWAY_TURN_DURATION = Histogram("aicompanion_gateway_turn_duration_seconds", "Gateway full turn duration")
 GATEWAY_STAGE_DURATION = Histogram("aicompanion_gateway_stage_duration_seconds", "Gateway downstream stage duration", ("stage",))
 
