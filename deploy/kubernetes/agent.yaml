@@ -60,11 +60,25 @@ spec:
             - name: COMPANION_CONTROL_TOKEN
               valueFrom:
                 secretKeyRef: {name: device-control, key: token, optional: true}
+            # The notes tools (read_notes/add_note/write_notes) touch only
+            # this one file, which the owner also edits on arch-ssd.
+            - name: COMPANION_CONTROL_NOTES_FILE
+              value: /rina/notes.md
           ports:
             - {containerPort: 8002, name: metrics}
           readinessProbe:
             httpGet: {path: /health, port: 8002}
             initialDelaySeconds: 5
+          volumeMounts:
+            - {name: notes, mountPath: /rina}
+      volumes:
+        # The directory, not the file: editors save by renaming a new file
+        # over the old one, and a single-file mount would keep the old inode.
+        # Nothing else of the home directory is mounted.
+        - name: notes
+          hostPath:
+            path: /home/aditya/rina
+            type: Directory
 ---
 apiVersion: v1
 kind: Service

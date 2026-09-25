@@ -1,4 +1,6 @@
 """Tests for the dependency-free companion-control MCP transport and tools."""
+import json
+
 import pytest
 
 from urllib.parse import parse_qs, urlparse
@@ -21,13 +23,14 @@ def test_initialize_negotiates_the_client_protocol_version():
     assert response["result"]["capabilities"] == {"tools": {"listChanged": False}}
 
 
-def test_tools_list_is_read_only_except_the_sticks_volume_and_brightness():
+def test_tools_list_is_read_only_except_the_sticks_settings_and_the_notes_file():
     """The permission boundary: adding any other write tool must change this test."""
     response = mcp.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert [tool["name"] for tool in response["result"]["tools"]] == [
         "get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
         "get_time", "search_web", "get_weather",
-        "get_stick_settings", "set_stick_volume", "set_stick_brightness"]
+        "get_stick_settings", "set_stick_volume", "set_stick_brightness",
+        "read_notes", "add_note", "write_notes"]
 
 
 def test_current_time_returns_requested_timezone(monkeypatch):
@@ -320,3 +323,55 @@ def test_gateway_errors_surface_as_tool_errors(monkeypatch):
                                    "params": {"name": "set_stick_volume", "arguments": {"percent": 5}}})
     assert response["result"]["isError"] is True
     assert "no Stick connected" in response["result"]["content"][0]["text"]
+
+
+@pytest.fixture
+def notes_file(tmp_path, monkeypatch):
+    path = tmp_path / "rina" / "notes.md"
+    path.parent.mkdir()
+    monkeypatch.setenv("COMPANION_CONTROL_NOTES_FILE", str(path))
+    return path
+
+
+def call_tool(name, arguments=None):
+    response = mcp.handle_request({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                                   "params": {"name": name, "arguments": arguments or {}}})
+    result = response["result"]
+    return result["isError"], json.loads(result["content"][0]["text"])
+
+
+def test_read_notes_on_a_missing_file_is_empty(notes_file):
+    is_error, payload = call_tool("read_notes")
+    assert not is_error
+    assert payload["text"] == "" and payload["lines"] == 0
+
+
+def test_add_note_appends_a_line_and_keeps_the_rest(notes_file):
+    notes_file.write_text("# Notes\nbuy milk")  # no trailing newline, as an editor might leave it
+    is_error, payload = call_tool("add_note", {"text": "  call mum on Sunday \n"})
+    assert not is_error and payload["added"] == "call mum on Sunday"
+    assert notes_file.read_text() == "# Notes\nbuy milk\ncall mum on Sunday\n"
+    assert call_tool("read_notes")[1]["lines"] == 3
+
+
+def test_write_notes_replaces_the_file_and_leaves_no_temp_files(notes_file):
+    notes_file.write_text("old\n")
+    is_error, payload = call_tool("write_notes", {"text": "new"})
+    assert not is_error and payload["previous"]["lines"] == 1
+    assert notes_file.read_text() == "new\n"
+    # The replaced version is kept once, and no temp files are left behind.
+    assert sorted(p.name for p in notes_file.parent.iterdir()) == ["notes.md", "notes.md.bak"]
+    assert (notes_file.parent / "notes.md.bak").read_text() == "old\n"
+
+
+def test_notes_writes_are_capped_and_leave_the_file_alone(notes_file):
+    notes_file.write_text("keep\n")
+    is_error, payload = call_tool("write_notes", {"text": "x" * (mcp.NOTES_MAX_BYTES + 1)})
+    assert is_error and "20 KB" in payload["error"]
+    assert call_tool("add_note", {"text": "   "})[0]
+    assert notes_file.read_text() == "keep\n"
+
+
+def test_notes_tools_reject_bad_arguments(notes_file):
+    assert call_tool("add_note", {"text": 5})[0]
+    assert call_tool("read_notes", {"path": "/etc/passwd"})[0]

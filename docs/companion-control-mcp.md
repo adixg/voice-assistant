@@ -39,8 +39,27 @@ Since 0.2 (2026-09-24) it also has its first **write** tools, for the Stick:
   for 10 s). A volume above 75% carries a note that it can brown out the Stick
   on battery.
 
-It still has no subprocess, filesystem or Kubernetes API access: a
-voice-triggered model must not receive generic cluster or shell control.
+Since 0.3 (2026-09-25) it can read and write **one notes file**, which the
+owner also edits: `~/rina/notes.md` on arch-ssd, at `/rina/notes.md` in the
+agent pod (`COMPANION_CONTROL_NOTES_FILE`).
+
+- `read_notes`: the whole file (empty if it doesn't exist yet).
+- `add_note`: appends one line, keeping everything else.
+- `write_notes`: replaces the whole file (rewrite, reorganize, delete lines);
+  the version it replaced is kept as `notes.md.bak`, one step deep.
+
+The pod mounts `~/rina/` (a hostPath of the directory, not the file: editors
+save by renaming a new file over the old one, which a single-file bind mount
+would never see) and nothing else of the home directory. Writes go to a temp
+file in that directory and are renamed over `notes.md`, so neither side ever
+reads half a file, and are handed back to the directory's owner (the agent runs
+as root). The file is capped at 20 KB, so it always fits in the model's context.
+An earlier plan for read-only access to all of `~` was dropped (2026-09-25) in
+favour of this one file. While the speaker check is off, any voice near the
+Stick can read or rewrite the notes: don't keep secrets there.
+
+Beyond that one file it still has no subprocess, filesystem or Kubernetes API
+access: a voice-triggered model must not receive generic cluster or shell control.
 The write tools follow the rules set for them before they existed:
 
 - **A project-owned, authenticated control API**: the gateway's

@@ -30,6 +30,9 @@ TOOL_STATUS = {
     "get_stick_settings": "checking my settings",
     "set_stick_volume": "changing the volume",
     "set_stick_brightness": "changing the brightness",
+    "read_notes": "reading the notes",
+    "add_note": "writing that down",
+    "write_notes": "rewriting the notes",
 }
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -27,7 +28,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 SERVER_NAME = "aicompanion-companion-control"
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.3.0"
 PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18"}
 Json = dict[str, Any]
 FetchJson = Callable[[str], Json]
@@ -149,6 +150,99 @@ def set_stick_volume(arguments: Json, request: Callable[..., Json] = gateway_req
 
 def set_stick_brightness(arguments: Json, request: Callable[..., Json] = gateway_request) -> Json:
     return _set_stick("brightness", arguments, request)
+
+
+# One plain-text notes file shared with the owner (~/rina/notes.md on
+# arch-ssd, whose directory is mounted into the agent pod). Only this file:
+# no other path is ever opened. Writes replace it atomically, so the owner's
+# editor and the agent never see half a file.
+NOTES_MAX_BYTES = 20_000
+
+
+def _notes_path() -> str:
+    return os.environ.get("COMPANION_CONTROL_NOTES_FILE", "/rina/notes.md")
+
+
+def _read_notes_text() -> str:
+    try:
+        with open(_notes_path(), encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+    except OSError as exc:
+        raise ControlPlaneError(f"can't read the notes file: {exc.strerror}") from exc
+
+
+def _write_notes_text(text: str, path: str | None = None) -> None:
+    if len(text.encode("utf-8")) > NOTES_MAX_BYTES:
+        raise ControlPlaneError(f"the notes file would pass {NOTES_MAX_BYTES // 1000} KB; "
+                                "rewrite it shorter instead")
+    path = path or _notes_path()
+    directory = os.path.dirname(path) or "."
+    try:
+        owner = os.stat(directory)
+        fd, tmp = tempfile.mkstemp(prefix=".notes-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.chmod(tmp, 0o644)
+            # The agent runs as root: hand the file back to whoever owns the
+            # directory, so the owner can keep editing it.
+            try:
+                os.chown(tmp, owner.st_uid, owner.st_gid)
+            except PermissionError:
+                pass
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+    except OSError as exc:
+        raise ControlPlaneError(f"can't write the notes file: {exc.strerror}") from exc
+
+
+def _describe_notes(text: str) -> Json:
+    return {"bytes": len(text.encode("utf-8")), "lines": len(text.splitlines())}
+
+
+def _text_argument(arguments: Json) -> str:
+    text = arguments.get("text")
+    if not isinstance(text, str):
+        raise ControlPlaneError("text must be a string")
+    return text
+
+
+def read_notes(_args: Json | None = None) -> Json:
+    text = _read_notes_text()
+    result = {"text": text, **_describe_notes(text)}
+    if not text:
+        result["note"] = "The notes file is empty."
+    return result
+
+
+def add_note(arguments: Json) -> Json:
+    line = _text_argument(arguments).strip()
+    if not line:
+        raise ControlPlaneError("nothing to add")
+    text = _read_notes_text()
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += line + "\n"
+    _write_notes_text(text)
+    return {"added": line, **_describe_notes(text)}
+
+
+def write_notes(arguments: Json) -> Json:
+    text = _text_argument(arguments)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    previous = _read_notes_text()
+    if previous and len(previous.encode("utf-8")) <= NOTES_MAX_BYTES:
+        # A rewrite can drop anything, and any voice can ask for one while the
+        # speaker check is off: keep the version it replaced.
+        _write_notes_text(previous, _notes_path() + ".bak")
+    _write_notes_text(text)
+    return {"written": True, "previous": _describe_notes(previous), **_describe_notes(text)}
 
 
 def prometheus_query(query: str, get_json: FetchJson = fetch_json) -> list[Json]:
@@ -566,6 +660,33 @@ TOOLS += [
         "inputSchema": _PERCENT_OR_CHANGE,
     },
 ]
+TOOLS += [
+    {
+        "name": "read_notes",
+        "description": "Read the owner's notes file (a plain-text file on the home server that the owner also edits). Use it when asked what's in the notes, or to recall something the owner asked you to remember.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "add_note",
+        "description": "Add one line to the end of the owner's notes file, e.g. when asked to note down or remember something. Keeps everything already there.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "The line to add."}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "write_notes",
+        "description": "Replace the whole notes file with new text, e.g. to rewrite, reorganize, or remove something from it. Read it first with read_notes: anything not in text is gone. Up to 20 KB.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "The file's complete new contents."}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    },
+]
 TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_service_health": lambda _args: service_health(),
     "get_gpu_status": lambda _args: gpu_status(),
@@ -577,9 +698,12 @@ TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_stick_settings": lambda _args: stick_settings(),
     "set_stick_volume": set_stick_volume,
     "set_stick_brightness": set_stick_brightness,
+    "read_notes": read_notes,
+    "add_note": add_note,
+    "write_notes": write_notes,
 }
 NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
-                     "get_stick_settings"}
+                     "get_stick_settings", "read_notes"}
 
 
 def _tool_result(payload: Json, is_error: bool = False) -> Json:
