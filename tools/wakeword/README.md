@@ -34,11 +34,11 @@ in `firmware/m5stick_bridge/`.
 The firmware compiles in one model, `src/wake_word_model.h`, generated from a
 `models/*.tflite` + manifest pair. Two are trained:
 
-- **"Assistant"** (current): `models/assistant.tflite`, cutoff 0.90.
+- **"Assistant"**: `models/assistant.tflite`, cutoff 0.90.
   `WAKE=assistant` selects `positives_assistant/`, `adversarial_assistant/`
   and `trained_models/assistant/` in the scripts; samples from
   `gen_samples_assistant.sh`.
-- **"Rina-chan"**: `models/rina_chan.tflite`, cutoff 0.99 (`WAKE` unset).
+- **"Rina-chan"** (current, flashed 2026-09-25): `models/rina_chan.tflite`, cutoff 0.99 (`WAKE` unset).
 
 Switch with, in `firmware/m5stick_bridge/`:
 `python scripts/tflite_to_header.py models/rina_chan.tflite models/rina_chan.json`

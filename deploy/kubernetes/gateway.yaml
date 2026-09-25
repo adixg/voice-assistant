@@ -34,6 +34,11 @@ spec:
             # 0.6 rejected the owner (0.536 on 2026-09-24; through the Stick they
             # score 0.54-0.66). Strangers score 0.07-0.28, so 0.5 keeps a wide gap.
             - "--speaker-threshold=0.5"
+            # Owner's choice (2026-09-25): no voice check, every utterance is
+            # answered. The threshold/short-utterance settings stay for when it's
+            # turned back on (delete this line). Note the agent's Stick volume and
+            # brightness tools are then usable by any voice near the Stick.
+            - "--no-speaker-check"
             # Clips under 2s can't be verified (measured 2026-09-24: cut to 1.5s,
             # 6 of 23 owner clips score under 0.5), so this answers them unchecked:
             # quick phrases work, and anyone can get a short reply. Switch to
