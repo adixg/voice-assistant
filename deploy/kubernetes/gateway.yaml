@@ -61,6 +61,9 @@ spec:
             - "--reminders=/reminders/reminders.json"
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
+            # Local time for the conversation log's timestamps and day files
+            # (UTC started a new day file at 8 PM).
+            - {name: TZ, value: America/New_York}
             # Bearer token for /device/settings (the agent's volume/brightness
             # tools). Without the Secret the control API is simply disabled.
             #   kubectl -n aicompanion create secret generic device-control \
