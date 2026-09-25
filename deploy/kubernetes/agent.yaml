@@ -64,6 +64,18 @@ spec:
             # this one file, which the owner also edits on arch-ssd.
             - name: COMPANION_CONTROL_NOTES_FILE
               value: /rina/notes.md
+            # ask_claude: questions the local model hands to Claude. Off
+            # without the Secret; create it without the key touching shell
+            # history (docs/companion-control-mcp.md):
+            #   read -rs KEY && kubectl -n aicompanion create secret generic \
+            #     anthropic-api --from-literal=api-key="$KEY"; unset KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: {name: anthropic-api, key: api-key, optional: true}
+            - name: COMPANION_CONTROL_CLAUDE_MODEL
+              value: claude-sonnet-5
+            - name: COMPANION_CONTROL_CLAUDE_DAILY_LIMIT
+              value: "100"
           ports:
             - {containerPort: 8002, name: metrics}
           readinessProbe:

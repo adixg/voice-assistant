@@ -37,6 +37,7 @@ TOOL_STATUS = {
     "set_reminder": "setting a reminder",
     "list_reminders": "checking the reminders",
     "cancel_reminder": "cancelling a reminder",
+    "ask_claude": "asking Claude",
 }
 
 

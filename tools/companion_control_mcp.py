@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 SERVER_NAME = "aicompanion-companion-control"
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.5.0"
 PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18"}
 Json = dict[str, Any]
 FetchJson = Callable[[str], Json]
@@ -159,6 +159,91 @@ def set_stick_volume(arguments: Json, request: Callable[..., Json] = gateway_req
 
 def set_stick_brightness(arguments: Json, request: Callable[..., Json] = gateway_request) -> Json:
     return _set_stick("brightness", arguments, request)
+
+
+# Claude, for what the local model can't answer well: the local model calls
+# ask_claude with a self-contained question, Claude answers briefly for the
+# ear, and the local model says it in Rina's voice (the tool loop's normal
+# second pass, so no separate summarizer). Off unless ANTHROPIC_API_KEY is set.
+CLAUDE_URL = "https://api.anthropic.com/v1/messages"
+CLAUDE_DEFAULT_MODEL = "claude-sonnet-5"
+CLAUDE_SYSTEM = (
+    "You answer questions relayed by a small local voice assistant that couldn't answer them "
+    "well itself. Your answer is handed back to it and then spoken aloud by text-to-speech, "
+    "so: answer directly, in plain spoken English, with no markdown, lists, headings, code "
+    "blocks, URLs or emoji. Keep it to {limit}. If the question needs code or a long "
+    "document, explain the gist in words instead. If you don't know or it depends on "
+    "something you can't see, say so briefly.")
+CLAUDE_LIMITS = {"short": ("three short sentences, about 60 words", 300),
+                 "detailed": ("about 150 words", 600)}
+# Calls since the MCP server started today (it lives as long as the agent pod),
+# so a model stuck calling it can't run up a bill.
+_claude_calls: dict[str, int] = {}
+
+
+def _claude_daily_limit() -> int:
+    try:
+        return max(0, int(os.environ.get("COMPANION_CONTROL_CLAUDE_DAILY_LIMIT", "100")))
+    except ValueError:
+        return 100
+
+
+def claude_request(body: Json) -> Json:
+    """POST one Messages API request. The key is only ever sent to Anthropic."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        raise ControlPlaneError("Claude isn't set up (no ANTHROPIC_API_KEY)")
+    request = Request(CLAUDE_URL, data=json.dumps(body).encode("utf-8"), method="POST", headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    try:
+        timeout = float(os.environ.get("COMPANION_CONTROL_CLAUDE_TIMEOUT_SECONDS", "45"))
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 -- fixed Anthropic URL
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message")
+        except (ValueError, AttributeError):
+            detail = None
+        raise ControlPlaneError(f"Claude returned HTTP {exc.code}: {detail or 'no detail'}") from exc
+    except (URLError, TimeoutError, ValueError) as exc:
+        raise ControlPlaneError(f"couldn't reach Claude: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ControlPlaneError("Claude returned a JSON value, not an object")
+    return payload
+
+
+def ask_claude(arguments: Json, request: Callable[[Json], Json] = claude_request,
+               today: Callable[[], str] = lambda: datetime.now(timezone.utc).date().isoformat()) -> Json:
+    question = arguments.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise ControlPlaneError("ask_claude needs a question")
+    if len(question) > 4000:
+        raise ControlPlaneError("the question is limited to 4000 characters")
+    detail = arguments.get("detail", "short")
+    if detail not in CLAUDE_LIMITS:
+        raise ControlPlaneError("detail must be short or detailed")
+    day = today()
+    used = _claude_calls.get(day, 0)
+    if used >= _claude_daily_limit():
+        raise ControlPlaneError(f"Claude's daily limit of {_claude_daily_limit()} questions is used up")
+    _claude_calls.clear()
+    _claude_calls[day] = used + 1
+
+    length, max_tokens = CLAUDE_LIMITS[detail]
+    model = os.environ.get("COMPANION_CONTROL_CLAUDE_MODEL", CLAUDE_DEFAULT_MODEL)
+    payload = request({"model": model, "max_tokens": max_tokens,
+                       "system": CLAUDE_SYSTEM.format(limit=length),
+                       "messages": [{"role": "user", "content": question.strip()}]})
+    blocks = payload.get("content")
+    text = " ".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text") \
+        if isinstance(blocks, list) else ""
+    if not text.strip():
+        raise ControlPlaneError("Claude returned no text")
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    return {"answer": text.strip(), "model": payload.get("model", model),
+            "truncated": payload.get("stop_reason") == "max_tokens",
+            "tokens": {"in": usage.get("input_tokens"), "out": usage.get("output_tokens")},
+            "note": "Tell the owner this answer in your own words and voice."}
 
 
 # Reminders live in the gateway, which says each one through the Stick when
@@ -768,6 +853,22 @@ TOOLS += [
         },
     },
 ]
+TOOLS += [
+    {
+        "name": "ask_claude",
+        "description": "Ask Claude, a much more capable AI model, and get a short answer back to tell the owner in your own words. Use it when the owner asks you to ask Claude, and for questions that need expert knowledge, careful reasoning, maths, code, advice or a real explanation that you aren't sure of. Don't use it for chit-chat, the time, weather, web searches, notes, reminders or the Stick. Write a complete, self-contained question: Claude can't see the conversation, so include any context it needs.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The full question, with any context from the conversation."},
+                "detail": {"type": "string", "enum": ["short", "detailed"], "default": "short",
+                           "description": "detailed only when the owner asks for an in-depth answer."},
+            },
+            "required": ["question"],
+            "additionalProperties": False,
+        },
+    },
+]
 TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_service_health": lambda _args: service_health(),
     "get_gpu_status": lambda _args: gpu_status(),
@@ -785,6 +886,7 @@ TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "set_reminder": set_reminder,
     "list_reminders": lambda _args: list_reminders(),
     "cancel_reminder": cancel_reminder,
+    "ask_claude": ask_claude,
 }
 NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
                      "get_stick_settings", "read_notes", "list_reminders"}

@@ -110,6 +110,40 @@ WebSocket (app 1.4+) -> BLE `SETTINGS` -> Stick, and the Stick's report back the
 same way. The gateway keeps reading the relay's socket while a turn runs, so a
 change requested mid-reply is confirmed without waiting for the turn to end.
 
+## Asking Claude (0.5, 2026-09-25)
+
+`ask_claude` hands a question the local model can't answer well to Claude
+(Anthropic's Messages API, `claude-sonnet-5` by default,
+`COMPANION_CONTROL_CLAUDE_MODEL`). The flow is one extra tool round, no new
+service:
+
+1. The owner asks Rina something hard ("explain how a transformer works",
+   "ask Claude whether…"). The local Qwen decides to call `ask_claude` with a
+   self-contained question (Claude can't see the conversation).
+2. Claude gets a system prompt saying its answer will be spoken: plain
+   English, no markdown/lists/code/URLs, about 60 words (`detail: short`,
+   300 tokens) or about 150 (`detailed`, 600 tokens).
+3. The answer goes back to Qwen as the tool result, and Qwen says it in
+   Rina's voice. That second pass is the "summarizer": asking Claude for a
+   short, speakable answer up front is cheaper and faster than a long answer
+   summarized afterwards, and keeps her persona in one place.
+
+Limits: `COMPANION_CONTROL_CLAUDE_DAILY_LIMIT` (100) questions a day, counted
+in the MCP server process (it resets if the agent pod restarts), a 4000
+character question, a 45 s timeout. Off unless `ANTHROPIC_API_KEY` is set,
+from the `anthropic-api` Secret; without it the tool returns an error the
+model can say. The key goes only to `api.anthropic.com`, never into logs or
+tool results. Create the Secret on arch-ssd without the key landing in shell
+history, then restart the agent:
+
+    read -rs KEY && kubectl -n aicompanion create secret generic anthropic-api \
+        --from-literal=api-key="$KEY"; unset KEY
+    kubectl -n aicompanion rollout restart deployment agent
+
+Privacy: whatever the question contains leaves the house for Anthropic's API,
+unlike the rest of the pipeline. With the speaker check off, anyone near the
+Stick can cause a call (bounded by the daily limit).
+
 ## Promises without a tool call
 
 A reply ends the turn, so "let me check that, one moment" with no tool call

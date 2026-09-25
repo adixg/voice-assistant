@@ -23,7 +23,7 @@ def test_initialize_negotiates_the_client_protocol_version():
     assert response["result"]["capabilities"] == {"tools": {"listChanged": False}}
 
 
-def test_tools_list_is_read_only_except_the_sticks_settings_notes_and_reminders():
+def test_tools_list_is_read_only_except_the_sticks_settings_notes_reminders_and_claude():
     """The permission boundary: adding any other write tool must change this test."""
     response = mcp.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert [tool["name"] for tool in response["result"]["tools"]] == [
@@ -31,7 +31,7 @@ def test_tools_list_is_read_only_except_the_sticks_settings_notes_and_reminders(
         "get_time", "search_web", "get_weather",
         "get_stick_settings", "set_stick_volume", "set_stick_brightness",
         "read_notes", "add_note", "write_notes",
-        "set_reminder", "list_reminders", "cancel_reminder"]
+        "set_reminder", "list_reminders", "cancel_reminder", "ask_claude"]
 
 
 def test_current_time_returns_requested_timezone(monkeypatch):
@@ -424,3 +424,50 @@ def test_stick_settings_include_the_battery_when_reported():
     assert result["battery_percent"] == 76 and result["charging"] is False
     assert result["battery_volts"] == 3.987
     assert 1.9 <= result["battery_reported_minutes_ago"] <= 2.1
+
+
+def test_ask_claude_sends_a_spoken_style_request_and_returns_the_answer(monkeypatch):
+    monkeypatch.setattr(mcp, "_claude_calls", {})
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_MODEL", "claude-test")
+    sent = []
+
+    def claude(body):
+        sent.append(body)
+        return {"model": "claude-test", "stop_reason": "end_turn",
+                "content": [{"type": "text", "text": "White Nights is a short story by Dostoevsky."}],
+                "usage": {"input_tokens": 90, "output_tokens": 12}}
+
+    result = mcp.ask_claude({"question": " What is White Nights about? "}, request=claude)
+    assert result["answer"] == "White Nights is a short story by Dostoevsky."
+    assert result["tokens"] == {"in": 90, "out": 12} and result["truncated"] is False
+    [body] = sent
+    assert body["model"] == "claude-test" and body["max_tokens"] == 300
+    assert body["messages"] == [{"role": "user", "content": "What is White Nights about?"}]
+    assert "spoken aloud" in body["system"] and "60 words" in body["system"]
+    assert mcp.ask_claude({"question": "x", "detail": "detailed"}, request=claude) and sent[1]["max_tokens"] == 600
+
+
+def test_ask_claude_is_capped_per_day_and_validates(monkeypatch):
+    monkeypatch.setattr(mcp, "_claude_calls", {})
+    monkeypatch.setenv("COMPANION_CONTROL_CLAUDE_DAILY_LIMIT", "2")
+    claude = lambda body: {"content": [{"type": "text", "text": "ok"}]}
+    day = lambda: "2026-09-25"
+    for _ in range(2):
+        mcp.ask_claude({"question": "q"}, request=claude, today=day)
+    with pytest.raises(mcp.ControlPlaneError, match="daily limit of 2"):
+        mcp.ask_claude({"question": "q"}, request=claude, today=day)
+    assert mcp.ask_claude({"question": "q"}, request=claude, today=lambda: "2026-09-26")["answer"] == "ok"
+    for bad in ({}, {"question": "  "}, {"question": "q", "detail": "essay"}):
+        with pytest.raises(mcp.ControlPlaneError):
+            mcp.ask_claude(bad, request=claude, today=lambda: "2026-09-27")
+    with pytest.raises(mcp.ControlPlaneError, match="no text"):
+        mcp.ask_claude({"question": "q"}, request=lambda body: {"content": []}, today=lambda: "2026-09-27")
+
+
+def test_ask_claude_without_a_key_is_a_tool_error_not_a_crash(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(mcp, "_claude_calls", {})
+    response = mcp.handle_request({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                                   "params": {"name": "ask_claude", "arguments": {"question": "hi"}}})
+    assert response["result"]["isError"] is True
+    assert "ANTHROPIC_API_KEY" in response["result"]["content"][0]["text"]
