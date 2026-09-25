@@ -55,6 +55,7 @@ from voicepipe.speaker import (
 )
 from voicepipe.text import sentences, speakable
 from voicepipe import conversation_log
+from voicepipe.reminders import ReminderError, ReminderStore
 from voicepipe.utterances import DEFAULT_MAX_KEEP, keep as keep_utterance
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (DEVICE_SETTINGS_CHANGES, GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
@@ -133,6 +134,11 @@ def build_parser():
     ap.add_argument("--announce-socket", default=os.path.join(tempfile.gettempdir(), "gateway-announce.sock"),
                     help="Unix socket that speaks any line written to it, same as "
                          "bridge_server.py's --announce-socket")
+    ap.add_argument("--reminders", default=None, metavar="FILE",
+                    help="keep reminders in FILE and say each one through the Stick when it's "
+                         "due (set via the control API, i.e. the agent's reminder tools); off by default")
+    ap.add_argument("--reminders-timezone", default="America/New_York",
+                    help="the timezone reminder times are in (default: America/New_York)")
     ap.add_argument("--encourage", action="store_true",
                     help="say something encouraging unprompted every so often")
     ap.add_argument("--encourage-interval", type=float, nargs=2, default=(15.0, 20.0),
@@ -195,6 +201,53 @@ async def post_device_settings(body: DeviceSettings, authorization: str | None =
     print(f"  [device] settings changed via control API: {body.model_dump(exclude_none=True)}"
           f" -> volume={applied['volume']} brightness={applied['brightness']}", flush=True)
     return applied
+
+
+class NewReminder(BaseModel):
+    text: str = Field(..., min_length=1, max_length=200)
+    at: str | None = Field(None, description='local "YYYY-MM-DDTHH:MM", or "HH:MM" for the next time the clock shows it')
+    in_minutes: float | None = Field(None, gt=0)
+    repeat: str = "none"
+
+
+def _reminder_store():
+    store = getattr(app.state, "reminders", None)
+    if store is None:
+        raise HTTPException(503, "reminders are disabled (--reminders unset)")
+    return store
+
+
+@app.get("/reminders")
+async def get_reminders(authorization: str | None = Header(None)):
+    _check_control_token(authorization)
+    store = _reminder_store()
+    now = store.now()
+    return {"now": store.describe_time(now, now), "timezone": str(store.tz),
+            "reminders": store.list(now)}
+
+
+@app.post("/reminders")
+async def post_reminder(body: NewReminder, authorization: str | None = Header(None)):
+    _check_control_token(authorization)
+    store = _reminder_store()
+    try:
+        reminder = store.add(body.text, body.at, body.in_minutes, body.repeat)
+    except ReminderError as e:
+        raise HTTPException(422, str(e)) from e
+    print(f"  [reminder] set {reminder['id']} for {reminder['due']} ({reminder['repeat']}): "
+          f"{reminder['text']}", flush=True)
+    return reminder
+
+
+@app.delete("/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: str, authorization: str | None = Header(None)):
+    _check_control_token(authorization)
+    try:
+        reminder = _reminder_store().cancel(reminder_id)
+    except KeyError:
+        raise HTTPException(404, f"no reminder with id {reminder_id}") from None
+    print(f"  [reminder] cancelled {reminder_id}: {reminder['text']}", flush=True)
+    return reminder
 
 
 class GatewaySession:
@@ -596,6 +649,25 @@ async def announce_server(session, path):
     return server
 
 
+async def reminder_loop(session, store, interval=5.0):
+    """Say each due reminder. Without a Stick it stays due and is said when
+    one connects (late ones say when they were for); a repeating one then
+    moves on to its next time. The line also goes into the conversation
+    history, so "what was that?" has an answer."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            for reminder in store.due():
+                line = store.spoken_line(reminder)
+                if not await session.announce(line):
+                    break  # no Stick: everything due stays due
+                print(f"  [reminder] said {reminder['id']}", flush=True)
+                session.messages.append({"role": "assistant", "content": line})
+                store.delivered(reminder["id"])
+        except Exception as e:  # noqa: BLE001 - this task must outlive any one failure
+            print(f"  ! reminder failed: {e}", flush=True)
+
+
 async def encourage_loop(session, low_minutes, high_minutes):
     """Say something encouraging every so often, unprompted -- ported
     unchanged from bridge_server.py's encourage_loop, see that one's
@@ -627,6 +699,12 @@ def main():
             set_speaker_gate_state(gate)
         app.state.announcer = await announce_server(_session, args.announce_socket)
         app.state.cheerleader = None
+        app.state.reminder_task = None
+        if args.reminders:
+            app.state.reminders = ReminderStore(args.reminders, args.reminders_timezone)
+            app.state.reminder_task = asyncio.create_task(reminder_loop(_session, app.state.reminders))
+            print(f"  reminders on -- {len(app.state.reminders.reminders)} in {args.reminders} "
+                  f"({args.reminders_timezone})", flush=True)
         if args.encourage:
             low, high = args.encourage_interval
             app.state.cheerleader = asyncio.create_task(encourage_loop(_session, low, high))
@@ -636,6 +714,8 @@ def main():
     async def _shutdown():
         if app.state.cheerleader is not None:
             app.state.cheerleader.cancel()
+        if app.state.reminder_task is not None:
+            app.state.reminder_task.cancel()
         app.state.announcer.close()
         with suppress(FileNotFoundError):
             os.unlink(args.announce_socket)

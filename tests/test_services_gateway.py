@@ -750,3 +750,52 @@ def test_control_api_validates_bounds_and_reports_no_stick(monkeypatch):
     assert client.post("/device/settings", json={}, headers=auth).status_code == 422
     assert client.post("/device/settings", json={"brightness": 0}, headers=auth).status_code == 503
     assert client.get("/device/settings", headers=auth).status_code == 503
+
+
+def test_reminder_api_sets_lists_and_cancels(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from voicepipe.reminders import ReminderStore
+    monkeypatch.setenv("GATEWAY_CONTROL_TOKEN", "t0k")
+    client = TestClient(gateway_app.app)
+    auth = {"Authorization": "Bearer t0k"}
+    monkeypatch.setattr(gateway_app.app.state, "reminders", None, raising=False)
+    assert client.get("/reminders", headers=auth).status_code == 503
+    monkeypatch.setattr(gateway_app.app.state, "reminders", ReminderStore(str(tmp_path / "r.json")))
+
+    assert client.get("/reminders").status_code == 401
+    made = client.post("/reminders", json={"text": "stretch", "in_minutes": 30}, headers=auth).json()
+    assert made["text"] == "stretch" and made["repeat"] == "none"
+    assert client.post("/reminders", json={"text": "x", "at": "whenever"}, headers=auth).status_code == 422
+    assert [r["id"] for r in client.get("/reminders", headers=auth).json()["reminders"]] == [made["id"]]
+    assert client.delete(f"/reminders/{made['id']}", headers=auth).status_code == 200
+    assert client.delete(f"/reminders/{made['id']}", headers=auth).status_code == 404
+
+
+def test_reminder_loop_says_due_ones_and_keeps_them_without_a_stick(monkeypatch, tmp_path):
+    from voicepipe.reminders import ReminderStore
+    store = ReminderStore(str(tmp_path / "r.json"))
+    reminder = store.add("stretch", in_minutes=1)
+    store.reminders[0]["due"] = "2020-01-01T00:00:00+00:00"  # long overdue
+    session = make_session()
+    spoken = []
+
+    async def announce(text):
+        if session.ws is None:
+            return False
+        spoken.append(text)
+        return True
+
+    session.announce = announce
+
+    async def run_for(seconds):
+        task = asyncio.create_task(gateway_app.reminder_loop(session, store, interval=0.01))
+        await asyncio.sleep(seconds)
+        task.cancel()
+
+    asyncio.run(run_for(0.05))
+    assert spoken == [] and store.list()[0]["id"] == reminder["id"]  # no Stick: still due
+    session.ws = FakeWebSocket()
+    asyncio.run(run_for(0.05))
+    assert spoken == ["Reminder from Tuesday 31 December 7:00 PM: stretch"]  # once, and late
+    assert store.list() == []
+    assert session.messages[-1] == {"role": "assistant", "content": spoken[0]}

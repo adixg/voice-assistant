@@ -56,6 +56,9 @@ spec:
             # stay. Delete these lines and the volume below to stop.
             - "--conversation-log=/conversations"
             - "--conversation-log-max-gb=2"
+            # Reminders the agent sets (set_reminder etc. via /reminders), said
+            # through the Stick when due; kept on the node across restarts.
+            - "--reminders=/reminders/reminders.json"
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
             # Bearer token for /device/settings (the agent's volume/brightness
@@ -79,7 +82,12 @@ spec:
               readOnly: true
             - {name: utterances, mountPath: /utterances}
             - {name: conversations, mountPath: /conversations}
+            - {name: reminders, mountPath: /reminders}
       volumes:
+        - name: reminders
+          hostPath:
+            path: /var/lib/aicompanion/reminders
+            type: DirectoryOrCreate
         - name: conversations
           hostPath:
             path: /var/lib/aicompanion/conversations

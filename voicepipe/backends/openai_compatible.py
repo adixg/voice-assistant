@@ -33,6 +33,9 @@ TOOL_STATUS = {
     "read_notes": "reading the notes",
     "add_note": "writing that down",
     "write_notes": "rewriting the notes",
+    "set_reminder": "setting a reminder",
+    "list_reminders": "checking the reminders",
+    "cancel_reminder": "cancelling a reminder",
 }
 
 

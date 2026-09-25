@@ -58,6 +58,27 @@ An earlier plan for read-only access to all of `~` was dropped (2026-09-25) in
 favour of this one file. While the speaker check is off, any voice near the
 Stick can read or rewrite the notes: don't keep secrets there.
 
+Since 0.4 (2026-09-25) it sets **reminders** that Rina says through the Stick:
+
+- `set_reminder`: `text`, plus exactly one of `at` (local `HH:MM`, meaning the
+  next time the clock shows it, or `YYYY-MM-DDTHH:MM`) or `in_minutes`, and
+  `repeat` (`none`, `daily`, `weekdays`, `weekly`). Returns when it will go off
+  ("3:00 PM today"), which is what she confirms out loud.
+- `list_reminders`: soonest first, with ids and the current time.
+- `cancel_reminder`: by id.
+
+The gateway owns them (`voicepipe/reminders.py`, `--reminders FILE`, times in
+`--reminders-timezone`, America/New_York): `GET/POST /reminders` and
+`DELETE /reminders/{id}` behind the same control token as `/device/settings`,
+kept in `/var/lib/aicompanion/reminders/reminders.json` on arch-ssd, rewritten
+atomically on each change. A loop checks every 5 s and says each due one
+("Reminder: …") as an announcement, which waits for a turn in progress to
+finish, and adds it to the conversation history. Without a Stick it stays due
+and is said on reconnect, with the time it was for when it's more than 3
+minutes late; a repeating one then moves to its next time in the future, so
+missed days aren't replayed, and keeps its wall-clock time across DST. At most
+50, 200 characters each.
+
 Beyond that one file it still has no subprocess, filesystem or Kubernetes API
 access: a voice-triggered model must not receive generic cluster or shell control.
 The write tools follow the rules set for them before they existed:

@@ -23,14 +23,15 @@ def test_initialize_negotiates_the_client_protocol_version():
     assert response["result"]["capabilities"] == {"tools": {"listChanged": False}}
 
 
-def test_tools_list_is_read_only_except_the_sticks_settings_and_the_notes_file():
+def test_tools_list_is_read_only_except_the_sticks_settings_notes_and_reminders():
     """The permission boundary: adding any other write tool must change this test."""
     response = mcp.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert [tool["name"] for tool in response["result"]["tools"]] == [
         "get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
         "get_time", "search_web", "get_weather",
         "get_stick_settings", "set_stick_volume", "set_stick_brightness",
-        "read_notes", "add_note", "write_notes"]
+        "read_notes", "add_note", "write_notes",
+        "set_reminder", "list_reminders", "cancel_reminder"]
 
 
 def test_current_time_returns_requested_timezone(monkeypatch):
@@ -375,3 +376,22 @@ def test_notes_writes_are_capped_and_leave_the_file_alone(notes_file):
 def test_notes_tools_reject_bad_arguments(notes_file):
     assert call_tool("add_note", {"text": 5})[0]
     assert call_tool("read_notes", {"path": "/etc/passwd"})[0]
+
+
+def test_reminder_tools_go_through_the_gateway_and_summarize():
+    calls = []
+
+    def gateway(method, path, body=None):
+        calls.append((method, path, body))
+        reminder = {"id": "a1b2c3", "text": "stretch", "when": "3:00 PM today", "repeat": "none",
+                    "due": "2026-09-25T15:00:00-04:00", "created": "x"}
+        return {"now": "2:00 PM today", "reminders": [reminder]} if method == "GET" else reminder
+
+    assert mcp.set_reminder({"text": "stretch", "at": "15:00"}, request=gateway) == {
+        "set": {"id": "a1b2c3", "text": "stretch", "when": "3:00 PM today", "repeat": "none"}}
+    assert mcp.list_reminders(request=gateway)["now"] == "2:00 PM today"
+    assert mcp.cancel_reminder({"id": "a1b2c3"}, request=gateway)["cancelled"]["id"] == "a1b2c3"
+    assert calls == [("POST", "/reminders", {"text": "stretch", "at": "15:00"}),
+                     ("GET", "/reminders", None), ("DELETE", "/reminders/a1b2c3", None)]
+    with pytest.raises(mcp.ControlPlaneError):
+        mcp.cancel_reminder({"id": "../device/settings"}, request=gateway)

@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 SERVER_NAME = "aicompanion-companion-control"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = "0.4.0"
 PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18"}
 Json = dict[str, Any]
 FetchJson = Callable[[str], Json]
@@ -150,6 +150,30 @@ def set_stick_volume(arguments: Json, request: Callable[..., Json] = gateway_req
 
 def set_stick_brightness(arguments: Json, request: Callable[..., Json] = gateway_request) -> Json:
     return _set_stick("brightness", arguments, request)
+
+
+# Reminders live in the gateway, which says each one through the Stick when
+# it's due; these tools only manage them through its control API.
+def _reminder_summary(reminder: Json) -> Json:
+    return {key: reminder.get(key) for key in ("id", "text", "when", "repeat")}
+
+
+def set_reminder(arguments: Json, request: Callable[..., Json] = gateway_request) -> Json:
+    body = {key: arguments[key] for key in ("text", "at", "in_minutes", "repeat") if key in arguments}
+    return {"set": _reminder_summary(request("POST", "/reminders", body))}
+
+
+def list_reminders(_args: Json | None = None, request: Callable[..., Json] = gateway_request) -> Json:
+    listing = request("GET", "/reminders")
+    return {"now": listing.get("now"),
+            "reminders": [_reminder_summary(r) for r in listing.get("reminders", [])]}
+
+
+def cancel_reminder(arguments: Json, request: Callable[..., Json] = gateway_request) -> Json:
+    reminder_id = arguments.get("id")
+    if not isinstance(reminder_id, str) or not reminder_id.isalnum():
+        raise ControlPlaneError("id must be a reminder id from list_reminders")
+    return {"cancelled": _reminder_summary(request("DELETE", f"/reminders/{reminder_id}"))}
 
 
 # One plain-text notes file shared with the owner (~/rina/notes.md on
@@ -687,6 +711,38 @@ TOOLS += [
         },
     },
 ]
+TOOLS += [
+    {
+        "name": "set_reminder",
+        "description": "Set a reminder that you will say out loud through the Stick when it's due. Give exactly one of at or in_minutes. For 'at 3' or 'at 9:30 tomorrow' use at; for 'in 20 minutes' use in_minutes. Times are the owner's local time. Returns when it will go off: tell the owner that.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "What to remind about, short, e.g. 'call the dentist'."},
+                "at": {"type": "string", "description": "Local time: 'HH:MM' (24-hour) for the next time the clock shows it, or 'YYYY-MM-DDTHH:MM' for a specific day. Call get_time first if you need today's date."},
+                "in_minutes": {"type": "number", "minimum": 1, "description": "Minutes from now."},
+                "repeat": {"type": "string", "enum": ["none", "daily", "weekdays", "weekly"], "default": "none"},
+            },
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_reminders",
+        "description": "List the reminders that are set, soonest first, with their ids, and the current time.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "cancel_reminder",
+        "description": "Cancel one reminder by its id (from list_reminders).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"id": {"type": "string", "description": "The reminder's id."}},
+            "required": ["id"],
+            "additionalProperties": False,
+        },
+    },
+]
 TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_service_health": lambda _args: service_health(),
     "get_gpu_status": lambda _args: gpu_status(),
@@ -701,9 +757,12 @@ TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "read_notes": read_notes,
     "add_note": add_note,
     "write_notes": write_notes,
+    "set_reminder": set_reminder,
+    "list_reminders": lambda _args: list_reminders(),
+    "cancel_reminder": cancel_reminder,
 }
 NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
-                     "get_stick_settings", "read_notes"}
+                     "get_stick_settings", "read_notes", "list_reminders"}
 
 
 def _tool_result(payload: Json, is_error: bool = False) -> Json:
