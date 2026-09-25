@@ -149,15 +149,16 @@ class Session:
         self.messages = [m for m in self.messages if m["role"] == "system"]
 
     async def handle_utterance(self, ws, pcm):
-        """One full turn. Sends exactly one "end" unless the audio was too
-        short to be speech, in which case the Stick never left idle and there
-        is nothing to close off."""
+        """One full turn. Always sends exactly one "end", even for audio too
+        short to be speech: the Stick shows "Thinking" as soon as it sends
+        stop and waits for that "end" to go back to idle."""
         if len(pcm) < MIN_UTTERANCE_BYTES:
             # Logged, not silently dropped: "nothing happened at all" is the
             # hardest symptom to diagnose, and this was the blind spot when a
             # button press produced no output whatsoever.
             print(f"  (ignored {len(pcm) / (SAMPLE_RATE * 2):.2f}s — under the "
                   f"{MIN_UTTERANCE_BYTES / (SAMPLE_RATE * 2):.2f}s minimum)", flush=True)
+            await ws.send("end")
             return
         async with self.speaking:
             try:

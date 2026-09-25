@@ -268,6 +268,10 @@ class GatewaySession:
         if len(pcm) < MIN_UTTERANCE_BYTES:
             print(f"  (ignored {len(pcm) / (SAMPLE_RATE * 2):.2f}s -- under the "
                   f"{MIN_UTTERANCE_BYTES / (SAMPLE_RATE * 2):.2f}s minimum)", flush=True)
+            # The Stick went to "Thinking" when it sent stop and only leaves it
+            # on "end": without this it sat there for good (2026-09-25, a turn
+            # that arrived with 0.00s of audio).
+            await ws.send_text("end")
             return
         async with self.speaking:
             try:

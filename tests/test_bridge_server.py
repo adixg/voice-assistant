@@ -34,7 +34,7 @@ class TestHandleUtterance:
         await session.handle_utterance(ws, b"\x00\x00")  # well under MIN_UTTERANCE_BYTES
 
         session.stt.transcribe.assert_not_called()
-        assert ws.sent == []
+        assert ws.sent == ["end"]  # or the Stick stays on "Thinking"
 
     async def test_nothing_heard_sends_apology_and_no_history_change(self):
         session = make_session()
@@ -162,15 +162,16 @@ class TestEveryTurnEnds:
 
         assert ws.sent.count("end") == 1
 
-    async def test_a_too_short_utterance_sends_nothing_at_all(self):
-        """No "end" here either: the Stick never left idle, so there is
-        nothing to close off."""
+    async def test_a_too_short_utterance_still_ends_the_turn(self):
+        """The Stick shows "Thinking" as soon as it sends stop, so even a
+        turn too short to answer needs its "end" (it used to get none and
+        stayed on "Thinking" for good)."""
         session = make_session()
         ws = FakeWebSocket()
 
         await session.handle_utterance(ws, b"\x00\x00")
 
-        assert ws.sent == []
+        assert ws.sent == ["end"]
 
 
 class TestHandleClient:

@@ -73,7 +73,7 @@ class TestHandleUtterance:
 
             await session.handle_utterance(ws, b"\x00\x00")  # well under MIN_UTTERANCE_BYTES
 
-            assert ws.sent == []
+            assert ws.sent == ["end"]  # or the Stick stays on "Thinking"
 
     async def test_nothing_heard_sends_apology_and_no_history_change(self):
         async with make_client(stt_agent_tts_handler(text="")) as client:
@@ -289,14 +289,14 @@ class TestEveryTurnEnds:
 
             assert ws.sent.count("end") == 1
 
-    async def test_a_too_short_utterance_sends_nothing_at_all(self):
+    async def test_a_too_short_utterance_still_ends_the_turn(self):
         async with make_client(stt_agent_tts_handler()) as client:
             session = make_session(client=client)
             ws = FakeWebSocket()
 
             await session.handle_utterance(ws, b"\x00\x00")
 
-            assert ws.sent == []
+            assert ws.sent == ["end"]
 
 
 class TestSpeakerGate:
