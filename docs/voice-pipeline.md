@@ -249,6 +249,31 @@ recording whatever followed. Two changes:
   `end` (the Stick goes back to idle), drops the fragment from the history,
   and logs the turn with `silent: true`.
 
+## Voice isolation, step one: gain and distance (2026-09-25)
+
+The StickS3 has **one** microphone (ES8311, MIC1P/N), so nothing on the
+device can separate voices by direction (that takes two or more mics), and
+M5Unified's `noise_filter_level` is only a one-pole low-pass: less hiss, more
+muffled consonants, no isolation. What the recordings did show, measured over
+24 logged turns (`voicepipe/audio_levels.py`: loud frames = 90th percentile of
+30 ms RMS, floor = 10th):
+
+- **The owner's speech clipped.** Most turns peaked at 0 dBFS, up to 9.4% of
+  samples clipped ("what's the time right now" became "raise the shine right
+  now", 3.5% clipped). The gain chain is the ES8311's analog PGA at minimum,
+  its digital ADC volume at maximum (0xFF, about +32 dB), then M5Unified's
+  software `magnification` of 16. The firmware now sets 8 (-6 dB).
+- **Distance separates the false triggers.** Speech meant for Rina: loud
+  frames -2 to -12 dBFS, 20-36 dB above the room. Fragments the wake word
+  caught from nearby talk: -13 to -25 dBFS, 8-16 dB above it.
+
+So every turn's levels now go into the conversation log (`levels`) and the
+gateway log (`levels speech=… floor=… snr=… clipped=…`). Next, once there
+are turns at the new gain: a threshold that ignores speech too quiet or too
+close to the room's level to have been aimed at the Stick. Server-side noise
+suppression (DeepFilterNet/RNNoise) and keeping only the owner's segments by
+voiceprint are the heavier steps after that.
+
 ## Conversation log (2026-09-25)
 
 `--conversation-log DIR` keeps every turn the gateway handled, for analysis:

@@ -56,6 +56,7 @@ from voicepipe.speaker import (
 )
 from voicepipe.text import sentences, speakable
 from voicepipe import conversation_log
+from voicepipe.audio_levels import levels as audio_levels
 from voicepipe.reminders import ReminderError, ReminderStore
 from voicepipe.utterances import DEFAULT_MAX_KEEP, keep as keep_utterance
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
@@ -506,6 +507,11 @@ class GatewaySession:
         # This turn's record for --conversation-log, filled in as it goes.
         self.turn_log = conversation_log.new_turn()
         self.turn_log["audio_seconds"] = round(len(pcm) / (SAMPLE_RATE * 2), 2)
+        measured = audio_levels(pcm, SAMPLE_RATE)
+        if measured:
+            self.turn_log["levels"] = measured
+            print(f"  levels speech={measured['speech_dbfs']} dBFS floor={measured['floor_dbfs']} "
+                  f"snr={measured['snr_db']} dB clipped={measured['clipped_pct']}%", flush=True)
         if self.next_trigger:
             self.turn_log["trigger"] = self.next_trigger
             if self.next_trigger == "wake" and self.wake_score is not None:

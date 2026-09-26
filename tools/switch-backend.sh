@@ -43,8 +43,13 @@ preset() {
     stt/moonshine)    MEM="512Mi 1Gi";    ARGS='"--stt-backend","moonshine"' ;;
     tts/kokoro)       MEM="1536Mi 3Gi"
                       ARGS='"--tts-backend","kokoro","--kokoro-voice","af_bella","--kokoro-language","a","--kokoro-device","cpu"' ;;
-    tts/kokoro-onnx)  MEM="1Gi 2Gi";     ARGS='"--tts-backend","kokoro-onnx","--kokoro-onnx-voice","af_bella"' ;;
-    tts/kitten)       MEM="384Mi 768Mi";  ARGS='"--tts-backend","kitten","--kitten-voice","Bella","--kitten-speed","1.6"' ;;
+    # Both sherpa presets keep --voice-state (set_voice's saved pick, which
+    # wins at start) and a Kokoro-sized limit, since set_voice can load Kokoro
+    # into either at runtime (services/tts/voices.py).
+    tts/kokoro-onnx)  MEM="1Gi 2Gi"
+                      ARGS='"--tts-backend","kokoro-onnx","--kokoro-onnx-voice","af_bella","--voice-state","/tts-state/voice.json"' ;;
+    tts/kitten)       MEM="384Mi 2Gi"
+                      ARGS='"--tts-backend","kitten","--kitten-voice","Bella","--kitten-speed","1.6","--voice-state","/tts-state/voice.json"' ;;
     *) echo "unknown preset: $1 $2" >&2; usage 1 ;;
   esac
 }

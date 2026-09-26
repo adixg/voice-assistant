@@ -42,8 +42,7 @@ spec:
           # --voice-state: the voice picked with set_voice ("switch to Kokoro
           # Bella") survives a restart and wins over these args; delete
           # /var/lib/aicompanion/tts/voice.json to go back to them.
-          args: ["--tts-backend", "kitten", "--kitten-voice", "Bella", "--kitten-speed", "1.6",
-                 "--voice-state", "/tts-state/voice.json"]
+          args: ["--tts-backend", "kitten", "--kitten-voice", "Bella", "--kitten-speed", "1.6", "--voice-state", "/tts-state/voice.json"]
           # Switch backend with tools/switch-backend.sh (tts: kitten,
           # kokoro-onnx, kokoro); it patches these args and the memory limit
           # together, since they need 768Mi, 2Gi and 3Gi+ respectively. For

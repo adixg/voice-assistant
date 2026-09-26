@@ -915,10 +915,22 @@ static void connectNetwork() {
 // her first utterance and 0.17-0.60 after — it was a self-assignment and fixed
 // nothing. The real cause was an enrollment captured with no playback between
 // samples; see CLAUDE.md.
+//
+// Gain: M5Unified multiplies by magnification / (2 * over_sampling) in
+// software, after the ES8311 has already applied its maximum digital volume
+// (0xFF, about +32 dB). At the default 16, speech a normal distance from the
+// Stick peaked at 0 dBFS and clipped up to 9% of its samples (24 logged turns,
+// 2026-09-25), which garbles STT ("what's the time right now" came out as
+// "raise the shine right now"). 8 is 6 dB lower; quieter, more distant speech
+// drops with it, which is the point: one mic can't tell voices apart, but
+// distance separates the owner from people talking across the room.
+static const uint8_t MIC_MAGNIFICATION = 8;
+
 static void applyMicConfig() {
   auto mic_cfg = M5.Mic.config();
   mic_cfg.sample_rate = SAMPLE_RATE;
   mic_cfg.stereo = false;
+  mic_cfg.magnification = MIC_MAGNIFICATION;
   M5.Mic.config(mic_cfg);
 }
 
