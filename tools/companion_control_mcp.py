@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 SERVER_NAME = "aicompanion-companion-control"
-SERVER_VERSION = "0.5.0"
+SERVER_VERSION = "0.6.0"
 PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18"}
 Json = dict[str, Any]
 FetchJson = Callable[[str], Json]
@@ -341,6 +341,48 @@ def claude_usage(_args: Json | None = None,
             "prices_usd_per_million_tokens": {"input": price_in, "output": price_out},
             "note": "Costs are estimates from token counts and the configured prices; "
                     "Anthropic's console has the billed amount."}
+
+
+# The TTS voice: the tts service switches it (services/tts/voices.py); these
+# tools only ask it to. Engine switches load a model, hence the long timeout.
+def tts_request(method: str, path: str, body: Json | None = None) -> Json:
+    url = _env_url("COMPANION_CONTROL_TTS_URL", "http://tts:8003") + path
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    request = Request(url, data=data, method=method,
+                      headers={"Accept": "application/json", "Content-Type": "application/json"})
+    try:
+        with urlopen(request, timeout=90) as response:  # noqa: S310 -- operator-set URL
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise ControlPlaneError(detail or f"the tts service returned HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, ValueError) as exc:
+        raise ControlPlaneError(f"request to the tts service failed: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ControlPlaneError("the tts service returned a JSON value, not an object")
+    return payload
+
+
+def list_voices(_args: Json | None = None, request: Callable[..., Json] = tts_request) -> Json:
+    catalog = request("GET", "/voices")
+    catalog["note"] = ("kitten is lighter and quicker; kokoro sounds fuller. Kokoro names start "
+                       "with af_/am_ (American female/male) or bf_/bm_ (British).")
+    return catalog
+
+
+def set_voice(arguments: Json, request: Callable[..., Json] = tts_request) -> Json:
+    voice = arguments.get("voice")
+    if not isinstance(voice, str) or not voice.strip():
+        raise ControlPlaneError("set_voice needs a voice name")
+    body = {"voice": voice.strip()}
+    for key in ("engine", "speed"):
+        if arguments.get(key) is not None:
+            body[key] = arguments[key]
+    return {"now": request("POST", "/voice", body),
+            "note": "Your reply to this will already be in the new voice."}
 
 
 # Reminders live in the gateway, which says each one through the Stick when
@@ -973,6 +1015,29 @@ TOOLS += [
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
 ]
+TOOLS += [
+    {
+        "name": "list_voices",
+        "description": "List the voices you can speak in (per engine: kitten and kokoro) and which one you're using now.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "set_voice",
+        "description": "Change the voice you speak in, e.g. 'switch to Kokoro Bella' -> engine kokoro, voice bella; 'use Luna' -> voice Luna. Switching engine takes a few seconds. Returns the voice now in use.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "voice": {"type": "string", "description": "Voice name, e.g. Bella, Luna, af_heart, bella, emma."},
+                "engine": {"type": "string", "enum": ["kitten", "kokoro"],
+                           "description": "Which engine; leave out to keep the current one if it has the voice."},
+                "speed": {"type": "number", "minimum": 0.5, "maximum": 2.5,
+                          "description": "Speaking rate, only if asked (kitten defaults to 1.6, kokoro to 1.0)."},
+            },
+            "required": ["voice"],
+            "additionalProperties": False,
+        },
+    },
+]
 TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "get_service_health": lambda _args: service_health(),
     "get_gpu_status": lambda _args: gpu_status(),
@@ -992,9 +1057,12 @@ TOOL_HANDLERS: dict[str, Callable[[Json], Json]] = {
     "cancel_reminder": cancel_reminder,
     "ask_claude": ask_claude,
     "get_claude_usage": lambda _args: claude_usage(),
+    "list_voices": lambda _args: list_voices(),
+    "set_voice": set_voice,
 }
 NO_ARGUMENT_TOOLS = {"get_service_health", "get_gpu_status", "get_agent_status", "get_model_status",
-                     "get_stick_settings", "read_notes", "list_reminders", "get_claude_usage"}
+                     "get_stick_settings", "read_notes", "list_reminders", "get_claude_usage",
+                     "list_voices"}
 
 
 def _tool_result(payload: Json, is_error: bool = False) -> Json:

@@ -29,17 +29,25 @@ spec:
           imagePullPolicy: Always
           # kitten peaked at 559Mi in the service (cgroup memory.peak, a
           # 150 s reply included, 2026-09-24). PyTorch Kokoro, the previous
-          # default, needed a 3Gi limit and was still OOM-killed.
+          # default, needed a 3Gi limit and was still OOM-killed. The limit
+          # is Kokoro-sized (~1.35 GiB settled) because the agent's set_voice
+          # can switch this pod to Kokoro at runtime (services/tts/voices.py);
+          # the request stays kitten-sized.
           resources:
             requests: {memory: 384Mi}
-            limits: {memory: 768Mi}
+            limits: {memory: 2Gi}
           # Speed 1.6, the owner's pick after hearing 1.0-1.5: at 1.0 Kitten
           # speaks noticeably slower than Kokoro (a demo line: 11.7 s at 1.0,
           # 9.2 s at 1.3, 8.3 s at 1.5).
-          args: ["--tts-backend", "kitten", "--kitten-voice", "Bella", "--kitten-speed", "1.6"]
+          # --voice-state: the voice picked with set_voice ("switch to Kokoro
+          # Bella") survives a restart and wins over these args; delete
+          # /var/lib/aicompanion/tts/voice.json to go back to them.
+          args: ["--tts-backend", "kitten", "--kitten-voice", "Bella", "--kitten-speed", "1.6",
+                 "--voice-state", "/tts-state/voice.json"]
           # Switch backend with tools/switch-backend.sh (tts: kitten,
           # kokoro-onnx, kokoro); it patches these args and the memory limit
-          # together, since they need 768Mi, 2Gi and 3Gi+ respectively.
+          # together, since they need 768Mi, 2Gi and 3Gi+ respectively. For
+          # kitten <-> kokoro-onnx voices, set_voice does it without a restart.
           env:
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: tempo:4317}
             - {name: SHERPA_MODELS_DIR, value: /models/sherpa-onnx}
@@ -47,10 +55,15 @@ spec:
             - {containerPort: 8003, name: metrics}
           volumeMounts:
             - {name: sherpa-models, mountPath: /models/sherpa-onnx}
+            - {name: tts-state, mountPath: /tts-state}
           readinessProbe:
             httpGet: {path: /health, port: 8003}
             initialDelaySeconds: 10
       volumes:
+        - name: tts-state
+          hostPath:
+            path: /var/lib/aicompanion/tts
+            type: DirectoryOrCreate
         # kokoro-onnx/kitten models (voicepipe/backends/_sherpa.py) download
         # here on first use; shared with the stt pod, same node.
         - name: sherpa-models

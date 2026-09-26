@@ -30,6 +30,7 @@ RUN pip3 install --no-cache-dir -r requirements/backend.txt
 COPY voicepipe/ voicepipe/
 COPY services/tts/app.py services/tts/app.py
 COPY services/tts/elevenlabs.py services/tts/elevenlabs.py
+COPY services/tts/voices.py services/tts/voices.py
 COPY services/metrics.py services/metrics.py
 COPY services/telemetry.py services/telemetry.py
 COPY services/__init__.py services/__init__.py

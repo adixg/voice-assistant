@@ -31,7 +31,8 @@ def test_tools_list_is_read_only_except_the_sticks_settings_notes_reminders_and_
         "get_time", "search_web", "get_weather",
         "get_stick_settings", "set_stick_volume", "set_stick_brightness",
         "read_notes", "add_note", "write_notes",
-        "set_reminder", "list_reminders", "cancel_reminder", "ask_claude", "get_claude_usage"]
+        "set_reminder", "list_reminders", "cancel_reminder", "ask_claude", "get_claude_usage",
+        "list_voices", "set_voice"]
 
 
 def test_current_time_returns_requested_timezone(monkeypatch):
@@ -533,3 +534,19 @@ def test_the_workspace_header_is_sent_when_set(monkeypatch):
     sent.clear()
     mcp.claude_request({"model": "m"})
     assert "anthropic-workspace-id" not in sent
+
+
+def test_voice_tools_go_through_the_tts_service():
+    calls = []
+
+    def tts(method, path, body=None):
+        calls.append((method, path, body))
+        if method == "GET":
+            return {"current": {"engine": "kitten", "voice": "Bella", "speed": 1.6}, "engines": {}}
+        return {"engine": "kokoro", "voice": "af_bella", "speed": 1.0}
+
+    assert mcp.list_voices(request=tts)["current"]["voice"] == "Bella"
+    assert mcp.set_voice({"voice": " bella ", "engine": "kokoro"}, request=tts)["now"]["voice"] == "af_bella"
+    assert calls[1] == ("POST", "/voice", {"voice": "bella", "engine": "kokoro"})
+    with pytest.raises(mcp.ControlPlaneError):
+        mcp.set_voice({"voice": " "}, request=tts)

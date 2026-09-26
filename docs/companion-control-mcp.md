@@ -165,6 +165,30 @@ Privacy: whatever the question contains leaves the house for Anthropic's API,
 unlike the rest of the pipeline. With the speaker check off, anyone near the
 Stick can cause a call (bounded by the daily limit).
 
+## Switching her voice (0.6, 2026-09-25)
+
+`list_voices` and `set_voice` ("switch to Kokoro Bella", "use Luna", "talk a
+bit slower") change the TTS voice at runtime, through the tts service's
+`GET /voices` and `POST /voice` (`services/tts/voices.py`). Two engines, both
+sherpa-onnx in the same image:
+
+- `kitten`: KittenTTS nano, 8 voices (Jasper, Bella, Bruno, Luna, Hugo, Rosie,
+  Leo, Kiki), default speed 1.6, the lightest and fastest.
+- `kokoro`: Kokoro-82M's American and British English voices (`af_*`,
+  `am_*`, `bf_*`, `bm_*`; "bella" means `af_bella`), default speed 1.0,
+  fuller but heavier. The non-English voices aren't offered: they'd be read
+  with the English front end.
+
+Within an engine a switch only changes the speaker id and speed. Across
+engines the old model is closed and dropped before the new one loads (a few
+seconds), so the two are never in memory together; the pod's limit is 2Gi
+for Kokoro's ~1.35 GiB. The choice is saved (`--voice-state`,
+`/var/lib/aicompanion/tts/voice.json` on arch-ssd) and restored at start,
+winning over the manifest's args. The tts service is ClusterIP only, like the
+other internal calls. The reply that confirms a switch is already spoken in
+the new voice. Other backends (PyTorch Kokoro, VITS, Chatterbox) are still
+`tools/switch-backend.sh` changes with a pod restart.
+
 ## Promises without a tool call
 
 A reply ends the turn, so "let me check that, one moment" with no tool call
