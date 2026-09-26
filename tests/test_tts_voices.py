@@ -55,6 +55,7 @@ def test_a_switch_across_engines_closes_the_old_model_first_and_is_remembered(tm
     assert old.closed and switcher.backend is not old
     assert switcher.synth("hi") == ["af_bella:hi"]
     assert json.loads(state.read_text()) == {"engine": "kokoro", "voice": "af_bella", "speed": 1.0}
+    assert state.stat().st_mode & 0o777 == 0o644
 
     # A restarted pod comes back to it.
     fresh = voices.VoiceSwitcher(FakeEngine("Bella", 1.6), "kitten", "Bella", 1.6, str(state))

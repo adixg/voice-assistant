@@ -102,6 +102,7 @@ class VoiceSwitcher:
         fd, tmp = tempfile.mkstemp(prefix=".voice-", dir=directory)
         with os.fdopen(fd, "w") as f:
             json.dump(self.current(), f)
+        os.chmod(tmp, 0o644)  # mkstemp's 0600 would hide it from the owner on the node
         os.replace(tmp, self.state_file)
 
     def restore(self):
