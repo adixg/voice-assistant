@@ -262,7 +262,7 @@ async def delete_reminder(reminder_id: str, authorization: str | None = Header(N
 # templates reject.
 SILENT = "[silent]"
 SILENCE_NOTE = (
-    "(Heard hands-free after your wake word, which sometimes fires by mistake. If this "
+    "(Heard hands-free after your wake word or a raise of the device, which sometimes fire by mistake. If this "
     "is a fragment, garbled, or clearly someone talking to somebody else rather than to "
     f"you, reply with exactly {SILENT} and nothing else. Otherwise answer normally.)\n")
 
@@ -480,7 +480,7 @@ class GatewaySession:
         # not the other way around, since a reasoning model defaults to on.
         think = None if self.args.think else False
         messages = self.messages
-        if self.turn_log.get("trigger") == "wake" and messages and messages[-1]["role"] == "user":
+        if self.turn_log.get("trigger") in ("wake", "raise") and messages and messages[-1]["role"] == "user":
             messages = messages[:-1] + [{"role": "user",
                                          "content": SILENCE_NOTE + messages[-1]["content"]}]
         payload = {"messages": messages, "think": think}

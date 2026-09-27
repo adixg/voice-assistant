@@ -515,3 +515,30 @@ Three changes, made together so they can be judged by one number:
 Not measured yet: the gain from each. The report is there so it can be: note
 the drain %/hour on the dashboard over a few idle hours on battery, on this
 build and on the one before it (OTA makes switching cheap).
+
+## Raise to talk (2026-09-27, built, not yet fitted or switched on)
+
+`raise_gesture.h` spots the Stick being brought up to look at and starts the
+same hands-free turn as the wake word (`startHandsFree("raise")`, event
+`raise fired <angle>`, turns tagged `trigger: raise`, and the gateway's
+[silent] allowance covers them). A raise is a sequence, not a reading:
+real movement (gyro over 80 deg/s or 0.25 g off 1 g), arriving in the
+looking-at-it pose (gravity within a cone of `pose`) from at least 60 deg
+away within 2.5 s, then holding still there for 0.4 s. Resting in the pose,
+swinging through it, drifting into it slowly and fidgeting while holding it
+up don't fire; a raise starting inside the 3 s cooldown is ignored rather
+than fired late. The owner carries the Stick several ways (wrist, hand,
+desk), which changes where the lift starts but not where it ends, so only the
+end pose is configured. Host-tested with synthetic motion
+(`tests/test_firmware_raise.py`).
+
+**Not live yet**: `RAISE_MODE` is `RAISE_OFF` because `pose` is a placeholder.
+To fit it: flash `firmware/imu_logger` (streams the IMU at 50 Hz), run
+`python tools/imu_record.py record` (a guided session: raises from each carry
+style, plus walking, typing, pick-ups without looking, pockets, fidgeting,
+gesturing; saved to `tests/data/raise/`), then `fit` (the pose and cone from
+the raises' steady ends) and `replay` (every recording through the detector).
+Put the fitted values into `Config`, flash `m5stick_bridge` back, and run
+`RAISE_LOG` for a day: it sends `raise would fire` events without starting
+turns, so the false-positive rate shows in the event log before `RAISE_ON`.
+The recordings stay in the test suite as a regression guard.

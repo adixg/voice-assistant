@@ -855,6 +855,7 @@ void handleBleFrame(uint8_t type, const uint8_t *payload, size_t len) {
 #include "stick_settings.h"
 #include "ota_update.h"
 #include "battery_report.h"
+#include "raise_gesture.h"
 
 static void onSettingsFrame(const uint8_t *payload, size_t len) { StickSettings::onFrame(payload, len); }
 static void onOtaFrame(uint8_t type, const uint8_t *payload, size_t len) { OtaUpdate::onFrame(type, payload, len); }
@@ -1041,14 +1042,17 @@ static void pumpPlayback() {
   }
 }
 
-// What started the current hands-free session ("wake" or "btnb"), reported
-// with the turn's start so the gateway knows (it only lets Rina stay silent
-// on wake-word turns, which can be false triggers; a button press is meant).
+// What started the current hands-free session ("wake", "raise" or "btnb"),
+// reported with the turn's start so the gateway knows (it only lets Rina stay
+// silent on wake-word and raise turns, which can be false triggers; a button
+// press is meant).
 static const char *handsFreeTrigger = "btnb";
 
-// Hands-free turn (vad.h ends it): started by a BtnB hold or the wake word.
-static void startHandsFree(const char *why) {
-  handsFreeTrigger = strcmp(why, "wake word") == 0 ? "wake" : "btnb";
+// Hands-free turn (vad.h ends it): started by a BtnB hold, the wake word or a
+// raise. `trigger` is "btnb", "wake" or "raise".
+static void startHandsFree(const char *trigger) {
+  handsFreeTrigger = trigger;
+  const char *why = trigger;
   recState = HANDSFREE;
   uiState = UI_LISTENING;
   currentScreen = SCREEN_RINA;
@@ -1069,6 +1073,15 @@ static uint8_t wakeHead = 0, wakeQueued = 0;
 static bool wakeListening = false;
 
 static const uint32_t LINK_FAST_LINGER_MS = 5000;
+
+// Raise to talk. OFF until raise_gesture.h's pose is fitted to recorded motion
+// (tools/imu_record.py); then LOG for a while (a "raise would fire" event
+// each time, nothing else), to see its false-positive rate in the event log
+// before it's allowed to start turns (ON).
+enum RaiseMode { RAISE_OFF, RAISE_LOG, RAISE_ON };
+static const RaiseMode RAISE_MODE = RAISE_OFF;
+static Raise::Detector raiseDetector;
+static uint32_t lastImuMs = 0;
 static uint32_t lastBusyMs = 0;  // last time a turn, reply, OTA or button kept the link fast
 
 static bool listenForWakeWord() {
@@ -1151,7 +1164,7 @@ void loop() {
 
   if (M5.BtnB.wasHold() && recState == REC_IDLE && uiState != UI_SPEAKING && bleReadyNow) {
     wakeListening = false;
-    startHandsFree("BtnB");
+    startHandsFree("btnb");
   }
 
   // Wake word: only while nothing else uses the mic or speaker (no turn in
@@ -1165,10 +1178,30 @@ void loop() {
       char ev[40];
       snprintf(ev, sizeof ev, "wake fired %u", WakeWord::detectedMean);
       BleTransport::sendEvent(ev);
-      startHandsFree("wake word");
+      startHandsFree("wake");
     }
   } else {
     wakeListening = false;
+  }
+
+  // Raise to talk (raise_gesture.h), under the same conditions as the wake
+  // word. The IMU is only read when the mode isn't OFF.
+  if (RAISE_MODE != RAISE_OFF && millis() - lastImuMs >= 20) {
+    lastImuMs = millis();
+    M5.Imu.update();
+    auto imu = M5.Imu.getImuData();
+    if (raiseDetector.feed(imu.accel.x, imu.accel.y, imu.accel.z, imu.gyro.x, imu.gyro.y, imu.gyro.z,
+                           millis())) {
+      bool act = RAISE_MODE == RAISE_ON && wakeIdle;
+      char ev[48];
+      snprintf(ev, sizeof ev, "raise %s %.0f", act ? "fired" : "would fire", raiseDetector.poseAngle());
+      BleTransport::sendEvent(ev);
+      Serial.printf("[raise] %s\n", ev);
+      if (act) {
+        wakeListening = false;
+        startHandsFree("raise");
+      }
+    }
   }
 
   if (!btnBLive) {
@@ -1287,7 +1320,11 @@ void loop() {
       switch (d) {
         case Vad::SPEECH_START:
           Serial.printf("[vad] speech (rms %.0f, floor %.0f)\n", vad.lastRms(), vad.noiseFloor());
-          BleTransport::sendEvent(handsFreeTrigger[0] == 'w' ? "turn wake" : "turn btnb");
+          {
+            char ev[32];
+            snprintf(ev, sizeof ev, "turn %s", handsFreeTrigger);
+            BleTransport::sendEvent(ev);
+          }
           BleTransport::sendStart();
           for (int i = 0; i < prerollCount; i++) {  // oldest first; includes this chunk
             int idx = (prerollNext - prerollCount + i + PREROLL_CHUNKS) % PREROLL_CHUNKS;
@@ -1307,8 +1344,11 @@ void loop() {
           break;
         case Vad::NO_SPEECH:
           Serial.printf("[vad] nothing said (floor %.0f)\n", vad.noiseFloor());
-          BleTransport::sendEvent(handsFreeTrigger[0] == 'w' ? "vad nothing heard after wake"
-                                                             : "vad nothing heard after btnb");
+          {
+            char ev[48];
+            snprintf(ev, sizeof ev, "vad nothing heard after %s", handsFreeTrigger);
+            BleTransport::sendEvent(ev);
+          }
           cancelled = true;
           break;
         case Vad::WAITING:

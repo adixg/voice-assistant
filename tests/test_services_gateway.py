@@ -891,3 +891,15 @@ def test_events_arrive_over_the_socket():
     ws = FakeWebSocket(["event:vad nothing heard after wake", "event:turn wake"])
     asyncio.run(gateway_app.handle_client(ws, session))
     assert session.next_trigger == "wake"
+
+
+async def test_a_raise_turn_gets_the_silence_note_too(monkeypatch):
+    monkeypatch.setattr(gateway_app, "resample_to_pcm16", AsyncMock(return_value=b"\x01\x02"))
+    seen = []
+    async with make_client(_asking_handler("so anyway", "[silent]", seen)) as client:
+        session = make_session(client=client)
+        session.on_device_event("turn raise")
+        ws = FakeWebSocket()
+        await session.handle_utterance(ws, LOUD_PCM)
+    assert seen[0]["messages"][-1]["content"].startswith("(Heard hands-free")
+    assert ws.sent == ["heard:so anyway", "end"]
