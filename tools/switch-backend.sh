@@ -66,11 +66,25 @@ switch() {
   local extra=""
   for arg in "$@"; do extra+=",\"${arg//\"/\\\"}\""; done
   read -r request limit <<<"$MEM"
-  local c=/spec/template/spec/containers/0
-  kubectl -n "$NS" patch deployment "$svc" --type=json -p "[
-    {\"op\":\"replace\",\"path\":\"$c/args\",\"value\":[${ARGS}${extra}]},
-    {\"op\":\"replace\",\"path\":\"$c/resources/requests/memory\",\"value\":\"$request\"},
-    {\"op\":\"replace\",\"path\":\"$c/resources/limits/memory\",\"value\":\"$limit\"}]"
+  # STT's GPU needs move with the backend: whisper runs on the 1650 (an
+  # nvidia.com/gpu slot, the NVIDIA runtime, and Recreate so a rollout never
+  # wants two of the 1650's two slots); the CPU backends drop all three. One
+  # strategic-merge patch, so a switch is a single rollout; null deletes a field.
+  local gpu="" strategy="" runtime=""
+  if [[ "$svc" == stt ]]; then
+    if [[ "$name" == whisper ]]; then
+      gpu=',"nvidia.com/gpu":"1"'
+      runtime='"runtimeClassName":"nvidia",'
+      strategy='"strategy":{"type":"Recreate","rollingUpdate":null},'
+    else
+      gpu=',"nvidia.com/gpu":null'
+      runtime='"runtimeClassName":null,'
+      strategy='"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxSurge":1,"maxUnavailable":0}},'
+    fi
+  fi
+  kubectl -n "$NS" patch deployment "$svc" --type=strategic -p "{\"spec\":{${strategy}\"template\":{\"spec\":{${runtime}
+    \"containers\":[{\"name\":\"$svc\",\"args\":[${ARGS}${extra}],
+      \"resources\":{\"requests\":{\"memory\":\"$request\"},\"limits\":{\"memory\":\"$limit\"${gpu}}}}]}}}}"
   kubectl -n "$NS" rollout status deployment "$svc" --timeout=10m
   status
 }
