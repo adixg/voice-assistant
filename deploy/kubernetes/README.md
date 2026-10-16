@@ -39,6 +39,17 @@ file is just the how-to-apply.
    kubectl label node <laptop-hostname> gpu-tier=rtx4060
    ```
 
+### k3s server config
+
+`deploy/k3s/arch-ssd-config.yaml` is arch-ssd's `/etc/rancher/k3s/config.yaml`
+(installed 2026-10-16; `sudo install -m 644 ... && sudo systemctl restart k3s`).
+It lowers `terminated-pod-gc-threshold` to 5 so the Failed `llama-cpp-gtx1650`
+pod each boot leaves behind (re-admitted before the NVIDIA device plugin
+registers the GPU, `UnexpectedAdmissionError`) is garbage-collected. The
+`--flannel-iface=tailscale0` flag still lives on the systemd unit's command
+line; moving it and the node labels into this file is the rest of the
+"rebuild from the repo" TODO item.
+
 ## Getting the images
 
 `.github/workflows/ci.yml` builds and pushes only the images a push to `main`

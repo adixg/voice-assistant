@@ -1,0 +1,13 @@
+# /etc/rancher/k3s/config.yaml on arch-ssd (the k3s server). Install with:
+#   sudo install -m 644 deploy/k3s/arch-ssd-config.yaml /etc/rancher/k3s/config.yaml
+#   sudo systemctl restart k3s
+# --flannel-iface=tailscale0 is still passed on the systemd unit's command line
+# (see docs/deployment-architecture.md); k3s merges the two.
+
+# Delete finished pods beyond the 5 most recent. Each boot otherwise leaves a
+# Failed llama-cpp-gtx1650 pod: the kubelet re-admits it before the NVIDIA
+# device plugin (itself a pod) has registered the GPU, so it fails with
+# UnexpectedAdmissionError while its Deployment starts a fresh one that works.
+# The default threshold is 12500, i.e. effectively never.
+kube-controller-manager-arg:
+  - "terminated-pod-gc-threshold=5"
