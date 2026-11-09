@@ -1,7 +1,7 @@
 package com.aicompanion.relay
 
 // The BLE-central + WebSocket-gateway app, replacing
-// tools/termux_relay.py's job -- but unlike that script (a byte-blind pump
+// the old Wi-Fi-era Termux relay's job -- but unlike that script (a byte-blind pump
 // between two WebSocket endpoints, since both sides already speak
 // WebSocket), this service does real protocol translation: the Stick side
 // is BLE now, not WebSocket, so every frame crosses formats one way or the

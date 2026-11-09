@@ -66,6 +66,6 @@ done.  smoke tests:
 
 run it:
   conda activate $CHAT_ENV
-  python chat_loop.py --host http://100.70.0.38:11434 --model qwen3:8b
+  python chat_loop.py --host http://<ollama-host>:11434 --model qwen3:8b
   # --tts-backend chatterbox is the default now; pass --tts-backend vits for the old voice
 EOF

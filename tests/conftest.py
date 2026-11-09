@@ -14,7 +14,7 @@ os.environ["_VOICEPIPE_CUDA_REEXEC"] = "1"
 
 class FakeWebSocket:
     """Stand-in for a websockets connection, shared by every wire-protocol
-    test (bridge_server.py, tools/echo_server.py, tools/termux_relay.py all
+    test (bridge_server.py and tools/echo_server.py both
     speak variants of the same start/binary/stop/reset framing): async-
     iterable over a preset message sequence, and collects everything sent
     back or closed."""

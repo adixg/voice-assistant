@@ -33,8 +33,8 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
-    <!-- The private-network gateway speaks plain ws://, not wss:// (see
-         tools/termux_relay.py and secrets.h.example), and Android blocks
+    <!-- The private-network gateway speaks plain ws://, not wss:// (it
+         only travels over Tailscale), and Android blocks
          cleartext traffic by default since API 28, confirmed on the real
          phone: RelayService's WebSocket to a plain ws:// host failed with
          "CLEARTEXT communication ... not permitted by network security

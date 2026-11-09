@@ -98,11 +98,6 @@ flowchart TB
     class llama1650,llama4060 worker
 ```
 
-`tools/termux_relay.py` (Termux, Wi-Fi hotspot + Tailscale) did this same
-relay job before the BLE migration and still works standalone, but
-`android_companion/` is what's actually used today — see "Using the Stick"
-below.
-
 In the standalone/local path, the heavy TTS models each run in their **own
 conda env** as a long-lived
 subprocess, because their torch/CUDA pins conflict with each other and with
@@ -439,10 +434,6 @@ tools/
                          firmware/.../sprites.h (RGB565) and assets/sprites/
                          (PNGs) — one run, one set of crops, so the Stick and
                          speech_orb.py can't drift apart
-  termux_relay.py        + termux_relay_setup.md — the pre-BLE way to reach
-                         the laptop over Tailscale (phone Wi-Fi hotspot +
-                         Termux); superseded by android_companion/ but kept,
-                         still works standalone
 
 firmware/
   m5stick_bridge/        the real push-to-talk firmware — talks to the k3s
@@ -642,8 +633,7 @@ always-on k3s gateway (`arch-ssd.<tailnet>.ts.net`, port 30800); install/update
 the app, open it, and tap **Start**. The service reconnects BLE and WebSocket
 failures automatically. Host and port remain editable: point them at any
 machine running `bridge_server.py` on port 8765 for a standalone fallback,
-without reflashing the Stick. `tools/termux_relay.py` is the older Wi-Fi-era
-alternative and is no longer the day-to-day route.
+without reflashing the Stick.
 
 ## Setup
 
