@@ -45,6 +45,16 @@ jobs:
               - 'tts_cli.py'
               - 'chatterbox_cli.py'
               - '.dockerignore'
+            # The VITS image isn't deployed by default, so a general
+            # voicepipe/ change doesn't rebuild it; only its own backend does.
+            ttsvits:
+              - 'services/tts/**'
+              - 'voicepipe/backends/vits.py'
+              - 'services/metrics.py'
+              - 'services/telemetry.py'
+              - 'requirements/uma-tts.txt'
+              - 'tts_cli.py'
+              - '.dockerignore'
             agent:
               - 'services/agent/**'
               - 'services/agent/Dockerfile'
@@ -71,6 +81,7 @@ jobs:
         env:
           STT: ${{ steps.filter.outputs.stt }}
           TTS: ${{ steps.filter.outputs.tts }}
+          TTSVITS: ${{ steps.filter.outputs.ttsvits }}
           AGENT: ${{ steps.filter.outputs.agent }}
           GATEWAY: ${{ steps.filter.outputs.gateway }}
           SCHEDULER: ${{ steps.filter.outputs.scheduler }}
@@ -83,9 +94,11 @@ jobs:
           if [ "$TTS" = true ]; then
             matrix=$(jq -c '.include += [
               {"image":"aicompanion-tts","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=chatterbox.txt"},
-              {"image":"aicompanion-tts-vits","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=uma-tts.txt"},
               {"image":"aicompanion-tts-kokoro","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=kokoro.txt"}
             ]' <<<"$matrix")
+          fi
+          if [ "$TTSVITS" = true ]; then
+            matrix=$(jq -c '.include += [{"image":"aicompanion-tts-vits","dockerfile":"services/tts/Dockerfile","build-args":"REQUIREMENTS_FILE=uma-tts.txt"}]' <<<"$matrix")
           fi
           if [ "$AGENT" = true ]; then
             matrix=$(jq -c '.include += [{"image":"aicompanion-agent","dockerfile":"services/agent/Dockerfile","build-args":""}]' <<<"$matrix")
@@ -145,6 +158,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
+      # The CUDA TTS images can fill the hosted runner's disk on a cold build.
+      - name: Free runner disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       # Only pushes on a real merge to main -- PRs still build (catches a
