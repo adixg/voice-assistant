@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.aigf.blespike"
+    namespace = "com.aicompanion.relay"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.aigf.blespike"
+        applicationId = "com.aicompanion.relay"
         // 31 (Android 12) is where the BLUETOOTH_SCAN/BLUETOOTH_CONNECT
         // runtime permission model starts -- see AndroidManifest.xml. No
         // need to support anything older, targeting one specific phone

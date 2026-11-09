@@ -1,7 +1,6 @@
 # Firmware notes — bug fixes, event loop, clock/pomodoro screens
 
-Detail behind the current-state summary in `CLAUDE.md`. Covers
-`firmware/m5stick_bridge/`.
+Covers `firmware/m5stick_bridge/`.
 
 ## Firmware — flashed 2026-09-07
 
@@ -448,7 +447,7 @@ host-tested by `tests/test_firmware_vad.py` (g++):
 **Not yet tuned on the device.** The thresholds are educated guesses for the
 ES8311 mic's levels; watch the serial log on the first tries and adjust
 `Vad::Config` (`speechRatio`, `minSpeechRms`, `hangoverMs`). This is the
-groundwork for a wake word (see `TODO.md`), which would start the same mode.
+groundwork for the wake word, which starts the same mode.
 
 
 ## Wake word "Rina-chan" (2026-09-25)

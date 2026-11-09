@@ -1,4 +1,4 @@
-package com.aigf.blespike
+package com.aicompanion.relay
 
 import android.content.Context
 
@@ -9,7 +9,7 @@ class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("relay_prefs", Context.MODE_PRIVATE)
 
     companion object {
-        const val DEFAULT_GATEWAY_HOST = "arch-ssd.<tailnet>.ts.net"
+        const val DEFAULT_GATEWAY_HOST = "gateway.your-tailnet.ts.net"
         const val DEFAULT_GATEWAY_PORT = 30800
         private const val ENDPOINT_DEFAULTS_VERSION = 1
     }

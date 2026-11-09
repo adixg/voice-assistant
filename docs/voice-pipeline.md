@@ -1,7 +1,5 @@
 # Voice pipeline — speaker verification, output, announcements, memory
 
-Detail behind the current-state summary in `CLAUDE.md`.
-
 ## Speaker verification (the gate)
 
 Added 2026-09-05. Only the enrolled owner's voice gets a reply.
@@ -207,7 +205,7 @@ no-Stick path logs rather than throwing.
 
 ## Memory
 
-`memory/about-me.md` holds hand-written facts about Aditya. `voicepipe/
+`memory/about-me.md` holds hand-written facts about the owner. `voicepipe/
 personas.py` reads it fresh at every start (no rebuild needed) and appends it
 to the system prompt under a header telling the model to use it silently.
 `--profile PATH` points elsewhere, `--no-profile` disables it.

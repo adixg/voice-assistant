@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "aigf-android-companion"
+rootProject.name = "aicompanion-android"
 include(":app")

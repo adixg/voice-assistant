@@ -10,9 +10,6 @@ No conda env needed — stdlib + `websockets` only (same as bridge_server.py's
 `chat` env, but nothing else from it is required).
 
     python tools/echo_server.py --ws-port 8765
-
-For the pure-hardware version with no Wi-Fi/server at all, flash
-firmware/m5stick_echo_test/ instead.
 """
 import argparse
 import asyncio

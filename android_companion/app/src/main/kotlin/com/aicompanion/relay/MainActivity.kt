@@ -1,4 +1,4 @@
-package com.aigf.blespike
+package com.aicompanion.relay
 
 // Thin settings/control UI over RelayService, which owns the
 // actual BLE-central + WebSocket-bridge connection so it survives this

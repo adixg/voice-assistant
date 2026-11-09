@@ -75,7 +75,7 @@ transitions retargeted the agent successfully, including a real
 gateway -> agent -> cross-node 4060-hosted model inference. Since the
 llama.cpp migration (2026-09-18) the live `agent` is confirmed pointed at
 `llama-cpp-rtx4060` with `qwen3-8b`; a fresh 4060-down/4060-up failover
-timing measurement is still open (see `TODO.md`).
+timing measurement is still open.
 Live testing also exposed and fixed the controller's missing node-patch RBAC,
 and the controller and agent are now pinned to the always-on GTX node so they
 remain available when the 4060 disappears. The WSL2/Tailscale networking

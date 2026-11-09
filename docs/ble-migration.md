@@ -1,8 +1,5 @@
 # BLE transport migration — full log
 
-Detail behind the current-state summary in `CLAUDE.md`. Full plan:
-`/home/aditya/.claude/plans/tranquil-drifting-stream.md`.
-
 Motivation: replace the phone's persistent Wi-Fi hotspot (battery/data drain)
 with BLE — ESP32-S3 is BLE-only (no Classic BT, confirmed against
 Espressif's ESP-IDF docs), so this is a from-scratch GATT protocol + a new
@@ -12,8 +9,8 @@ it needs — open upstream issue `espressif/esp-idf#6522`).
 
 ## Phase 1 — flash-budget spike PASSES (2026-09-14)
 
-Spike lives in `firmware/m5stick_ble_flash_spike/` (throwaway, same pattern as
-`m5stick_echo_test/` etc. — one `platformio.ini` + `src/main.cpp`, `lib_deps`
+The spike was a throwaway firmware directory, `m5stick_ble_flash_spike`, since
+removed (one `platformio.ini` + `src/main.cpp`, `lib_deps`
 edited in place between runs, not four separate directories). Four configs
 measured against the real `m5stick_bridge` baseline of **2,647,008 B (84.1%)**:
 
@@ -516,7 +513,7 @@ in-character LLM replies. Stick serial log independently showed the matching
 Done` cycle for both turns, with no BLE drops. This also happened to be the
 first end-to-end test of the new default TTS backend (VITS-Umamusume,
 switched from Chatterbox the same day at the owner's request — see
-`CLAUDE.md`'s hardware-budget section and `docs/hardware-budget.md`); it
+`docs/hardware-budget.md`); it
 worked over the BLE audio path with no changes needed on the firmware or
 transport side, confirming the TTS-backend swap is fully decoupled from the
 BLE transport as designed.
@@ -535,5 +532,4 @@ on the real device (owner-verified). As of 2026-09-24 the app is at
 `versionName` 1.2 (volume/brightness settings, firmware updates over BLE) and
 real conversations run through the k3s gateway, with reply audio playing as it
 arrives. **Still remaining**: reboot/deep-sleep reconnect and the hours-long
-soak. See
-`TODO.md`.
+soak.

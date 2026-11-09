@@ -16,13 +16,14 @@ swappable (`--tts-backend kitten` (the deployed default), `kokoro-onnx`,
 
 - **Hands-free listening** — hold BtnB, let go, and just talk: the Stick
   detects when you start and stop speaking (on-device, `vad.h`) and sends only
-  the speech. Saying nothing cancels quietly; BtnA ends it early. The same
-  mode is what a future wake word will trigger.
+  the speech. Saying nothing cancels quietly; BtnA ends it early. Saying "Rina-chan"
+  starts the same mode, through an on-device wake word.
 - **Voice chatbot** — hold BtnA to talk, release to send; STT → LLM → TTS →
   speaker, same pipeline as the desktop entrypoint.
 - **Speaker verification** ("voice recognition") — replies are gated to the
   enrolled owner's voice (WeSpeaker ECAPA-TDNN-512), so someone else in the
-  room doesn't get an answer. See `docs/voice-pipeline.md`.
+  room doesn't get an answer. Built, but currently switched off in the cluster
+  deployment. See `docs/voice-pipeline.md`.
 - **Three screens, cycled by tapping BtnA** (a hold still talks from any of
   them): Rina's animated pixel-art face, a Catppuccin-themed **clock**
   (no on-board RTC, so it's set from a `TIME_SYNC` BLE frame the phone sends
@@ -39,7 +40,7 @@ swappable (`--tts-backend kitten` (the deployed default), `kokoro-onnx`,
 - Powering the device off is the **physical power button** (double-click),
   not a firmware feature — see `docs/firmware-notes.md`.
 
-Still tracked in `TODO.md`: wake word activation, an IMU wrist-raise gesture
+Still in progress: an IMU wrist-raise gesture
 wake, haptic feedback, voice isolation, and a BLE soak test (hours-long
 connection, reconnect after reboot/deep-sleep; Start → Stop → Start and
 Bluetooth-toggle reconnects are already verified on the device).
@@ -408,7 +409,8 @@ assets/sprites/         the extracted pixel art, written by
                          the same crops, as PNGs, for speech_orb.py
 assets/screens/         README previews of the clock and pomodoro screens
 
-memory/about-me.md      hand-written facts about you, appended to the system
+memory/about-me.example.md  template for memory/about-me.md (gitignored; copy
+                         and fill in): facts about you, appended to the system
                          prompt every conversation so she doesn't have to be
                          told them again (--profile / --no-profile)
 
@@ -437,7 +439,6 @@ tools/
                          firmware/.../sprites.h (RGB565) and assets/sprites/
                          (PNGs) — one run, one set of crops, so the Stick and
                          speech_orb.py can't drift apart
-  make_test_clip.sh     regenerates m5stick_speak_test's embedded voice clip
   termux_relay.py        + termux_relay_setup.md — the pre-BLE way to reach
                          the laptop over Tailscale (phone Wi-Fi hotspot +
                          Termux); superseded by android_companion/ but kept,
@@ -448,25 +449,14 @@ firmware/
                          gateway (or bridge_server.py) over BLE via
                          android_companion/ (ble_envelope.h / ble_transport.h;
                          no Wi-Fi; two-slot partition table for OTA updates)
-  m5stick_echo_test/     mic -> speaker loopback, on-device only, no Wi-Fi at
-                         all — the fastest way to sanity-check the hardware
-                         (mic, codec, speaker, volume) in isolation
-  m5stick_speak_test/    plays one fixed pre-baked sentence (real Rina voice)
-                         on button press — isolates the speaker/volume path
-  m5stick_http_test/     standalone Wi-Fi/HTTP connectivity smoke test, no
-                         relation to the WebSocket protocol — GETs a plain
-                         HTTP server and reports Wi-Fi/TCP/HTTP status
 
 tests/                  pytest suite for voicepipe/, services/, MCP,
                          observability, deployment contracts, and bridge_server.py
                          wire protocol — see "Running the tests" below
 
-docs/                   detailed investigation logs behind CLAUDE.md's
-                         current-state summaries (hardware budget, the local
+docs/                   detailed investigation logs (hardware budget, the local
                          agent investigation, voice pipeline, firmware bugs,
                          the BLE migration, the k3s deployment architecture)
-                         — CLAUDE.md itself is a lean index
-TODO.md                 the active punch list
 
 models/                 local Ollama Modelfiles for the development compatibility path
 requirements/           the three conda envs' pinned dependencies
@@ -630,16 +620,12 @@ can't drift apart — changing a crop changes both.
 
 From most to least isolated:
 
-1. **`firmware/m5stick_echo_test/`** — flash this alone. Hold BtnA, talk,
-   release, hear it played back. No BLE, no phone, no server, nothing but
-   the mic, codec, and speaker. If this doesn't sound right, it's a
-   hardware/firmware issue, not network or models.
-2. **`tools/echo_server.py`** + `firmware/m5stick_bridge/` + the
+1. **`tools/echo_server.py`** + `firmware/m5stick_bridge/` + the
    `android_companion/` app — the real firmware and the real BLE/WebSocket
    path, but the phone app talks to the echo server instead of
    `bridge_server.py`. Isolates the BLE + WebSocket relay path from
    STT/LLM/VITS.
-3. **k3s `gateway`** + `firmware/m5stick_bridge/` + `android_companion/`
+2. **k3s `gateway`** + `firmware/m5stick_bridge/` + `android_companion/`
    — the real deployment. Use `bridge_server.py` on port 8765 as the
    standalone equivalent when isolating cluster issues.
 
@@ -651,8 +637,8 @@ install interoperate out of the box).
 
 ## Using the Stick
 
-The Stick only talks BLE to the phone. The Android app defaults to the
-always-on k3s gateway at `arch-ssd.<tailnet>.ts.net:30800`; install/update
+The Stick only talks BLE to the phone. Set the Android app's host to the
+always-on k3s gateway (`arch-ssd.<tailnet>.ts.net`, port 30800); install/update
 the app, open it, and tap **Start**. The service reconnects BLE and WebSocket
 failures automatically. Host and port remain editable: point them at any
 machine running `bridge_server.py` on port 8765 for a standalone fallback,

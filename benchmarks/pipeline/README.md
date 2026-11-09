@@ -131,7 +131,7 @@ warm, 4060 up (so `agent` was routed to the 4060):
 Reply TTS could not be measured that day: the deployed Kokoro `tts` pod was
 OOM-killed (3 GiB limit) after three to four sequential `/synth` calls,
 memory climbing per request. STT at ~3 s is also well above the 0.33 s this
-card measured standalone (`docs/hardware-budget.md`). Both are in `TODO.md`.
+card measured standalone (`docs/hardware-budget.md`).
 
 After the fix (same command, agent redeployed, 4060 route, warm):
 
@@ -143,8 +143,7 @@ After the fix (same command, agent redeployed, 4060 route, warm):
 
 The agent now costs about 0.5 s over a direct call (its MCP tool loop). STT
 is now the largest stage. The GTX 1650 rows failed in this run because
-`llama-cpp-gtx1650` was OOM-killed at its 2 GiB limit mid-request (see
-`TODO.md`).
+`llama-cpp-gtx1650` was OOM-killed at its 2 GiB limit mid-request.
 
 ## Comparing STT and TTS backends
 

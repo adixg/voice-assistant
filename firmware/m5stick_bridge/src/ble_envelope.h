@@ -1,5 +1,5 @@
 // Phase 4: the byte-envelope codec both sides speak, copied verbatim from
-// the Phase 3 spike (firmware/m5stick_ble_flash_spike/src/ble_envelope.h)
+// the Phase 3 spike
 // once bonding/AUTH/TIME_SYNC/the codec were all confirmed round-tripping
 // together on real hardware (2026-09-16, see docs/ble-migration.md) -- this
 // is that same proven file, not a rewrite. It re-expresses
@@ -12,7 +12,7 @@
 // Pure logic, no BLE/Arduino dependency beyond fixed-width int types --
 // deliberately kept that way so it's the same file conceptually testable
 // on either side of the link (this header IS the one source of truth; the
-// Kotlin mirror is android_companion/app/src/main/kotlin/com/aigf/blespike/
+// Kotlin mirror is android_companion/app/src/main/kotlin/com/aicompanion/relay/
 // BleEnvelopeCodec.kt and must match every constant and the wire format
 // below exactly).
 //
@@ -41,7 +41,7 @@
 //     directly in ble_transport.h rather than forwarded to main.cpp).
 //
 //   NOTE on the plan doc: Phase 3's RX bullet in
-//   /home/aditya/.claude/plans/tranquil-drifting-stream.md lists
+//   the migration plan lists
 //   start/stop/reset under "RX (phone->Stick)", which can't be right --
 //   those originate at the Stick's own buttons, and GATT has no mechanism
 //   for a peripheral to receive its own button state from the central. This

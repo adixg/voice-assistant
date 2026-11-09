@@ -1,6 +1,6 @@
 # Hardware budget — GPU, models, TTS backends
 
-Detail behind the current-state summary in `CLAUDE.md`. Every number below is
+Every number below is
 measured or fetched, with the date and the command that produced it, so it
 can be re-checked rather than trusted.
 

@@ -1,4 +1,4 @@
-package com.aigf.blespike
+package com.aicompanion.relay
 
 // Kotlin mirror of firmware/m5stick_bridge/src/ble_envelope.h --
 // that header is the one source of truth for the wire format and every

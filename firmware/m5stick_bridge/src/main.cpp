@@ -2,7 +2,7 @@
 // over BLE (ble_transport.h) and the phone's Android app
 // (android_companion/.../RelayService.kt), not Wi-Fi/WebSocket directly any
 // more as of Phase 4 of the BLE transport migration (2026-09-16) -- see
-// docs/ble-migration.md for the full log and CLAUDE.md for current status.
+// docs/ble-migration.md for the full log.
 //
 // Protocol, framed as typed BLE packets (see ble_envelope.h) but carrying
 // exactly the same logical messages bridge_server.py's WebSocket protocol
@@ -915,7 +915,7 @@ static void connectNetwork() {
 // was tried as a fix for speaker verification scoring the same person 0.75 on
 // her first utterance and 0.17-0.60 after — it was a self-assignment and fixed
 // nothing. The real cause was an enrollment captured with no playback between
-// samples; see CLAUDE.md.
+// samples; see docs/voice-pipeline.md.
 //
 // Gain: M5Unified multiplies by magnification / (2 * over_sampling) in
 // software, after the ES8311 has already applied its maximum digital volume

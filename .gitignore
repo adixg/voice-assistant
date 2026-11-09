@@ -32,3 +32,11 @@ __pycache__/
 /android_companion/.kotlin/
 /android_companion/app/build/
 /android_companion/local.properties
+
+# local working notes, not project content
+/CLAUDE.md
+/TODO.md
+/TODO.html
+
+# personal facts for the system prompt; copy memory/about-me.example.md
+/memory/about-me.md

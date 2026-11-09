@@ -58,8 +58,8 @@ PROFILE_HEADER = (
     "it back at them, and don't mention that you were given it."
 )
 
-# The local 8B model has roughly 6K tokens of context (see CLAUDE.md's VRAM
-# measurements), and the profile is spent on every single turn. Warn well
+# The local 8B model has roughly 6K tokens of context (see
+# docs/hardware-budget.md), and the profile is spent on every single turn. Warn well
 # before it becomes the reason a conversation loses its history.
 PROFILE_WARN_CHARS = 4000
 

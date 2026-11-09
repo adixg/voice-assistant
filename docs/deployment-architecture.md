@@ -141,7 +141,7 @@ uses.
   It is now the primary repository/device route. `bridge_server.py` remains
   the port-8765 fallback; the APK is installed, the manifest applied, and
   live Stick conversations run through the gateway (2026-09-24). The BLE soak
-  is tracked in `TODO.md`.
+  is still open.
 
   The speaker gate is the one pipeline stage that stayed in-process rather
   than becoming its own HTTP service: it's CPU-only (ONNX, ~24MB model) and
@@ -205,7 +205,7 @@ the standby `llama-cpp-gtx1650` (~0.7-1 GiB RAM, 3.4 GiB VRAM) only runs while
 the laptop is down or it's pinned warm (61 s cold start on failover).
 Swap: zram (3.8 GiB, zstd, measured 3.3:1, priority 100) plus a 4 GiB disk
 `/swapfile` at priority 10 as a last resort before the OOM killer (added
-2026-09-24, in `/etc/fstab`). Growing zram to `ram` is pending (`TODO.md`). The
+2026-09-24, in `/etc/fstab`). Growing zram to `ram` is pending. The
 second RAM stick remains the real fix.
 
 - **Every workload here has a memory limit and a priority class**
@@ -348,4 +348,4 @@ automated-switching design.
    BLE soak.
 
 Phase 3 (observability) is deployed, with dashboard polish pending; Phase 4
-(measured benchmarks) is still open; see `TODO.md` for tracking.
+(measured benchmarks) is still open.

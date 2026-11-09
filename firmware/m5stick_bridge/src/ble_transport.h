@@ -1,5 +1,5 @@
 // Phase 4: BLE transport, replacing WiFi.h + WebSocketsClient. Adapted from
-// the Phase 3 spike (firmware/m5stick_ble_flash_spike/src/main.cpp) once
+// the Phase 3 spike once
 // bonding, the app-layer AUTH handshake, TIME_SYNC, and the codec were all
 // confirmed round-tripping together on real hardware (2026-09-16) -- see
 // docs/ble-migration.md for that full log, including the two real bugs

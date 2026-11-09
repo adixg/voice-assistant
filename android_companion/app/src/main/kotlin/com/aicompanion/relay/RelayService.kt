@@ -1,4 +1,4 @@
-package com.aigf.blespike
+package com.aicompanion.relay
 
 // The BLE-central + WebSocket-gateway app, replacing
 // tools/termux_relay.py's job -- but unlike that script (a byte-blind pump

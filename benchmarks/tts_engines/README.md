@@ -34,9 +34,9 @@ image, so the engine sees the same CPU and libraries the live service does:
 kubectl -n aicompanion run tts-engine-bench --image=ghcr.io/adixg/aicompanion-tts-kokoro:latest \
     --overrides='{"spec":{"nodeSelector":{"gpu-tier":"gtx1650"}, ...}}' -- sleep 7200
 kubectl -n aicompanion exec tts-engine-bench -- sh -c \
-    'cd /tmp/aigf && python3 benchmarks/tts_engines/bench_tts_engines.py ... --host-label arch-ssd \
+    'cd /tmp/aicompanion && python3 benchmarks/tts_engines/bench_tts_engines.py ... --host-label arch-ssd \
      --git-commit <sha> --keep "arch-ssd CPU"'
-kubectl -n aicompanion cp tts-engine-bench:/tmp/aigf/benchmarks/runs/tts_engines/<file> \
+kubectl -n aicompanion cp tts-engine-bench:/tmp/aicompanion/benchmarks/runs/tts_engines/<file> \
     benchmarks/runs/tts_engines/<file>
 kubectl -n aicompanion delete pod tts-engine-bench
 ```
