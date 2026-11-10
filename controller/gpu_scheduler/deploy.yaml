@@ -45,9 +45,11 @@ roleRef:
   name: gpu-scheduler-nodes
   apiGroup: rbac.authorization.k8s.io
 ---
-# Namespaced and limited to the three Deployments it looks at: it reads all of
-# them to decide, patches `agent` to retarget it, and patches the standby
-# (llama-cpp-gtx1650) to scale it to zero or back.
+# Namespaced and limited to what it looks at: it reads the four Deployments
+# to decide, patches `agent` to retarget it, scales the standby
+# (llama-cpp-gtx1650) and tts-gpu, and repoints the `tts` Service between the
+# CPU and GPU TTS pods. Listing pods is only to see whether the standby's pod
+# has actually left the GTX 1650 before lending the card to TTS.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -56,12 +58,19 @@ metadata:
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    resourceNames: ["agent", "llama-cpp-gtx1650", "llama-cpp-rtx4060"]
+    resourceNames: ["agent", "llama-cpp-gtx1650", "llama-cpp-rtx4060", "tts-gpu"]
     verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    resourceNames: ["agent", "llama-cpp-gtx1650"]
+    resourceNames: ["agent", "llama-cpp-gtx1650", "tts-gpu"]
     verbs: ["patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["tts"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

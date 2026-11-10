@@ -50,8 +50,18 @@ its node stays `Ready` all heal on their own. Nothing is kept in memory; the
   needed and never scales it down, trading its RAM/VRAM for instant failover.
 - `llama-cpp-gtx1650.yaml` deliberately has no `replicas:` -- this controller
   owns the field, and a manifest value would be re-applied over it.
-- Deliberately narrow scope: only `agent` is retargeted. `stt` and `tts` stay
-  pinned to the always-on node.
+- **GPU TTS while the 1650 is idle**: once the 4060 has been up for 60s, `agent`
+  is on it, the standby is not pinned, and the standby's pod has actually left
+  the card, scale `tts-gpu` (Kokoro on CUDA, `deploy/kubernetes/tts-gpu.yaml`)
+  to 1 and, once it's ready, patch the `tts` Service's selector to
+  `app: tts-gpu`. In any other state the Service goes back to `app: tts` (Kitten
+  on CPU, always running) and `tts-gpu` is scaled to 0. On a loss of the 4060
+  those two steps come first in the same pass that starts the standby, so the
+  card is free for the LLM. Repointing a Service needs no restart, so the
+  gateway never notices; voice switching (`set_voice`) only works on the CPU
+  pod. Opt out with the annotation `aicompanion/gpu-tts=off` on `tts-gpu`.
+- `stt` stays on the always-on node's CPU: Whisper on the 1650 was barely
+  faster than on its CPU, and Moonshine on CPU beats both.
 - The serving runtime was migrated from Ollama to llama.cpp on 2026-09-18
   (see `docs/llama-cpp-migration.md`).
 

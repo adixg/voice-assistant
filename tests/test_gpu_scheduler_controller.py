@@ -77,6 +77,53 @@ class TestDecide:
         assert gs.decide(state(agent_host=None), NOW) == [("target", "rtx4060")]
 
 
+def calm(**overrides):
+    """4060 serving stably, standby gone, GPU TTS enabled but not started."""
+    base = dict(standby_replicas=0, standby_ready=False, standby_pods=0, gpu_tts_enabled=True)
+    base.update(overrides)
+    return state(**base)
+
+
+class TestDecideTts:
+    def test_starts_gpu_tts_once_the_standby_has_left_the_card(self):
+        assert gs.decide(calm(), NOW) == [("scale_gpu_tts", 1)]
+
+    def test_waits_for_the_standby_pod_to_actually_terminate(self):
+        assert gs.decide(calm(standby_pods=1), NOW) == []
+
+    def test_waits_while_the_standby_is_still_scaled_up(self):
+        # the LLM side scales it away first; TTS waits for a later pass
+        assert gs.decide(calm(standby_replicas=1, standby_ready=True, standby_pods=1), NOW) == [
+            ("scale_standby", 0)]
+
+    def test_moves_the_service_only_once_gpu_tts_is_ready(self):
+        assert gs.decide(calm(gpu_tts_replicas=1, gpu_tts_ready=False), NOW) == []
+        assert gs.decide(calm(gpu_tts_replicas=1, gpu_tts_ready=True), NOW) == [("tts_target", "gpu")]
+
+    def test_settled_on_gpu_tts_does_nothing(self):
+        assert gs.decide(calm(gpu_tts_replicas=1, gpu_tts_ready=True, tts_target="gpu"), NOW) == []
+
+    def test_losing_the_4060_moves_tts_to_cpu_and_frees_the_card_before_the_standby_starts(self):
+        lost = calm(rtx_up=False, rtx_up_since=None, gpu_tts_replicas=1, gpu_tts_ready=True, tts_target="gpu")
+        assert gs.decide(lost, NOW) == [("tts_target", "cpu"), ("scale_gpu_tts", 0), ("scale_standby", 1)]
+
+    def test_no_gpu_tts_before_the_4060_has_been_up_a_while(self):
+        assert gs.decide(calm(rtx_up_since=NOW - timedelta(seconds=10)), NOW) == []
+
+    def test_no_gpu_tts_while_the_agent_is_still_on_the_1650(self):
+        assert gs.decide(calm(agent_host=gs.GTX1650_HOST), NOW) == [("target", "rtx4060")]
+
+    def test_no_gpu_tts_while_the_standby_is_pinned_warm(self):
+        pinned = calm(keep_warm=True, standby_replicas=1, standby_ready=True, standby_pods=1,
+                      gpu_tts_replicas=1, gpu_tts_ready=True, tts_target="gpu")
+        assert gs.decide(pinned, NOW) == [("tts_target", "cpu"), ("scale_gpu_tts", 0)]
+
+    def test_annotated_off_keeps_tts_on_the_cpu(self):
+        off = calm(gpu_tts_enabled=False, gpu_tts_replicas=1, gpu_tts_ready=True, tts_target="gpu")
+        assert gs.decide(off, NOW) == [("tts_target", "cpu"), ("scale_gpu_tts", 0)]
+        assert gs.decide(calm(gpu_tts_enabled=False), NOW) == []
+
+
 class TestIsRtx4060:
     def test_true_for_the_labeled_node(self):
         assert gs._is_rtx4060({"labels": {"gpu-tier": "rtx4060"}}) is True
@@ -105,18 +152,33 @@ def deployment(replicas=1, ready=1, conditions=(), annotations=None, env=None, g
 
 
 class FakeCluster:
-    def __init__(self, nodes, deployments):
+    def __init__(self, nodes, deployments, standby_pods=0, tts_selector=None):
         self.nodes, self.deployments, self.patches = nodes, deployments, []
+        self.standby_pods = standby_pods
+        self.tts_selector = tts_selector or {"app": "tts"}
 
     def list_node(self, label_selector):
         assert label_selector == "gpu-tier=rtx4060"
         return NS(items=self.nodes)
 
+    def list_namespaced_pod(self, namespace, label_selector):
+        assert label_selector == f"app={gs.STANDBY_DEPLOYMENT}"
+        return NS(items=[object()] * self.standby_pods)
+
     def read_namespaced_deployment(self, name, namespace):
         assert namespace == gs.NAMESPACE
+        if name not in self.deployments:
+            raise gs.client.ApiException(status=404)
         return self.deployments[name]
 
+    def read_namespaced_service(self, name, namespace):
+        assert name == gs.TTS_SERVICE
+        return NS(spec=NS(selector=self.tts_selector))
+
     def patch_namespaced_deployment(self, name, namespace, body):
+        self.patches.append((name, body))
+
+    def patch_namespaced_service(self, name, namespace, body):
         self.patches.append((name, body))
 
 
@@ -159,6 +221,26 @@ class TestReadState:
         install(monkeypatch, cluster_with(standby=deployment(annotations={gs.KEEP_WARM_ANNOTATION: "True"})))
         assert gs.read_state().keep_warm is True
 
+    def test_gpu_tts_missing_means_disabled(self, monkeypatch):
+        install(monkeypatch, cluster_with())
+        st = gs.read_state()
+        assert st.gpu_tts_enabled is False and st.gpu_tts_replicas == 0 and st.tts_target == "cpu"
+
+    def test_gpu_tts_and_service_target_are_read(self, monkeypatch):
+        cluster = cluster_with()
+        cluster.deployments[gs.TTS_GPU_DEPLOYMENT] = deployment(replicas=1, ready=1)
+        cluster.tts_selector = {"app": "tts-gpu"}
+        cluster.standby_pods = 1
+        install(monkeypatch, cluster)
+        st = gs.read_state()
+        assert st.gpu_tts_enabled and st.gpu_tts_ready and st.tts_target == "gpu" and st.standby_pods == 1
+
+    def test_gpu_tts_annotated_off_is_disabled(self, monkeypatch):
+        cluster = cluster_with()
+        cluster.deployments[gs.TTS_GPU_DEPLOYMENT] = deployment(annotations={gs.GPU_TTS_ANNOTATION: "off"})
+        install(monkeypatch, cluster)
+        assert gs.read_state().gpu_tts_enabled is False
+
     def test_agent_mid_rollout_is_not_rolled_out(self, monkeypatch):
         install(monkeypatch, cluster_with(agent=deployment(env={"LLM_HOST": gs.RTX4060_HOST},
                                                            generation=2, observed=1)))
@@ -198,6 +280,20 @@ class TestReconcile:
         env = body["spec"]["template"]["spec"]["containers"][0]["env"]
         assert env == [{"name": "LLM_HOST", "value": gs.GTX1650_HOST},
                        {"name": "LLM_MODEL", "value": gs.GTX1650_MODEL}]
+
+
+    def test_loss_of_the_4060_moves_the_tts_service_before_freeing_the_card(self, monkeypatch):
+        cluster = cluster_with(node_ready=False, standby=deployment(replicas=0, ready=0))
+        cluster.deployments[gs.TTS_GPU_DEPLOYMENT] = deployment(replicas=1, ready=1)
+        cluster.tts_selector = {"app": "tts-gpu"}
+        install(monkeypatch, cluster)
+        monkeypatch.setattr(gs, "datetime", NS(now=lambda tz: NOW))
+
+        gs.reconcile(FakeLogger())
+
+        assert cluster.patches == [(gs.TTS_SERVICE, {"spec": {"selector": {"app": "tts"}}}),
+                                   (gs.TTS_GPU_DEPLOYMENT, {"spec": {"replicas": 0}}),
+                                   (gs.STANDBY_DEPLOYMENT, {"spec": {"replicas": 1}})]
 
 
 class TestHandlers:
