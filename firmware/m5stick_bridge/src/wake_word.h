@@ -1,4 +1,4 @@
-// On-device wake word ("Rina-chan"): a microWakeWord streaming model run by
+// On-device wake word ("Assistant"): a microWakeWord streaming model run by
 // TensorFlow Lite Micro on the Stick itself, on the idle microphone. Nothing
 // leaves the Stick until it fires; then main.cpp starts the same hands-free
 // turn a BtnB hold does (vad.h ends it).
