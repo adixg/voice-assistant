@@ -12,6 +12,7 @@ Run:
 """
 import argparse
 import base64
+import time
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -107,6 +108,20 @@ def synth(req: SynthRequest):
     return SynthResponse(chunks_b64=chunks_b64)
 
 
+def warm_up(engine):
+    """Synthesize one short line before the server starts, so /health only
+    answers once the first real request will be fast. Kokoro on CUDA took
+    26.6 s for its first sentence and ~0.6 s after (GTX 1650, 2026-11-10),
+    and the GPU scheduler routes to tts-gpu as soon as it reports ready."""
+    started = time.time()
+    try:
+        engine.synth("Hello.")
+    except Exception as e:  # a failed warm-up must not stop the service
+        print(f"  warm-up failed: {e}", flush=True)
+        return
+    print(f"  warm-up {time.time() - started:.1f}s", flush=True)
+
+
 def main():
     global _backend, _config, _voices
     args = build_parser().parse_args()
@@ -120,6 +135,7 @@ def main():
         _voices = VoiceSwitcher(_backend, engine, getattr(args, f"{prefix}_voice"),
                                 getattr(args, f"{prefix}_speed"), args.voice_state)
         _voices.restore()
+    warm_up(_voices or _backend)
     try:
         uvicorn.run(app, host=args.host, port=args.port)
     finally:

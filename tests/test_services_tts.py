@@ -84,3 +84,16 @@ class TestElevenLabs:
                       if sample.name == "elevenlabs_characters_total"
                       and sample.labels["model"] == "eleven_multilingual_v2")
         assert sample.value >= 5
+
+
+def test_warm_up_synthesizes_once_before_serving():
+    backend = FakeTTS()
+    tts_app.warm_up(backend)
+    assert backend.requested_text == "Hello."
+
+
+def test_a_failed_warm_up_does_not_stop_the_service(capsys):
+    backend = Mock()
+    backend.synth.side_effect = RuntimeError("CUDA not ready")
+    tts_app.warm_up(backend)  # must not raise
+    assert "warm-up failed: CUDA not ready" in capsys.readouterr().out

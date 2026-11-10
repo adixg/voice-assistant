@@ -36,7 +36,9 @@ spec:
       containers:
         - name: tts
           image: ghcr.io/adixg/aicompanion-tts-kokoro:latest
-          imagePullPolicy: IfNotPresent
+          # Always, like tts.yaml: a digest check against :latest, so a
+          # rebuilt image is picked up on the next scale-up.
+          imagePullPolicy: Always
           args: ["--tts-backend", "kokoro", "--kokoro-voice", "af_bella", "--kokoro-language", "a",
                  "--kokoro-device", "cuda"]
           # 2,064 MiB peak RSS in the benchmark; the request is what the node
