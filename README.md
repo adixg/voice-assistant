@@ -1,4 +1,4 @@
-# AI Companion
+# Voice Assistant
 
 **A self-hosted, hands-free voice assistant: say "Assistant" to a tiny ESP32-S3 device and a small Kubernetes cluster on consumer GPUs answers out loud.**
 
@@ -6,7 +6,7 @@ I built AI Companion to turn an M5StickS3 into a voice interface for locally hos
 
 <table>
   <tr>
-    <th>Rina</th>
+    <th>Assistant</th>
     <th>Clock</th>
     <th>Pomodoro</th>
   </tr>
@@ -20,10 +20,10 @@ I built AI Companion to turn an M5StickS3 into a voice interface for locally hos
 ## Features
 
 - **Wake word:** say "Assistant" and the Stick starts listening, using a microWakeWord model trained locally and running on the device (2.8 ms per 30 ms of audio).
-- **Hands-free conversation:** an on-device endpointer detects when you start and stop speaking and sends only the speech. No button needed; holding BtnB starts the same mode, and hold-to-talk on BtnA remains as a fallback.
+- **Hands-free conversation:** an on-device endpointer detects when you start and stop speaking and sends only the speech.
 - **Local speech and language:** Moonshine STT and KittenTTS on CPU, Qwen on llama.cpp, with replies spoken a sentence at a time so audio starts before the whole reply is ready.
-- **Agent tools over MCP:** web search, notes, reminders, voice switching ("switch to Kokoro Bella"), Stick volume and brightness, and `ask_claude` for questions the local model can't answer well.
-- **Speaks first:** reminders and encouragement arrive unprompted, with no button press.
+- **Agent tools over MCP:** web search, notes, reminders, voice switching ("switch to Kokoro Bella"), ESP32 device volume and brightness, and `ask_claude` for questions the local model can't answer well.
+- **Speaks first:** reminders arrive unprompted, with no button press.
 - **Speaker verification:** ECAPA-TDNN matching against an enrolled voiceprint.
 - **Embedded interface:** animated pixel-art face, clock, and pomodoro timer on a 240×135 display.
 - **Resilience:** BLE reconnection, OTA firmware updates over BLE with automatic rollback, and GPU inference failover.
@@ -63,7 +63,8 @@ flowchart TB
     class llama1650,llama4060 worker
 ```
 
-One turn, from wake word to reply. The Android relay translates these messages 1:1 to and from BLE frames.
+### How the relay works:
+The Android relay translates these messages 1:1 to and from BLE frames.
 
 ```mermaid
 sequenceDiagram
@@ -178,7 +179,7 @@ flowchart LR
 
 ## Custom Kubernetes controller
 
-Stock Kubernetes decides where a pod runs, not which of two backends a live service should call. `gpu-scheduler` fills that gap: it prefers the laptop's **RTX 4060** for inference and falls back to the home server's **GTX 1650** when the laptop goes away, so `agent` never targets a server that isn't there.
+`gpu-scheduler` helps the live service figure out which backend to call: it prefers the laptop's **RTX 4060** for inference and falls back to the home server's **GTX 1650** when the laptop goes away.
 
 ```mermaid
 flowchart TD
@@ -234,29 +235,66 @@ Every stage of a voice turn is measured, and the monitoring stack stays up when 
 - **A custom NVML GPU exporter** (`services/gpu_exporter`) replaced NVIDIA's DCGM Exporter, going from about 405 MiB to 37 MiB while adding clocks, throttle reasons, energy, XID errors, and VRAM per pod.
 - **A terminal dashboard** (`tools/obs_tui.py`, standard library only) shows host memory, GPUs, pods, latency, and recent turns without a browser.
 
-<!-- Add assets/charts/obs-tui.png and assets/charts/distributed-trace.png, then uncomment:
-![Terminal dashboard](assets/charts/obs-tui.png)
+<img src="assets/charts/obs-tui.png" alt="Terminal dashboard showing host memory, both GPUs, every pod, turn latency, and the five most recent traces split into STT, LLM, and TTS" width="820">
+
+<!-- Add assets/charts/distributed-trace.png, then uncomment:
 ![Distributed trace of one voice interaction](assets/charts/distributed-trace.png)
 -->
 
 ## Benchmarks
 
-I compared STT and TTS models on latency and memory to choose what's practical for my hardware. Every number traces back to a file in [`benchmarks/runs/`](benchmarks/runs/).
+I compared STT, TTS, and language models on speed and memory to choose what's practical for my hardware. Find the benchmark runs in: [`benchmarks/runs/`](benchmarks/runs/).
 
 ### Speech-to-text
 
-<!-- Add assets/charts/stt-benchmarks.svg, then uncomment:
-![STT model latency and memory benchmarks](assets/charts/stt-benchmarks.svg)
--->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/charts/stt-cpu-speed-vs-ram-dark.svg">
+  <img src="assets/charts/stt-cpu-speed-vs-ram-light.svg" alt="Scatter plot of median seconds to transcribe one request against peak RAM for Moonshine, Parakeet and Whisper models on the home server's CPU" width="760">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/charts/stt-gpu-speed-vs-vram-dark.svg">
+  <img src="assets/charts/stt-gpu-speed-vs-vram-light.svg" alt="Scatter plot of median seconds to transcribe one request against VRAM for Whisper models on the GTX 1650, with the card's 4 GB limit marked" width="760">
+</picture>
+
+The deployed STT is Moonshine base on CPU: 0.40 s per request in 274 MiB of RAM. Whisper is 2x to 50x slower on this hardware. On the GTX 1650 it is only slightly faster than on the CPU, and Whisper large doesn't fit the card's 4 GB at all.
 
 ### Text-to-speech
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/charts/tts-speed-vs-memory-dark.svg">
-  <img src="assets/charts/tts-speed-vs-memory-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against peak memory for each TTS engine" width="720">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/charts/tts-cpu-speed-vs-ram-dark.svg">
+  <img src="assets/charts/tts-cpu-speed-vs-ram-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against peak RAM for each TTS engine on the home server's CPU" width="760">
 </picture>
 
-The deployed backend is KittenTTS nano on CPU: 3.1x realtime at about 560 MiB on the home server.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/charts/tts-gpu-speed-vs-vram-dark.svg">
+  <img src="assets/charts/tts-gpu-speed-vs-vram-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against VRAM for each TTS engine on the GTX 1650 and RTX 4060, with both cards' limits marked" width="760">
+</picture>
+
+The deployed backend is KittenTTS nano on CPU at 1.6x speech speed: 3.4x realtime in 250 MiB of RAM. Kokoro and VITS on the GTX 1650 are about seven times faster, using under 1 GB of the card's VRAM. Chatterbox, the voice-cloning engine, is slower than both and needs 2-3 GB of VRAM; on the CPU, VITS manages only 2x realtime in 2 GB of RAM.
+
+### Language models
+
+Each model ran on llama.cpp (Q4_K_M) with the same settings as the live server on its card: an 8 GB RTX 4060 with a 40K-token context, and a 4 GB GTX 1650 with a 4K-token context. Every request carried the agent's real 20 tool definitions. Speed is the median over 80 replies to 8 fixed prompts, with thinking off. Tool calls are 13 fixed requests, 11 of which need a specific tool and 2 of which must not call any.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/charts/llm-reply-vs-vram-dark.svg">
+  <img src="assets/charts/llm-reply-vs-vram-light.svg" alt="Scatter plot of median seconds per reply against VRAM for eight language models on the GTX 1650 and RTX 4060, with both cards' limits marked" width="800">
+</picture>
+
+| Model | GPU | First token | Generation | Whole reply | Tool calls | Load | VRAM |
+|---|---|---|---|---|---|---|---|
+| **Qwen3 8B** (live) | RTX 4060 | 0.08 s | 27 tok/s | 0.94 s | 12/13 | 10 s | 7.7 GB |
+| Llama 3.1 8B | RTX 4060 | 0.24 s | 42 tok/s | 0.50 s | 11/13 | 10 s | 7.3 GB |
+| Granite 4.2 8B | RTX 4060 | 0.42 s | 19 tok/s | 2.67 s | 12/13 | 17 s | 7.7 GB |
+| **Qwen3.5 4B** (standby) | GTX 1650 | 0.32 s | 41 tok/s | 1.28 s | 10/13 | 87 s | 2.7 GB |
+| Qwen3.5 2B | GTX 1650 | 0.13 s | 72 tok/s | 0.54 s | 8/13 | 76 s | 2.3 GB |
+| Ministral 3 3B | GTX 1650 | 0.25 s | 42 tok/s | 0.72 s | 12/13 | 56 s | 3.4 GB |
+| Granite 4.2 3B | GTX 1650 | 0.25 s | 44 tok/s | 1.96 s | 10/13 | 58 s | 2.4 GB |
+| Phi-4 mini | GTX 1650 | 0.11 s | 41 tok/s | 0.64 s | 2/13 | 79 s | 3.0 GB |
+| Gemma 4 E4B | GTX 1650 | — | — | — | — | — | crashed while loading; the 4.8 GB file alone is bigger than the card |
+
+With thinking on, both Qwen models passed all 13 tool calls, but the first spoken word came after 6.2 s on the 4060 and 2.4 s on the 1650, too slow for a voice reply. Ministral 3 3B is the strongest standby candidate: the same tool score as the 8B models at 0.72 s per reply, though at 3.4 GB it leaves the 1650 almost no room for anything else. VRAM on the 4060 is mostly the 40K-token KV cache, not the weights. Load times on the 1650 include starting the container from the home server's hard disk.
 
 ## Hardware and setup
 
@@ -270,15 +308,4 @@ git clone https://github.com/adixg/voice-assistant.git
 cd voice-assistant
 ```
 
-This is a hardware-specific, self-managed deployment rather than a one-command install. Start with [`docs/setup.md`](docs/setup.md). Do not expose the gateway directly to the public internet without authentication.
-
-## More details
-
-- [Setup and using the Stick](docs/setup.md)
-- [Development: layout, tests, CI, swapping backends, debugging](docs/development.md)
-- [Deployment architecture](docs/deployment-architecture.md)
-- [Voice pipeline](docs/voice-pipeline.md), [BLE migration](docs/ble-migration.md), [firmware notes](docs/firmware-notes.md), [hardware budget](docs/hardware-budget.md)
-- **Part 1:** custom Kubernetes controller, distributed tracing, and model benchmarking *(blog forthcoming)*
-- **Part 2:** ESP32 communication, streaming audio, and internet-enabled agent tools *(forthcoming)*
-
-> **Note:** model inference runs locally, but web search and `ask_claude` need internet access.
+This is a hardware-specific, self-managed deployment rather than a one-command install.

@@ -1,0 +1,44 @@
+{
+  "label": "tts-chatterbox-turbo-gtx1650",
+  "metadata": {
+    "timestamp_utc": "2026-11-10T21:14:45.349029+00:00",
+    "host": "arch-ssd",
+    "device": "gpu",
+    "cpu": "Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz",
+    "cpus": 8,
+    "warmups": 3,
+    "repetitions": 10,
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "git_commit": "2a19a1f0a86f",
+    "failures": [],
+    "memory_note": "rss_peak_mib is the engine process's own peak RSS (VmHWM), plus any worker processes it started; not a pod's cgroup total"
+  },
+  "summary": [
+    {
+      "label": "Chatterbox Turbo",
+      "backend": "chatterbox",
+      "options": {
+        "chatterbox_device": "cuda",
+        "chatterbox_prompt": null,
+        "chatterbox_nano": false
+      },
+      "n": 50,
+      "load_s": 0.0,
+      "rss_peak_mib": 3144.3,
+      "x_realtime": 2.168,
+      "s_per_10s_speech": 4.613,
+      "x_realtime_p50": 2.113,
+      "x_realtime_min": 1.684,
+      "synth_s_p50": 1.6362,
+      "synth_s_p95": 3.1040049999999995,
+      "synth_s_max": 3.1626,
+      "audio_s_total": 198.84
+    }
+  ]
+}

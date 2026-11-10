@@ -1,0 +1,24 @@
+{
+ "metadata": {
+  "what": "Peak memory of each STT pod while bench_turn (or, for moonshine and parakeet, tools/stt_mem.py-style repeated requests) ran its requests against it",
+  "how": "kubectl top pod (metrics-server working set) sampled every 10-20 s during the run; VRAM is nvidia-smi memory.used on the GTX 1650 sampled alongside, idle baseline 14-29 MiB included",
+  "host": "arch-ssd",
+  "note": "Sampled peaks, so a short spike between samples can be missed. Working set is not the same measure as the TTS chart's process RSS; compare within this file.",
+  "date": "2026-11-09/10"
+ },
+ "pods": [
+  {"model": "moonshine-tiny", "hw": "cpu", "ram_peak_mib": 138},
+  {"model": "moonshine", "hw": "cpu", "ram_peak_mib": 274},
+  {"model": "parakeet", "hw": "cpu", "ram_peak_mib": 1059},
+  {"model": "whisper-tiny", "hw": "cpu", "ram_peak_mib": 406},
+  {"model": "whisper-tiny", "hw": "gtx1650", "ram_peak_mib": 480, "vram_peak_mib": 223},
+  {"model": "whisper-base", "hw": "cpu", "ram_peak_mib": 375},
+  {"model": "whisper-base", "hw": "gtx1650", "ram_peak_mib": 451, "vram_peak_mib": 383},
+  {"model": "whisper-small", "hw": "cpu", "ram_peak_mib": 783},
+  {"model": "whisper-small", "hw": "gtx1650", "ram_peak_mib": 468, "vram_peak_mib": 831},
+  {"model": "whisper-medium", "hw": "cpu", "ram_peak_mib": 2112},
+  {"model": "whisper-medium", "hw": "gtx1650", "ram_peak_mib": 1749, "vram_peak_mib": 2129},
+  {"model": "whisper-large-v2", "hw": "cpu", "ram_peak_mib": 3910},
+  {"model": "whisper-large-v3", "hw": "cpu", "ram_peak_mib": 3907}
+ ]
+}

@@ -1,0 +1,6 @@
+# GitHub's language bar (linguist) counts bytes. These are generated or
+# third-party, so leave them out of it; nothing else about the files changes.
+firmware/m5stick_bridge/src/sprites.h linguist-generated
+firmware/m5stick_bridge/src/wake_word_model.h linguist-generated
+firmware/m5stick_bridge/lib/tflm_esp/** linguist-vendored
+assets/charts/*.svg linguist-generated

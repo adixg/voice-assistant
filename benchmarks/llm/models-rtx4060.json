@@ -1,0 +1,48 @@
+[
+ {
+  "label": "qwen3-8b-rtx4060",
+  "repo": "Qwen/Qwen3-8B-GGUF",
+  "file": "Qwen3-8B-Q4_K_M.gguf",
+  "think": true,
+  "extra": [
+   "--parallel",
+   "1",
+   "--flash-attn",
+   "on",
+   "--cache-type-k",
+   "q8_0",
+   "--cache-type-v",
+   "q8_0"
+  ]
+ },
+ {
+  "label": "granite-4.2-8b-rtx4060",
+  "repo": "ibm-granite/granite-4.2-8b-GGUF",
+  "file": "granite-4.2-8b-Q4_K_M.gguf",
+  "extra": [
+   "--parallel",
+   "1",
+   "--flash-attn",
+   "on",
+   "--cache-type-k",
+   "q8_0",
+   "--cache-type-v",
+   "q8_0"
+  ]
+ },
+ {
+  "label": "llama-3.1-8b-rtx4060",
+  "repo": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
+  "file": "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+  "extra": [
+   "--parallel",
+   "1",
+   "--flash-attn",
+   "on",
+   "--cache-type-k",
+   "q8_0",
+   "--cache-type-v",
+   "q8_0"
+  ]
+ }
+]

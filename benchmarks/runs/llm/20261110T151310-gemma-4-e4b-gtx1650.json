@@ -1,0 +1,18 @@
+{
+ "model": {
+  "label": "gemma-4-e4b-gtx1650",
+  "repo": "unsloth/gemma-4-E4B-it-GGUF",
+  "file": "gemma-4-E4B-it-Q4_K_M.gguf"
+ },
+ "image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+ "ctx": "4096",
+ "started": "2026-11-10T15:13:10-0500",
+ "node_selector": {
+  "gpu-tier": "gtx1650"
+ },
+ "system_prompt": "You are Rina, a friendly voice assistant on a small desk device. Your replies are spoken aloud, so keep them short, natural and free of markdown. Use a tool when the request needs one; otherwise just answer.",
+ "tools_sent": 20,
+ "vram_idle_mib": 14,
+ "first_start_s": 296.57378935813904,
+ "error": "pod Failed: libggml-base.so.0(+0x183e6)[0x7fa5b34463e6]\nlibggml-base.so.0(+0x1886a)[0x7fa5b344686a]\nlibggml-base.so.0(ggml_abort+0x15b)[0x7fa5b3446a4b]\nlibggml-base.so.0(+0x33be1)[0x7fa5b3461be1]\nlibmtmd.so.0(_ZN17mtmd_model_loader12load_tensorsER10mtmd_modelP24ggml_backend_buffer_typeb+0x24d7)[0x7fa5b3b53d97]\nlibmtmd.so.0(+0x1666f5)[0x7fa5b3b2f6f5]\nlibmtmd.so.0(_Z15mtmd_model_loadPKcRK17mtmd_model_paramsP24ggml_backend_buffer_type+0x91)[0x7fa5b3b2f7a1]\nlibmtmd.so.0(_ZN12mtmd_contextC2EPKcPK11llama_modelRK19mtmd_context_paramsb+0x315)[0x7fa5b3a7aec5]\nlibmtmd.so.0(mtmd_init_from_file+0x31)[0x7fa5b3a69701]\nlibllama-server-impl.so(_ZN19server_context_impl10load_modelER13common_params+0x88b)[0x7fa5b47e350b]\nlibllama-server-impl.so(+0x10199f)[0x7fa5b46f199f]\nlibllama-server-impl.so(_Z12llama_serveriPPc+0x11cf)[0x7fa5b46f374f]\n/lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca)[0x7fa5b41551ca]\n/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b)[0x7fa5b415528b]\n/app/llama-server(+0x1315)[0x55772eb87315]"
+}

@@ -1,0 +1,44 @@
+{
+ "metadata": {
+  "what": "VRAM held while each GPU TTS engine ran its benchmark, whole card as nvidia-smi reports it",
+  "how": "nvidia-smi memory.used sampled every 15 s during the run (2026-11-10), idle baseline 14-29 MiB included; Chatterbox on the RTX 4060 from the 2026-09-05 transcribed run",
+  "note": "VITS on the GTX 1650 finished its whole run in about 15 s and was sampled once mid-run: 585 MiB is a lower bound. Kokoro PyTorch matches the 977 MiB measured 2026-09-24 (docs/hardware-budget.md)."
+ },
+ "engines": [
+  {
+   "label": "Kokoro PyTorch",
+   "card": "gtx1650",
+   "vram_peak_mib": 977,
+   "samples": 5
+  },
+  {
+   "label": "VITS",
+   "card": "gtx1650",
+   "vram_peak_mib": 585,
+   "samples": 1,
+   "lower_bound": true
+  },
+  {
+   "label": "Chatterbox Nano",
+   "card": "rtx4060",
+   "vram_peak_mib": 1857
+  },
+  {
+   "label": "Chatterbox Turbo",
+   "card": "rtx4060",
+   "vram_peak_mib": 2805
+  },
+  {
+   "label": "Chatterbox Nano",
+   "card": "gtx1650",
+   "vram_peak_mib": 2222,
+   "samples": 16
+  },
+  {
+   "label": "Chatterbox Turbo",
+   "card": "gtx1650",
+   "vram_peak_mib": 3172,
+   "samples": 22
+  }
+ ]
+}

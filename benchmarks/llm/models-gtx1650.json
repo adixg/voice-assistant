@@ -1,0 +1,8 @@
+[
+ {"label":"qwen3.5-4b-gtx1650","repo":"TheStageAI/Qwen3.5-4B-GGUF","file":"Qwen3.5-4B-M-TS-Q4_K_M.gguf","think":true},
+ {"label":"qwen3.5-2b-gtx1650","repo":"unsloth/Qwen3.5-2B-GGUF","file":"Qwen3.5-2B-Q4_K_M.gguf","think":true},
+ {"label":"granite-4.2-3b-gtx1650","repo":"ibm-granite/granite-4.2-3b-GGUF","file":"granite-4.2-3b-Q4_K_M.gguf"},
+ {"label":"ministral-3-3b-gtx1650","repo":"mistralai/Ministral-3-3B-Instruct-2512-GGUF","file":"Ministral-3-3B-Instruct-2512-Q4_K_M.gguf"},
+ {"label":"phi-4-mini-gtx1650","repo":"unsloth/Phi-4-mini-instruct-GGUF","file":"Phi-4-mini-instruct-Q4_K_M.gguf"},
+ {"label":"gemma-4-e4b-gtx1650","repo":"unsloth/gemma-4-E4B-it-GGUF","file":"gemma-4-E4B-it-Q4_K_M.gguf"}
+]

@@ -1,0 +1,45 @@
+{
+  "label": "tts-kokoro-onnx-fp32-arch-ssd-cpu",
+  "metadata": {
+    "timestamp_utc": "2026-11-10T04:36:08.659552+00:00",
+    "host": "arch-ssd",
+    "device": "cpu",
+    "cpu": "Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz",
+    "cpus": 8,
+    "warmups": 3,
+    "repetitions": 10,
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "git_commit": "2a19a1f0a86f",
+    "failures": [],
+    "memory_note": "rss_peak_mib is the engine process's own peak RSS (VmHWM), plus any worker processes it started; not a pod's cgroup total"
+  },
+  "summary": [
+    {
+      "label": "Kokoro-ONNX fp32",
+      "backend": "kokoro-onnx",
+      "options": {
+        "kokoro_onnx_voice": "af_bella",
+        "kokoro_onnx_model": "kokoro-multi-lang-v1_0",
+        "kokoro_onnx_speed": 1.0,
+        "kokoro_onnx_threads": 4
+      },
+      "n": 50,
+      "load_s": 1.47,
+      "rss_peak_mib": 653.4,
+      "x_realtime": 2.351,
+      "s_per_10s_speech": 4.254,
+      "x_realtime_p50": 2.361,
+      "x_realtime_min": 1.802,
+      "synth_s_p50": 1.4745,
+      "synth_s_p95": 2.6511850000000003,
+      "synth_s_max": 2.7063,
+      "audio_s_total": 182.82
+    }
+  ]
+}

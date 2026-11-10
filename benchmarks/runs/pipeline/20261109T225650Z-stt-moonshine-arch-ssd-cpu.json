@@ -1,0 +1,83 @@
+{
+  "label": "stt-moonshine-arch-ssd-cpu",
+  "metadata": {
+    "timestamp_utc": "2026-11-09T22:56:50.218736+00:00",
+    "llms": [
+      {
+        "name": "rtx4060",
+        "url": "http://10.43.145.134:8080/v1",
+        "kind": "openai",
+        "model": "qwen3-8b",
+        "think": "off",
+        "extra": {}
+      }
+    ],
+    "tts": [
+      [
+        "kitten",
+        "http://10.43.58.69:8003"
+      ]
+    ],
+    "stt": "http://10.43.217.121:8001",
+    "repetitions": 10,
+    "warmups": 3,
+    "system": null,
+    "stt_backend": {
+      "name": "moonshine",
+      "options": {
+        "moonshine_model": "sherpa-onnx-moonshine-base-en-quantized-2026-02-27",
+        "moonshine_threads": 4
+      }
+    },
+    "tts_backends": {},
+    "git_commit": "8faa0c2",
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "records": 50
+  },
+  "summary": [
+    {
+      "llm": "rtx4060",
+      "tts": "kitten",
+      "stt_backend": "moonshine",
+      "tts_backend": null,
+      "ok": 50,
+      "n": 50,
+      "stt_ms_p50": 403.4,
+      "stt_ms_p95": 653.0149999999999,
+      "stt_ms_mean": 447.192,
+      "stt_ms_min": 237.7,
+      "stt_ms_max": 1663.1,
+      "llm_ms_p50": 6317.15,
+      "llm_ms_p95": 12524.305,
+      "llm_ms_mean": 6098.772,
+      "llm_ms_min": 982.9,
+      "llm_ms_max": 18056.5,
+      "tts_ms_p50": 0.0,
+      "tts_ms_p95": 0.0,
+      "tts_ms_mean": 0.0,
+      "tts_ms_min": 0.0,
+      "tts_ms_max": 0.0,
+      "turn_ms_p50": 6749.049999999999,
+      "turn_ms_p95": 12921.415,
+      "turn_ms_mean": 6545.964,
+      "turn_ms_min": 1233.4,
+      "turn_ms_max": 18506.7,
+      "tts_x_realtime_p50": null,
+      "tts_x_realtime_p95": null,
+      "tts_x_realtime_mean": null,
+      "tts_x_realtime_min": null,
+      "tts_x_realtime_max": null,
+      "audio_s_p50": 0.0,
+      "audio_s_p95": 0.0,
+      "audio_s_mean": 0.0,
+      "audio_s_min": 0.0,
+      "audio_s_max": 0.0
+    }
+  ]
+}

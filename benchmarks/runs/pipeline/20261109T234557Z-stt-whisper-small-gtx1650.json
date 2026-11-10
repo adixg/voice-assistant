@@ -1,0 +1,121 @@
+{
+  "label": "stt-whisper-small-gtx1650",
+  "metadata": {
+    "timestamp_utc": "2026-11-09T23:45:57.361261+00:00",
+    "llms": [
+      {
+        "name": "rtx4060",
+        "url": "http://10.43.145.134:8080/v1",
+        "kind": "openai",
+        "model": "qwen3-8b",
+        "think": "off",
+        "extra": {}
+      }
+    ],
+    "tts": [
+      [
+        "kitten",
+        "http://10.43.58.69:8003"
+      ]
+    ],
+    "stt": "http://10.42.0.249:8001",
+    "repetitions": 10,
+    "warmups": 3,
+    "system": null,
+    "stt_backend": {
+      "name": "faster-whisper",
+      "options": {
+        "whisper_model": "small",
+        "whisper_device": "cuda"
+      }
+    },
+    "tts_backends": {},
+    "git_commit": "8faa0c2",
+    "sentences": [
+      "Hey, how was your day?",
+      "Can you remind me to drink water in an hour?",
+      "Nice work, that was a full fifty minute focus session. Take a short break and stretch a little.",
+      "What's the GPU temperature right now, and is anything running hot?",
+      "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
+    ],
+    "records": 50
+  },
+  "summary": [
+    {
+      "llm": "rtx4060",
+      "tts": "kitten",
+      "stt_backend": "faster-whisper",
+      "tts_backend": null,
+      "ok": 46,
+      "n": 47,
+      "stt_ms_p50": 3350.3,
+      "stt_ms_p95": 3830.1,
+      "stt_ms_mean": 3411.365,
+      "stt_ms_min": 3088.1,
+      "stt_ms_max": 3905.8,
+      "llm_ms_p50": 2125.1,
+      "llm_ms_p95": 14578.224999999999,
+      "llm_ms_mean": 5600.246,
+      "llm_ms_min": 1446.9,
+      "llm_ms_max": 15438.0,
+      "tts_ms_p50": 0.0,
+      "tts_ms_p95": 0.0,
+      "tts_ms_mean": 0.0,
+      "tts_ms_min": 0.0,
+      "tts_ms_max": 0.0,
+      "turn_ms_p50": 5732.4,
+      "turn_ms_p95": 17937.975,
+      "turn_ms_mean": 9011.611,
+      "turn_ms_min": 4566.2,
+      "turn_ms_max": 18767.6,
+      "tts_x_realtime_p50": null,
+      "tts_x_realtime_p95": null,
+      "tts_x_realtime_mean": null,
+      "tts_x_realtime_min": null,
+      "tts_x_realtime_max": null,
+      "audio_s_p50": 0.0,
+      "audio_s_p95": 0.0,
+      "audio_s_mean": 0.0,
+      "audio_s_min": 0.0,
+      "audio_s_max": 0.0
+    },
+    {
+      "llm": "rtx4060",
+      "tts": "-",
+      "stt_backend": "faster-whisper",
+      "tts_backend": null,
+      "ok": 0,
+      "n": 3,
+      "stt_ms_p50": null,
+      "stt_ms_p95": null,
+      "stt_ms_mean": null,
+      "stt_ms_min": null,
+      "stt_ms_max": null,
+      "llm_ms_p50": null,
+      "llm_ms_p95": null,
+      "llm_ms_mean": null,
+      "llm_ms_min": null,
+      "llm_ms_max": null,
+      "tts_ms_p50": null,
+      "tts_ms_p95": null,
+      "tts_ms_mean": null,
+      "tts_ms_min": null,
+      "tts_ms_max": null,
+      "turn_ms_p50": null,
+      "turn_ms_p95": null,
+      "turn_ms_mean": null,
+      "turn_ms_min": null,
+      "turn_ms_max": null,
+      "tts_x_realtime_p50": null,
+      "tts_x_realtime_p95": null,
+      "tts_x_realtime_mean": null,
+      "tts_x_realtime_min": null,
+      "tts_x_realtime_max": null,
+      "audio_s_p50": null,
+      "audio_s_p95": null,
+      "audio_s_mean": null,
+      "audio_s_min": null,
+      "audio_s_max": null
+    }
+  ]
+}

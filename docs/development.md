@@ -332,15 +332,17 @@ flag (`--only`, `--no-NAME`, `--history`). It reads Prometheus and Tempo through
 
 ## TTS backends
 
-See the chart in [the README](../README.md#text-to-speech).
+See the two charts in [the README](../README.md#text-to-speech): CPU engines by
+RAM, GPU engines by VRAM, since those are separate budgets.
 
 Lower is faster, further left is lighter; each label shows its sample count.
-CPU points are 50 samples each on the home server
-(`benchmarks/runs/tts_engines/`); memory is the engine process's peak RAM for
-those and VRAM for the GPU ones, whose 3-sample numbers date from 2026-09-05. Not plotted, for lack of one of the two numbers: VITS
-(1.8x realtime on the laptop CPU, RAM not measured), Chatterbox on CPU
-(0.4-0.8x realtime), PyTorch Kokoro (OOM-killed at 3 GiB before finishing a
-run) and ElevenLabs (cloud). Every number and its source is in
+Speed points are 50 samples each on the home server
+(`benchmarks/runs/tts_engines/`) except Chatterbox, whose 3-sample numbers on
+the RTX 4060 date from 2026-09-05. CPU memory is the engine process's peak RAM;
+GPU memory is the whole card's VRAM sampled during the run
+(`*-tts-vram.json`; VITS ran for only ~15 s, so its 585 MiB is a lower bound).
+Not plotted: Chatterbox Nano on CPU (its checkpoint is saved for CUDA and fails to load
+without `map_location`), and ElevenLabs (cloud). Every number and its source is in
 `docs/hardware-budget.md`; regenerate with `python benchmarks/plot_tts_tradeoff.py`
 (it reads the kept runs; see `benchmarks/README.md`).
 

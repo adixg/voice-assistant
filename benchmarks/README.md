@@ -8,7 +8,8 @@ What is measured, how, and where the results live.
 | [`tts_engines/bench_tts_engines.py`](tts_engines/README.md) | each TTS engine alone: seconds per 10 s of speech, x realtime, peak memory | `results/tts_engines/` | `runs/tts_engines/` |
 | [`latency/benchmark_streaming.py`](latency/README.md) | LLM streaming latency (time to first token, total) | `results/` | none yet |
 | [`gpu_allocation/`](gpu_allocation/README.md) | 4060 → 1650 failover and recovery | — | **plan only, never run** |
-| `plot_tts_tradeoff.py` | draws the README's TTS chart from `runs/tts_engines/` | | `../assets/charts/` |
+| [`llm/bench_llm.py`](llm/bench_llm.py) | each LLM on one card: time to first token, generation speed, whole reply, load time, VRAM, and 13 tool-call checks with the agent's real tools | | `runs/llm/` |
+| `plot_stt.py`, `plot_tts_tradeoff.py`, `plot_llm.py` | draw the README's speed-vs-memory charts (CPU by RAM, GPU by VRAM) from `runs/`; shared renderer in `chart_svg.py` | | `../assets/charts/` |
 
 ## Raw vs kept
 
