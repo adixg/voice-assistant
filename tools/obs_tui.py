@@ -532,6 +532,27 @@ def tempo_search(base, name, start, end, get_json):
         raise TempoError(str(exc)) from exc
 
 
+def full_trace_stage_spans(base, trace_id, get_json):
+    """Every pipeline-stage span in one trace, as [(start_ns, stage, dur_ns)],
+    from Tempo's trace-by-ID API; None if it can't be fetched. Search alone is
+    not enough: for a long-lived Stick connection (one trace, hundreds of
+    WebSocket spans) it returned 1 of a trace's 4 transcribe spans (2026-11-11)."""
+    names = {name: stage for stage, name in STAGES}
+    try:
+        trace = get_json(f"{base.rstrip('/')}/api/traces/{trace_id}")
+    except PromError:
+        return None
+    out = []
+    for batch in trace.get("batches") or trace.get("resourceSpans") or []:
+        for scope in batch.get("scopeSpans") or batch.get("instrumentationLibrarySpans") or []:
+            for span in scope.get("spans", []):
+                stage = names.get(span.get("name"))
+                if stage:
+                    start = int(span["startTimeUnixNano"])
+                    out.append((start, stage, int(span["endTimeUnixNano"]) - start))
+    return out or None
+
+
 def collect_turns(base, window, get_json=fetch_json, now=time.time):
     """Stick turns, newest first, each {start_ns, end_ns, stt, agent, tts} in ms.
 
@@ -541,6 +562,8 @@ def collect_turns(base, window, get_json=fetch_json, now=time.time):
     calling an endpoint rather than the gateway running a turn. A live Stick
     connection is one long-lived WebSocket whose root span has not finished, so
     its trace holds many turns; a new turn begins at each transcribe span.
+    Search finds the traces; each is then fetched whole, since search returns
+    only some of a big trace's matching spans.
     """
     end = now()
     events = {}  # trace id -> [(start_ns, stage, dur_ns)]
@@ -552,6 +575,11 @@ def collect_turns(base, window, get_json=fetch_json, now=time.time):
                 for span in span_set.get("spans", []):
                     events.setdefault(trace["traceID"], []).append(
                         (int(span["startTimeUnixNano"]), stage, int(span["durationNanos"])))
+    since_ns = (end - window_seconds(window)) * 1e9
+    for trace_id in list(events):
+        whole = full_trace_stage_spans(base, trace_id, get_json)
+        if whole:  # otherwise keep what search returned
+            events[trace_id] = [e for e in whole if e[0] >= since_ns]
     turns = []
     for trace_events in events.values():
         current = None

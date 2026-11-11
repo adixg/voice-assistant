@@ -325,9 +325,17 @@ def span(start_s, dur_ms):
     return {"spanID": "x", "startTimeUnixNano": str(int(start_s * NS)), "durationNanos": str(int(dur_ms * 1e6))}
 
 
-def tempo(traces_by_stage):
-    """A get_json for Tempo's search: answers by the span name in the TraceQL."""
+def tempo(traces_by_stage, full=None):
+    """A get_json for Tempo: search answers by the span name in the TraceQL;
+    /api/traces/<id> answers from `full` (trace id -> [(name, start_s, dur_ms)]),
+    or with nothing, so the search spans are used."""
     def get_json(url):
+        path = urlparse(url).path
+        if "/api/traces/" in path:
+            spans = (full or {}).get(path.rsplit("/", 1)[-1], [])
+            return {"batches": [{"scopeSpans": [{"spans": [
+                {"name": n, "startTimeUnixNano": str(int(s * NS)), "endTimeUnixNano": str(int(s * NS + d * 1e6))}
+                for n, s, d in spans]}]}]}
         q = parse_qs(urlparse(url).query)["q"][0]
         for name, traces in traces_by_stage.items():
             if f'"{name}"' in q:
@@ -381,6 +389,17 @@ def test_a_long_lived_websocket_trace_yields_one_turn_per_transcribe():
     }
     turns = obs_tui.collect_turns("http://t", "1h", tempo(traces), now=lambda: NOW)
     assert [(t["stt"], t["agent"], t["tts"]) for t in turns] == [(1500, 5000, 3000), (1000, 4000, 2000)]  # newest first
+
+
+def test_a_big_trace_is_fetched_whole_when_search_returns_only_some_spans():
+    # search found 1 of the connection's 2 transcribe spans; the full trace has both
+    search = {"POST /transcribe": [trace("ws", None, [span(9100, 1000)])]}
+    full = {"ws": [("POST /transcribe", 9100, 1000), ("POST /ask_stream", 9101, 4000), ("POST /synth", 9106, 2000),
+                   ("POST /transcribe", 9200, 1500), ("POST /ask_stream", 9202, 5000), ("POST /synth", 9208, 3000),
+                   ("HTTP /stick websocket receive", 9150, 1),
+                   ("POST /transcribe", 100, 900)]}  # older than the 1h window: left out
+    turns = obs_tui.collect_turns("http://t", "1h", tempo(search, full), now=lambda: NOW)
+    assert [(t["stt"], t["agent"], t["tts"]) for t in turns] == [(1500, 5000, 3000), (1000, 4000, 2000)]
 
 
 def test_a_failed_turn_with_no_tts_span_is_still_shown():
