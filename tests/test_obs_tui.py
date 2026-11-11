@@ -167,6 +167,21 @@ def test_pods_panel_shows_rss_against_limit_only_where_rss_exists():
     assert "limit 2,048Mi" in by_pod["llama-cpp-x"] and "/" not in by_pod["llama-cpp-x"].split("limit")[0].split("llama-cpp-x")[1]
 
 
+def test_pods_panel_matches_rss_to_its_pod_by_ip():
+    # two pods behind the tts Service; only the selected one (tts-gpu) is scraped
+    routes = {
+        "kube_pod_status_ready": [({"pod": "tts-cpu1"}, 1), ({"pod": "tts-gpu-2"}, 1)],
+        "kube_pod_info": [({"pod": "tts-cpu1", "pod_ip": "10.0.0.1"}, 1), ({"pod": "tts-gpu-2", "pod_ip": "10.0.0.2"}, 1)],
+        "resource_limits": [({"pod": "tts-cpu1"}, 2048 * 2**20), ({"pod": "tts-gpu-2"}, 3072 * 2**20)],
+        "process_resident_memory_bytes": [({"service": "tts", "instance": "10.0.0.2:8003"}, 1992 * 2**20)],
+    }
+    text = "\n".join(obs_tui.panel_pods(PLAIN, "http://p", fake_prom(routes)))
+    gpu = next(l for l in text.splitlines() if "tts-gpu-2" in l)
+    cpu = next(l for l in text.splitlines() if "tts-cpu1" in l)
+    assert "1,992Mi / 3,072Mi" in gpu
+    assert "1,992Mi" not in cpu and "limit 2,048Mi" in cpu
+
+
 def test_pods_panel_flags_restarts_oom_kills_and_unready_pods():
     text = "\n".join(obs_tui.panel_pods(PLAIN, "http://p", fake_prom(pod_routes())))
     tts = next(l for l in text.splitlines() if "tts-def" in l)

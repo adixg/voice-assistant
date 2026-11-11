@@ -339,19 +339,28 @@ def panel_pods(style, base, get_json=fetch_json, history=None):
         base, 'kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1', get_json)}
     limits = {m["pod"]: v for m, v in prom(
         base, 'sum by (pod) (kube_pod_container_resource_limits{resource="memory"})', get_json)}
-    rss = {m["service"]: v for m, v in prom(base, "process_resident_memory_bytes", get_json)}
+    # RSS is matched to its pod by IP (the scrape's `instance`), not by Service
+    # name: since tts-gpu, two pods sit behind the `tts` Service and only the one
+    # it selects is scraped. Without kube_pod_info, fall back to the Service name.
+    pod_ip = {m["pod"]: m.get("pod_ip") for m, v in prom(base, "kube_pod_info", get_json) if m.get("pod_ip")}
+    rss_samples = prom(base, "process_resident_memory_bytes", get_json)
+    rss_by_ip = {m["instance"].rsplit(":", 1)[0]: v for m, v in rss_samples if m.get("instance")}
+    rss = {m["service"]: v for m, v in rss_samples}
     serving_hosts = [m["host"] for m, v in prom(base, "aicompanion_agent_llm_target_info == 1", get_json)]
     scaled_down = sorted(m["deployment"] for m, v in prom(
         base, "kube_deployment_spec_replicas == 0", get_json))
     rss_hist = {}
     if history:
-        rss_hist = graph_data(lambda: {m["service"]: v for m, v in prom_range(
-            base, "process_resident_memory_bytes", history, get_json)})
+        rss_hist = graph_data(lambda: {
+            (m["instance"].rsplit(":", 1)[0] if pod_ip and m.get("instance") else m["service"]): v
+            for m, v in prom_range(base, "process_resident_memory_bytes", history, get_json)})
     if not ready:
         return lines + [style("y", "  no pod data from kube-state-metrics")]
     for pod in sorted(ready):
         service = next((s for s in RSS_SERVICES if pod.startswith(s + "-")), None)
-        used, limit = rss.get(service), limits.get(pod)
+        key = pod_ip.get(pod) if pod_ip else service
+        used = rss_by_ip.get(key) if pod_ip else rss.get(service)
+        limit = limits.get(pod)
         state = style("g", "ready ") if ready[pod] >= 1 else style("r", "NOT   ")
         mem = ""
         if limit:
@@ -364,9 +373,9 @@ def panel_pods(style, base, get_json=fetch_json, history=None):
         flag = style("r", f"  restarts={n} OOMKilled") if pod in oom else (
             style("y", f"  restarts={n}") if n else "")
         trend = ""
-        if limit and rss_hist.get(service):
+        if limit and rss_hist.get(key):
             # Scaled 0..limit, so a line near the top means "close to being killed".
-            trend = "  " + spark(style, rss_hist[service], hi=limit) if len(rss_hist[service]) >= 2 else ""
+            trend = "  " + spark(style, rss_hist[key], hi=limit) if len(rss_hist[key]) >= 2 else ""
         role = role_of(pod, serving_hosts)
         role_cell = style(ROLE_COLOURS.get(role, "d"), f"{role:8}")
         lines.append(f"  {state} {role_cell} {pod[:36]:36} {mem}{trend}{flag}")
