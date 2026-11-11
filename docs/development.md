@@ -9,7 +9,7 @@ The primary device path is M5StickS3 → BLE → Android relay → the k3s gatew
 and split STT/agent/TTS services. `bridge_server.py` remains the standalone
 development fallback, and `chat_loop.py` runs the same backends with this
 machine's local mic/speaker. TTS is
-swappable (`--tts-backend kitten` (the deployed default), `kokoro-onnx`,
+swappable (`--tts-backend kitten` (the cluster's CPU voice), `kokoro-onnx`,
 `kokoro`, `vits`, `chatterbox`, or `elevenlabs`), and so is STT (`moonshine`,
 `parakeet`, `faster-whisper`) — see "Swapping backends" below. In the cluster,
 `tools/switch-backend.sh` swaps either one live.
@@ -35,7 +35,8 @@ voicepipe/            the STT/LLM/TTS pipeline, plain importable modules — no
     chatterbox.py           Chatterbox Turbo         ("chatterbox", TTS)
     kokoro.py               Kokoro-82M on PyTorch    ("kokoro", TTS)
     sherpa_tts.py           Kokoro-82M, KittenTTS on CPU via sherpa-onnx
-                            ("kokoro-onnx", "kitten", TTS; kitten deployed)
+                            ("kokoro-onnx", "kitten", TTS; kitten is the
+                            cluster's CPU voice)
     _sherpa.py              shared model download + wav helpers
     vits.py                 VITS-Umamusume           ("vits", TTS)
   cli.py                  the flags every entrypoint shares, assembled from
@@ -346,8 +347,11 @@ without `map_location`), and ElevenLabs (cloud). Every number and its source is 
 `docs/hardware-budget.md`; regenerate with `python benchmarks/plot_tts_tradeoff.py`
 (it reads the kept runs; see `benchmarks/README.md`).
 
-The deployed TTS backend is KittenTTS nano (voice `Bella`) on CPU via
-sherpa-onnx: 3.1x realtime at ~560 MiB on the home server. `kokoro-onnx` is the
+In the cluster, Rina speaks with PyTorch Kokoro (`af_bella`) on the GTX 1650
+whenever the LLM doesn't need that card (the `tts-gpu` pod, run by the GPU
+scheduler, 22x realtime), and with KittenTTS nano (voice `Bella`, speed 1.6) on
+CPU via sherpa-onnx otherwise: 3.4x realtime at ~250 MiB, in the `tts` pod,
+which always runs as the fallback. `kokoro-onnx` is the
 higher-quality alternative (Kokoro-82M's `af_bella` voice, 2.2x realtime, ~1.35
 GiB); the PyTorch `kokoro` backend with the same voice needed 3 GiB and was
 still OOM-killed there. Measurements: `docs/hardware-budget.md`. Switch live

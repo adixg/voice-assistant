@@ -165,7 +165,10 @@ README.
 
 `stt` and `tts` are pinned to the GTX 1650 node (`nodeSelector: gpu-tier:
 gtx1650`) so they're always reachable regardless of whether the laptop is
-up. `tts` runs KittenTTS nano (voice Bella, speed 1.6) and `stt` runs
-Moonshine, both on CPU via sherpa-onnx; `tools/switch-backend.sh` switches
-either (Kokoro, Whisper, Parakeet...). The original VITS backend,
+up. `stt` runs Moonshine on CPU. TTS has two pods: `tts` runs KittenTTS nano
+(voice Bella, speed 1.6) on CPU and always runs, and `tts-gpu` runs Kokoro on
+the GTX 1650 while the 4060 serves the LLM; the GPU scheduler points the `tts`
+Service at whichever should answer (`controller/gpu_scheduler/README.md`).
+`tools/switch-backend.sh` switches the CPU pods' backends (Kokoro, Whisper,
+Parakeet...). The original VITS backend,
 Chatterbox, and ElevenLabs remain selectable in local/service configurations.

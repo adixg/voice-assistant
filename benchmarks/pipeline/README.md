@@ -46,8 +46,9 @@ From inside a pod the service names resolve directly; drop `--cluster-ssh`.
 
 Default targets: the live `agent` route (whatever the GPU scheduler currently
 points it at), plus both llama.cpp servers called directly with thinking off,
-each spoken by the deployed `tts` (Kitten nano since 2026-09-24; the target
-is still labelled `kokoro`). While the 4060 serves, `llama-cpp-gtx1650` is at 0
+each spoken by the `tts` Service (Kitten nano on CPU from 2026-09-24; since
+2026-11-10 Kokoro on the GTX 1650 while the 4060 serves; the target is still
+labelled `kokoro`). While the 4060 serves, `llama-cpp-gtx1650` is at 0
 replicas: run `tools/standby.sh warm` first (about 61 s to Ready) and
 `tools/standby.sh auto` afterwards, or that row fails. Override with repeatable flags:
 

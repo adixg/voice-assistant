@@ -1,6 +1,8 @@
-# KittenTTS nano (voice Bella) on CPU via sherpa-onnx, the lightest and
-# fastest TTS measured on arch-ssd (docs/hardware-budget.md, "sherpa-onnx
-# backends"). The image also has kokoro-onnx and PyTorch Kokoro; switch with
+# The CPU voice: KittenTTS nano (voice Bella) via sherpa-onnx, the lightest
+# and fastest CPU TTS measured on arch-ssd (docs/hardware-budget.md,
+# "sherpa-onnx backends"). It always runs; the GPU scheduler points the `tts`
+# Service below at it whenever Kokoro on the GTX 1650 (tts-gpu.yaml) isn't
+# answering. The image also has kokoro-onnx and PyTorch Kokoro; switch with
 # tools/switch-backend.sh.
 apiVersion: apps/v1
 kind: Deployment

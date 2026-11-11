@@ -31,7 +31,7 @@ overhead on top (pod peaks: kitten 559 MiB, kokoro-onnx fp32 ~1.35 GiB):
 
 | backend | CPU, laptop | arch-ssd, n=50 (slowest call) | GPU (4060) | memory | measured |
 | --- | ---: | ---: | ---: | --- | --- |
-| `kitten` nano int8, speed 1.6 (deployed) | — | **3.35x** (2.97x) | — | 251 MiB RSS | 09-24 |
+| `kitten` nano int8, speed 1.6 (the cluster's CPU voice) | — | **3.35x** (2.97x) | — | 251 MiB RSS | 09-24 |
 | `kitten` nano int8, speed 1.0 | — | 3.20x (2.92x) | — | 348 MiB RSS | 09-24 |
 | `kokoro-onnx` fp32 | — | **2.11x** (1.36x) | — | 650 MiB RSS | 09-24 |
 | `kitten` mini | ~2.2x | 1.49x (1.25x) | — | 539 MiB RSS | 09-24 |
@@ -50,7 +50,7 @@ the full reply, n=50 each, `benchmarks/runs/pipeline/`):
 | stt + tts | turn p50 | turn p95 |
 | --- | ---: | ---: |
 | parakeet + kitten 1.6 | 6.57 s | 32.1 s |
-| **moonshine + kitten 1.6 (deployed)** | **6.83 s** | 30.8 s |
+| **moonshine + kitten 1.6 (deployed until 2026-11-10; CPU fallback since)** | **6.83 s** | 30.8 s |
 | moonshine + kokoro-onnx | 7.34 s | 41.5 s |
 | faster-whisper (1650) + kitten 1.6 | 9.36 s | 35.7 s |
 
