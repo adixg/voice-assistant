@@ -647,7 +647,7 @@ def build_frame(args, style, get_json=fetch_json, cache=None, trail=None, **over
         "speaker": lambda: panel_speaker(style, base, args.speaker_window, get_json, graph=args.graphs),
         "traces": lambda: panel_traces(style, args.tempo, args.window, args.turns, get_json),
     }
-    frame = [style("b", "aicompanion") + style("d", f"  {time.strftime('%H:%M:%S')}  "
+    frame = [style("b", "voice-assistant") + style("d", f"  {time.strftime('%H:%M:%S')}  "
                                                     f"prometheus={base}  refresh={args.interval:g}s  Ctrl-C quits")]
     for name in getattr(args, "order", PANELS):
         if not getattr(args, name):
