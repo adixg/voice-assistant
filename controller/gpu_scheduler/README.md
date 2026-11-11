@@ -80,14 +80,16 @@ from the hostPath cache is ~50s), and `auto` scaled it away again. That 61s is
 the floor for a failover from zero -- on a real laptop loss add the time k3s
 takes to mark the node NotReady.
 
-**Failover measured end to end (2026-11-10,
-`benchmarks/gpu_allocation/bench_failover.py`, five runs each; trigger:
-`llama-cpp-rtx4060` scaled to 0).** From a cold standby the first good reply
-came 261-299 s after the trigger: the standby was ready at 130-171 s (slower
-than the 61 s above since container images moved to the home server's hard
-disk) and the first request to the fresh server needed ~110 s more for the
-system prompt and tool definitions. With the standby pinned warm: 30 s.
-Returning to the 4060: 17-29 s, no failed requests. In every cold run the
+**Failover measured end to end (`benchmarks/gpu_allocation/bench_failover.py`,
+five runs each; trigger: `llama-cpp-rtx4060` scaled to 0).** From a cold
+standby (2026-11-11, container images on the SSD) the first good reply came
+148-170 s after the trigger in four runs and 284 s in one: the standby was
+ready at 69-78 s, the agent had moved at 87-95 s, and the first request to the
+fresh server needed 55-75 s more for the system prompt and tool definitions.
+(On 2026-11-10, with the images on the home server's hard disk, the standby
+took 130-189 s to be ready and the first reply 261-299 s.) With the standby
+pinned warm: 30 s (2026-11-10). Returning to the 4060: 15-26 s, no failed
+requests. In every cold run the
 `tts` Service moved to the CPU and `tts-gpu` was scaled to 0 within 10 s. Kopf logs harmless 403s listing namespaces (the ClusterRole doesn't grant
 it, kopf falls back to `aicompanion`). Also found while rolling out: the live
 standby predated the manifest (no `--jinja`, no readiness probe), and the

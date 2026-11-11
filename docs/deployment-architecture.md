@@ -204,8 +204,8 @@ peaks (`tts` up to ~2.8 GiB, LLM ~1.06 GiB anon, `stt` ~0.4 GiB) plus k3s
 (~0.7 GiB), the small pods (~1 GiB) and the desktop did not fit 7.6 GiB
 together in the worst case, so it leaned on swap. Now `tts` (~0.56 GiB) and
 `stt` (~0.57 GiB) are small, `gpu-exporter` is 37 MiB instead of ~0.42 GiB, and
-the standby `llama-cpp-gtx1650` (~0.7-1 GiB RAM, 3.4 GiB VRAM) only runs while
-the laptop is down or it's pinned warm (cold failover 4.5-5 min to the first good reply, warm 30 s; measured 2026-11-10).
+the standby `llama-cpp-gtx1650` (~0.7-1 GiB RAM, ~2.7 GB VRAM) only runs while
+the laptop is down or it's pinned warm (cold failover about 2.5 min to the first good reply, measured 2026-11-11; warm 30 s).
 Swap: zram (3.8 GiB, zstd, measured 3.3:1, priority 100) plus a 4 GiB disk
 `/swapfile` at priority 10 as a last resort before the OOM killer (added
 2026-09-24, in `/etc/fstab`). Growing zram to `ram` is pending. The

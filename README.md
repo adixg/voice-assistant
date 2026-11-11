@@ -218,7 +218,7 @@ flowchart TD
 
 </details>
 
-**Tradeoff:** this is *availability-based failover*, not per-request load balancing. Measured over five runs each (2026-11-10, [`benchmarks/runs/gpu_allocation/`](benchmarks/runs/gpu_allocation/)), the first good reply after the 4060's server goes down comes 4.5 to 5 minutes later from a cold standby, or 30 s with `tools/standby.sh warm` keeping it loaded. A real laptop loss adds the time k3s takes to notice the node is gone. Coming back to the 4060 takes 17 to 29 s with no failed requests. A warm standby can't share the 1650 with Kokoro: together they filled all 3.64 GiB the card offers and Kokoro ran out of memory, so pinning the standby moves TTS to the CPU.
+**Tradeoff:** this is *availability-based failover*, not per-request load balancing. Measured over five runs each ([`benchmarks/runs/gpu_allocation/`](benchmarks/runs/gpu_allocation/)), the first good reply after the 4060's server goes down comes about 2.5 minutes later from a cold standby (148 to 170 s in four runs, 284 s in one; 2026-11-11), or 30 s with `tools/standby.sh warm` keeping it loaded (2026-11-10). A real laptop loss adds the time k3s takes to notice the node is gone. Coming back to the 4060 takes 15 to 26 s with no failed requests. A warm standby can't share the 1650 with Kokoro: together they filled all 3.64 GiB the card offers and Kokoro ran out of memory, so pinning the standby moves TTS to the CPU.
 
 <details>
 <summary><b>Failover details</b></summary>
@@ -231,16 +231,16 @@ serving. Then:
 - **4060 up**: it patches `agent` to `LLM_HOST=http://llama-cpp-rtx4060:8080/v1`,
   `LLM_MODEL=qwen3-8b`, and once that rollout has finished **and the 4060 has been
   up for 60 seconds** it scales `llama-cpp-gtx1650` to zero, freeing about 1 GiB
-  of RAM and 3.4 GiB of VRAM on the home server. The 60 s debounce keeps a
+  of RAM and about 2.7 GB of VRAM on the home server. The 60 s debounce keeps a
   laptop that sleeps and wakes from making the 1650 reload its model every time.
 - **4060 lost** (`NotReady`, deleted, or its server down): it scales the 1650
   standby back up first, and only points `agent` at
   `http://llama-cpp-gtx1650:8080/v1`, `qwen3.5-4b` once the standby reports
   ready, so `agent` never targets a server that isn't there. From zero the
-  standby takes 2 to 3 minutes to be ready (mostly starting its container from
-  the home server's hard disk), and the first request to a fresh server takes
-  about 110 s more while it reads the system prompt and tool definitions; turns
-  during that window fail and should be retried.
+  standby is ready in about 70 to 80 s, the agent has moved to it about 15 s
+  later, and the first request to a fresh server takes about 55 to 75 s more
+  while it reads the system prompt and tool definitions; turns during that
+  window fail and should be retried.
 - **Pinned warm**: `tools/standby.sh warm` keeps the standby running for an
   instant failover at the cost of its RAM/VRAM; `auto` hands it back.
 - **TTS on the idle 1650**: once the standby's pod has left the card (and it
@@ -305,7 +305,7 @@ The deployed STT is Moonshine base on CPU: 0.40 s per request in 274 MiB of RAM.
   <img src="assets/charts/tts-gpu-speed-vs-vram-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against VRAM for each TTS engine on the GTX 1650 and RTX 4060, with both cards' limits marked" width="760">
 </picture>
 
-Rina speaks with Kokoro on the GTX 1650 whenever the LLM doesn't need the card: 22x realtime in under 1 GB of VRAM. When the 1650 runs the standby LLM she falls back to KittenTTS nano on CPU at 1.6x speech speed: 3.4x realtime in 250 MiB of RAM. VITS on the 1650 is about as fast as Kokoro. Chatterbox, the voice-cloning engine, is slower than both and needs 2-3 GB of VRAM; on the CPU, VITS manages only 2x realtime in 2 GB of RAM.
+Rina speaks with Kokoro on the GTX 1650 whenever the LLM doesn't need the card: 22x realtime in about 1 GB of VRAM. When the 1650 runs the standby LLM she falls back to KittenTTS nano on CPU at 1.6x speech speed: 3.4x realtime in 250 MiB of RAM. VITS on the 1650 is about as fast as Kokoro. Chatterbox, the voice-cloning engine, is slower than both and needs 2-3 GB of VRAM; on the CPU, VITS manages only 2x realtime in 2 GB of RAM.
 
 ### Language models
 

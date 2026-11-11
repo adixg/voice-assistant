@@ -1,0 +1,112 @@
+{
+ "metadata": {
+  "trigger": "scale llama-cpp-rtx4060 to 0 and back",
+  "warm_standby": false,
+  "gpu_tts_deployed": true,
+  "probe": "POST /ask once a second around each switch",
+  "probe_timeout_s": 300,
+  "runs": 5
+ },
+ "runs": [
+  {
+   "departure": {
+    "tts_on_cpu": 1.2,
+    "standby_scaled_up": 1.7,
+    "standby_ready": 68.9,
+    "agent_retargeted": 72.4,
+    "agent_rolled_out": 87.1,
+    "first_good_reply": 169.7,
+    "failed_probes": 80
+   },
+   "return": {
+    "rtx_ready": 14.7,
+    "agent_retargeted": 25.2,
+    "agent_rolled_out": 36.3,
+    "first_good_reply": 25.8,
+    "failed_probes": 0,
+    "standby_scaled_down": 76.2,
+    "tts_on_gpu": 116.1
+   }
+  },
+  {
+   "departure": {
+    "standby_scaled_up": 10.8,
+    "tts_on_cpu": 11.0,
+    "standby_ready": 77.6,
+    "agent_retargeted": 82.3,
+    "agent_rolled_out": 94.6,
+    "first_good_reply": 148.9,
+    "failed_probes": 77
+   },
+   "return": {
+    "rtx_ready": 14.6,
+    "agent_retargeted": 14.6,
+    "agent_rolled_out": 25.8,
+    "first_good_reply": 15.3,
+    "failed_probes": 0,
+    "standby_scaled_down": 75.3,
+    "tts_on_gpu": 116.9
+   }
+  },
+  {
+   "departure": {
+    "tts_on_cpu": 8.9,
+    "standby_scaled_up": 9.5,
+    "standby_ready": 71.2,
+    "agent_retargeted": 80.5,
+    "agent_rolled_out": 92.1,
+    "first_good_reply": 148.1,
+    "failed_probes": 75
+   },
+   "return": {
+    "rtx_ready": 14.6,
+    "agent_retargeted": 24.4,
+    "agent_rolled_out": 36.2,
+    "first_good_reply": 24.9,
+    "failed_probes": 0,
+    "standby_scaled_down": 75.0,
+    "tts_on_gpu": 116.7
+   }
+  },
+  {
+   "departure": {
+    "tts_on_cpu": 9.0,
+    "standby_scaled_up": 9.6,
+    "standby_ready": 75.6,
+    "agent_retargeted": 80.9,
+    "agent_rolled_out": 93.9,
+    "first_good_reply": 284.3,
+    "failed_probes": 77
+   },
+   "return": {
+    "rtx_ready": 13.4,
+    "agent_retargeted": 22.6,
+    "agent_rolled_out": 34.4,
+    "first_good_reply": 23.0,
+    "failed_probes": 0,
+    "standby_scaled_down": 74.2,
+    "tts_on_gpu": 115.8
+   }
+  },
+  {
+   "departure": {
+    "standby_scaled_up": 9.6,
+    "tts_on_cpu": 9.8,
+    "standby_ready": 71.7,
+    "agent_retargeted": 82.1,
+    "agent_rolled_out": 95.0,
+    "first_good_reply": 148.8,
+    "failed_probes": 77
+   },
+   "return": {
+    "rtx_ready": 14.6,
+    "agent_retargeted": 24.4,
+    "agent_rolled_out": 36.1,
+    "first_good_reply": 25.0,
+    "failed_probes": 0,
+    "standby_scaled_down": 74.9,
+    "tts_on_gpu": 116.6
+   }
+  }
+ ]
+}

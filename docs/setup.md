@@ -96,7 +96,7 @@ llama.cpp server the `agent` calls, and therefore where the LLM step runs.
 **Laptop offline — GTX 1650 only (fallback).** Every hop after the phone stays
 on `arch-ssd`. STT and TTS run on CPU, so the 4B model has the 1650 to
 itself; when the laptop drops, that model is first cold-started from zero
-(4.5 to 5 minutes to the first good reply, measured 2026-11-10) unless
+(about 2.5 minutes to the first good reply, measured 2026-11-11) unless
 `tools/standby.sh warm` pinned it (30 s).
 
 **Laptop Ready — RTX 4060 online (preferred).** The same services stay on
@@ -118,8 +118,9 @@ serving. Then:
   standby back up first, and only points `agent` at
   `http://llama-cpp-gtx1650:8080/v1`, `qwen3.5-4b` once the standby reports
   ready, so `agent` never targets a server that isn't there. From zero the
-  standby takes 2 to 3 minutes to be ready and the first request to a fresh
-  server about 110 s more (2026-11-10), on top of the time k3s takes to notice
+  standby is ready in about 70 to 80 s and the first request to a fresh server
+  takes about 55 to 75 s more after the agent moves (2026-11-11), on top of the
+  time k3s takes to notice
   the node is gone; turns during that window fail and should be retried.
 - **Pinned warm**: `tools/standby.sh warm` keeps the standby running for an
   instant failover at the cost of its RAM/VRAM; `auto` hands it back.
