@@ -56,8 +56,11 @@ its node stays `Ready` all heal on their own. Nothing is kept in memory; the
   to 1 and, once it's ready, patch the `tts` Service's selector to
   `app: tts-gpu`. In any other state the Service goes back to `app: tts` (Kitten
   on CPU, always running) and `tts-gpu` is scaled to 0. The Service also goes
-  back to the CPU pod whenever `tts-gpu` isn't ready (restarting or crashed),
-  so it never selects a pod that isn't there. On a loss of the 4060
+  back to the CPU pod whenever `tts-gpu` isn't ready (restarting or crashed).
+  The controller checks every 10 s, so that took up to ~10 s when the Kokoro
+  pod died (measured 2026-11-11); the gateway covers the gap by retrying a
+  failed synth on `tts-cpu`, a second Service that always selects the CPU pod
+  (`--tts-fallback-url`). On a loss of the 4060
   those two steps come first in the same pass that starts the standby, so the
   card is free for the LLM. Repointing a Service needs no restart, so the
   gateway never notices; voice switching (`set_voice`) only works on the CPU

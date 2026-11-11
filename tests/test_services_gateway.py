@@ -660,6 +660,48 @@ class TestSpeakPipelining:
                 await session._speak(ws, "First sentence is long enough. Second sentence is long enough.")
             assert ws.sent == [b"\x01\x02"]
 
+    async def test_a_refused_tts_is_retried_on_the_fallback_voice(self):
+        import base64
+        hosts = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            hosts.append(request.url.host)
+            if request.url.host == "tts":
+                raise httpx.ConnectError("Connection refused", request=request)
+            return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"cpu").decode()]})
+
+        async with make_client(handler) as client:
+            session = make_session(client=client)
+            session.urls["tts_fallback"] = "http://tts-cpu"
+            assert await session._synth("hello") == [base64.b64encode(b"cpu").decode()]
+        assert hosts == ["tts", "tts-cpu"]
+
+    async def test_a_5xx_is_retried_but_a_4xx_is_not(self):
+        import base64
+        status = {"code": 503}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "tts":
+                return httpx.Response(status["code"], text="nope")
+            return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"cpu").decode()]})
+
+        async with make_client(handler) as client:
+            session = make_session(client=client)
+            session.urls["tts_fallback"] = "http://tts-cpu"
+            assert await session._synth("hello")
+            status["code"] = 422
+            with pytest.raises(httpx.HTTPStatusError):
+                await session._synth("hello")
+
+    async def test_without_a_fallback_the_error_is_raised_as_before(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("Connection refused", request=request)
+
+        async with make_client(handler) as client:
+            session = make_session(client=client)
+            with pytest.raises(httpx.ConnectError):
+                await session._synth("hello")
+
     async def test_first_audio_metric_recorded(self, monkeypatch):
         import base64
         from prometheus_client import REGISTRY

@@ -18,6 +18,10 @@ HTTP_DURATION = Histogram(
     ("service", "route", "method", "status"),
 )
 GATEWAY_TURNS = Counter("aicompanion_gateway_turns_total", "Gateway turns completed", ("outcome",))
+# A synth retried on --tts-fallback-url (the always-running CPU voice) because
+# the main tts Service failed, by result of the retry.
+TTS_FALLBACKS = Counter("aicompanion_gateway_tts_fallbacks_total",
+                        "TTS requests retried on the fallback TTS service", ("outcome",))
 # Every device-settings change requested through the gateway's control API
 # (volume/brightness, from the agent's MCP tools), by result: the audit count.
 DEVICE_SETTINGS_CHANGES = Counter("aicompanion_gateway_device_settings_changes_total",

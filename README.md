@@ -248,7 +248,9 @@ serving. Then:
   up, points the `tts` Service at it. On any loss of the 4060 it points the
   Service back at KittenTTS on CPU, which always runs, and scales `tts-gpu` to
   zero in the same pass that starts the standby, so the LLM gets the card. If
-  Kokoro itself restarts or crashes, TTS goes back to the CPU until it's ready.
+  Kokoro itself restarts or crashes, TTS goes back to the CPU until it's ready,
+  and in the seconds before the controller notices, the gateway retries any
+  failed synth on the CPU voice (`tts-cpu`) straight away, so no reply goes silent.
   Repointing a Service restarts nothing. Voice switching only works on the CPU
   pod; `aicompanion/gpu-tts=off` on `tts-gpu` keeps TTS on the CPU.
 

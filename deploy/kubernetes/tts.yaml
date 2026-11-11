@@ -88,3 +88,20 @@ spec:
     - name: metrics
       port: 8003
       targetPort: 8003
+---
+# Always the CPU voice, whatever the GPU scheduler does with `tts` above: the
+# gateway retries a failed synth here (--tts-fallback-url in gateway.yaml), so
+# a Kokoro pod that dies or restarts costs no speech while the scheduler catches
+# up (it took up to ~10 s to move `tts`, measured 2026-11-11).
+apiVersion: v1
+kind: Service
+metadata:
+  name: tts-cpu
+  namespace: aicompanion
+spec:
+  selector:
+    app: tts
+  ports:
+    - name: http
+      port: 8003
+      targetPort: 8003

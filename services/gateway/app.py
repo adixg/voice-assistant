@@ -62,7 +62,7 @@ from voicepipe.utterances import DEFAULT_MAX_KEEP, keep as keep_utterance
 from voicepipe.wire_audio import SAMPLE_RATE, SEND_CHUNK, resample_to_pcm16
 from services.metrics import (DEVICE_SETTINGS_CHANGES, GATEWAY_STAGE_DURATION, GATEWAY_TURN_DURATION, GATEWAY_TURNS,
                               STICK_BATTERY_PERCENT, STICK_BATTERY_REPORT_TIME, STICK_BATTERY_VOLTS,
-                              STICK_CHARGING, install_http_metrics, record_speaker_check,
+                              STICK_CHARGING, TTS_FALLBACKS, install_http_metrics, record_speaker_check,
                               set_speaker_gate_state)
 from services.telemetry import install_tracing
 
@@ -82,6 +82,9 @@ def build_parser():
     ap.add_argument("--stt-url", default="http://localhost:8001")
     ap.add_argument("--agent-url", default="http://localhost:8002")
     ap.add_argument("--tts-url", default="http://localhost:8003")
+    ap.add_argument("--tts-fallback-url", default=None, metavar="URL",
+                    help="retry a synth here when --tts-url refuses, drops, or answers 5xx (in the "
+                         "cluster: the always-running CPU voice, while --tts-url may be on the GPU)")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
 
@@ -405,7 +408,29 @@ class GatewaySession:
         await self._speak(ws, text)
 
     async def _synth(self, text):
-        resp = await self.client.post(f"{self.urls['tts']}/synth", json={"text": text})
+        """Synthesize on the tts Service, retrying once on the fallback (the
+        always-running CPU voice) if the main one is unreachable or fails.
+        Measured 2026-11-11: when the Kokoro pod died, the tts Service kept
+        pointing at it for up to ~10 s until the GPU scheduler's next pass,
+        and every synth in that window was refused."""
+        try:
+            return await self._synth_at(self.urls["tts"], text)
+        except (httpx.TransportError, httpx.HTTPStatusError) as e:
+            fallback = self.urls.get("tts_fallback")
+            server_side = not isinstance(e, httpx.HTTPStatusError) or e.response.status_code >= 500
+            if not fallback or fallback == self.urls["tts"] or not server_side:
+                raise
+            print(f"  tts failed ({type(e).__name__}); retrying on the fallback voice", flush=True)
+            try:
+                chunks = await self._synth_at(fallback, text)
+            except Exception:
+                TTS_FALLBACKS.labels("failed").inc()
+                raise
+            TTS_FALLBACKS.labels("ok").inc()
+            return chunks
+
+    async def _synth_at(self, base, text):
+        resp = await self.client.post(f"{base}/synth", json={"text": text})
         resp.raise_for_status()
         return resp.json()["chunks_b64"]
 
@@ -777,7 +802,8 @@ async def encourage_loop(session, low_minutes, high_minutes):
 def main():
     global _urls, _session
     args = cli.parse_args(build_parser())
-    _urls = {"stt": args.stt_url, "agent": args.agent_url, "tts": args.tts_url}
+    _urls = {"stt": args.stt_url, "agent": args.agent_url, "tts": args.tts_url,
+             "tts_fallback": args.tts_fallback_url}
     gate = cli.build_speaker_gate(args)
     client = httpx.AsyncClient(timeout=120)
     _session = GatewaySession(client, _urls, gate, args)
