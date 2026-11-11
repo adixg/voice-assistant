@@ -4,7 +4,9 @@ Status: **The cluster core is live and the Stick talks to it through the
 gateway; the hours-long BLE soak is still pending.** `arch-ssd`
 (GTX 1650, native Arch): k3s live, labeled `gpu-tier=gtx1650`, running
 `llama-cpp-gtx1650` (CUDA; scaled to 0 by the gpu-scheduler while the 4060
-serves), `stt` (Moonshine, CPU), `tts` (Kitten, CPU) and `agent`. At bring-up
+serves), `stt` (Moonshine, CPU), `tts` (Kitten, CPU), `tts-gpu` (Kokoro on
+the 1650, run by the gpu-scheduler while the 4060 serves, since 2026-11-10)
+and `agent`. At bring-up
 (2026-09-16) all four were confirmed doing real CUDA inference. `agent`'s `LLM_HOST` env defaults to
 `http://llama-cpp-gtx1650:8080/v1` (the controller flips it, with `LLM_MODEL`,
 to `llama-cpp-rtx4060`/`qwen3-8b` while the laptop is up). LLM serving moved
@@ -186,6 +188,7 @@ is what actually causes OOM kills.
 | Pod | Real use | Peak | Limit | Notes |
 |---|---|---|---|---|
 | `tts` (Kitten nano) | — | ~560 MiB | 768Mi (set by `tools/switch-backend.sh`) | PyTorch Kokoro, before 2026-09-24: 1.2-2.8 GiB, 3Gi limit, OOM-killed at 1792Mi |
+| `tts-gpu` (Kokoro, CUDA) | — | ~2.0 GiB RSS, ~0.9 GiB VRAM | 3Gi, request 1.5Gi | only while the 4060 serves and the standby has left the 1650; the standby's 1 GiB request is free then |
 | `llama-cpp-gtx1650` | 0.6 GiB after load, **1.06 GiB after a long generation, never shrinks** | 2.0 GiB at load (1.76 GiB is GGUF page cache) | 3 GiB | OOM-killed at 2Gi mid-request; scaled to 0 by the gpu-scheduler while the 4060 serves (60 s debounce, 61 s cold start, `tools/standby.sh warm` keeps it up) |
 | `stt` (Moonshine) | — | 571 MiB | 1 GiB | faster-whisper, before 2026-09-24: ~0.4 GiB, 1.0 GiB peak (page cache) |
 | `gpu-exporter` | 37 MiB | — | 128Mi | replaced `dcgm-exporter` (~0.42 GiB, limit 512Mi) on 2026-09-24 |
@@ -202,7 +205,7 @@ peaks (`tts` up to ~2.8 GiB, LLM ~1.06 GiB anon, `stt` ~0.4 GiB) plus k3s
 together in the worst case, so it leaned on swap. Now `tts` (~0.56 GiB) and
 `stt` (~0.57 GiB) are small, `gpu-exporter` is 37 MiB instead of ~0.42 GiB, and
 the standby `llama-cpp-gtx1650` (~0.7-1 GiB RAM, 3.4 GiB VRAM) only runs while
-the laptop is down or it's pinned warm (61 s cold start on failover).
+the laptop is down or it's pinned warm (cold failover 4.5-5 min to the first good reply, warm 30 s; measured 2026-11-10).
 Swap: zram (3.8 GiB, zstd, measured 3.3:1, priority 100) plus a 4 GiB disk
 `/swapfile` at priority 10 as a last resort before the OOM killer (added
 2026-09-24, in `/etc/fstab`). Growing zram to `ram` is pending. The
@@ -286,7 +289,7 @@ second RAM stick remains the real fix.
 
 | Node | Label | Runs |
 |---|---|---|
-| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `llama-cpp-gtx1650`, `stt` (Moonshine CPU), `tts` (Kitten CPU), `gateway`, `agent`, `gpu-scheduler` |
+| Home server (GTX 1650) | `gpu-tier=gtx1650` | k3s server, `llama-cpp-gtx1650` or `tts-gpu` (never both), `stt` (Moonshine CPU), `tts` (Kitten CPU), `gateway`, `agent`, `gpu-scheduler` |
 | Laptop (RTX 4060) | `gpu-tier=rtx4060` | k3s agent, `llama-cpp-rtx4060` (only while the laptop is up) |
 
 `agent` and `gpu-scheduler` are pinned here too (`nodeSelector`, added
@@ -298,8 +301,10 @@ killed the controller at the exact moment it needed to fail `agent` back
 over to the GTX 1650's LLM server.
 
 `stt`/`tts`/`gateway` are pinned to the always-on node so the Stick always
-has something to talk to. Only the LLM backend the `agent` service calls
-changes based on which node is up — see `deploy/kubernetes/README.md` for
+has something to talk to. What changes with the 4060 is the LLM backend the
+`agent` service calls and which pod the `tts` Service selects: Kokoro on the
+1650 (`tts-gpu`) while the 4060 serves the LLM, Kitten on CPU while the 1650
+runs the standby — see `deploy/kubernetes/README.md` for
 the exact manifests and `controller/gpu_scheduler/README.md` for the
 automated-switching design.
 

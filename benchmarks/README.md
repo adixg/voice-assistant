@@ -7,7 +7,7 @@ What is measured, how, and where the results live.
 | [`pipeline/bench_turn.py`](pipeline/README.md) | one voice turn on the live cluster, stage by stage: STT, LLM, TTS, whole turn | `results/pipeline/` | `runs/pipeline/` |
 | [`tts_engines/bench_tts_engines.py`](tts_engines/README.md) | each TTS engine alone: seconds per 10 s of speech, x realtime, peak memory | `results/tts_engines/` | `runs/tts_engines/` |
 | [`latency/benchmark_streaming.py`](latency/README.md) | LLM streaming latency (time to first token, total) | `results/` | none yet |
-| [`gpu_allocation/`](gpu_allocation/README.md) | 4060 → 1650 failover and recovery | — | **plan only, never run** |
+| [`gpu_allocation/bench_failover.py`](gpu_allocation/bench_failover.py) | 4060 → 1650 failover and recovery, cold and warm standby, timed to the first good reply | — | `runs/gpu_allocation/` |
 | [`llm/bench_llm.py`](llm/bench_llm.py) | each LLM on one card: time to first token, generation speed, whole reply, load time, VRAM, and 13 tool-call checks with the agent's real tools | | `runs/llm/` |
 | `plot_stt.py`, `plot_tts_tradeoff.py`, `plot_llm.py` | draw the README's speed-vs-memory charts (CPU by RAM, GPU by VRAM) from `runs/`; shared renderer in `chart_svg.py` | | `../assets/charts/` |
 

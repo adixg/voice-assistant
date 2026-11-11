@@ -64,6 +64,11 @@ The GTX 1650 Kokoro row is n=50 from a one-off pod with the tts-kokoro image
 (torch 2.14 cu130), the 1650 otherwise idle (LLM standby scaled to 0), kept in
 `benchmarks/runs/tts_engines/20260924T205438Z-arch-ssd-gtx-1650.json`. The card
 sat at 34% mean utilisation. RAM, not VRAM, is its cost on this 8 GB machine.
+Deployed 2026-11-10 as `tts-gpu`, which the gpu-scheduler runs only while the
+4060 serves the LLM (`controller/gpu_scheduler/README.md`); re-measured that
+day at 22.4x realtime, 977 MiB VRAM, 2,064 MiB RSS. Its first sentence after
+loading took 26.6 s (CUDA warm-up), so the service now synthesizes one line
+before it reports ready.
 
 Missing GPU numbers need the 4060 free of `llama-cpp-rtx4060` (it holds
 ~7.9 of 8 GiB), and the sherpa-onnx rows need its CUDA wheel.

@@ -1,0 +1,101 @@
+{
+ "metadata": {
+  "trigger": "scale llama-cpp-rtx4060 to 0 and back",
+  "warm_standby": true,
+  "gpu_tts_deployed": true,
+  "probe": "POST /ask once a second",
+  "runs": 5
+ },
+ "runs": [
+  {
+   "departure": {
+    "standby_scaled_up": 0.2,
+    "tts_on_cpu": 0.4,
+    "standby_ready": 129.4,
+    "agent_retargeted": 133.5,
+    "agent_rolled_out": 147.5,
+    "first_good_reply": 261.3,
+    "failed_probes": 102
+   },
+   "return": {
+    "rtx_ready": 24.3,
+    "agent_retargeted": 33.6,
+    "agent_rolled_out": 47.9,
+    "first_good_reply": 34.9,
+    "failed_probes": 0
+   }
+  },
+  {
+   "departure": {
+    "standby_scaled_up": 0.2,
+    "standby_ready": 0.2,
+    "tts_on_cpu": 0.4,
+    "agent_retargeted": 6.1,
+    "agent_rolled_out": 20.3,
+    "first_good_reply": 30.3,
+    "failed_probes": 1
+   },
+   "return": {
+    "rtx_ready": 12.2,
+    "agent_retargeted": 16.3,
+    "agent_rolled_out": 30.7,
+    "first_good_reply": 17.5,
+    "failed_probes": 0
+   }
+  },
+  {
+   "departure": {
+    "standby_scaled_up": 0.1,
+    "standby_ready": 0.2,
+    "tts_on_cpu": 0.4,
+    "agent_retargeted": 6.1,
+    "agent_rolled_out": 20.7,
+    "first_good_reply": 30.3,
+    "failed_probes": 1
+   },
+   "return": {
+    "rtx_ready": 7.6,
+    "agent_retargeted": 16.3,
+    "agent_rolled_out": 30.7,
+    "first_good_reply": 17.3,
+    "failed_probes": 0
+   }
+  },
+  {
+   "departure": {
+    "standby_scaled_up": 0.2,
+    "standby_ready": 0.2,
+    "tts_on_cpu": 0.4,
+    "agent_retargeted": 6.1,
+    "agent_rolled_out": 21.0,
+    "first_good_reply": 30.4,
+    "failed_probes": 1
+   },
+   "return": {
+    "rtx_ready": 7.6,
+    "agent_retargeted": 16.9,
+    "agent_rolled_out": 31.4,
+    "first_good_reply": 19.1,
+    "failed_probes": 0
+   }
+  },
+  {
+   "departure": {
+    "standby_scaled_up": 0.2,
+    "standby_ready": 0.3,
+    "tts_on_cpu": 0.4,
+    "agent_retargeted": 6.7,
+    "agent_rolled_out": 22.2,
+    "first_good_reply": 30.4,
+    "failed_probes": 1
+   },
+   "return": {
+    "rtx_ready": 7.7,
+    "agent_retargeted": 16.4,
+    "agent_rolled_out": 31.4,
+    "first_good_reply": 17.1,
+    "failed_probes": 0
+   }
+  }
+ ]
+}

@@ -189,6 +189,14 @@ other internal calls. The reply that confirms a switch is already spoken in
 the new voice. Other backends (PyTorch Kokoro, VITS, Chatterbox) are still
 `tools/switch-backend.sh` changes with a pod restart.
 
+Since 2026-11-10 the `tts` Service points at `tts-gpu` (PyTorch Kokoro
+`af_bella` on the GTX 1650) whenever the 4060 serves the LLM. That pod can't
+switch voices, so `list_voices`/`set_voice` get a 409 ("this backend's voice
+can't be switched at runtime") and say so; a voice picked earlier is kept in
+`voice.json` and comes back when the Service returns to the CPU pod.
+`kubectl -n aicompanion annotate deployment tts-gpu aicompanion/gpu-tts=off`
+keeps TTS on the CPU, where switching works.
+
 ## Promises without a tool call
 
 A reply ends the turn, so "let me check that, one moment" with no tool call

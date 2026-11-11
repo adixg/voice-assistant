@@ -21,8 +21,8 @@ I built AI Companion to turn an M5StickS3 into a voice interface for locally hos
 
 - **Wake word:** say "Assistant" and the Stick starts listening, using a microWakeWord model trained locally and running on the device (2.8 ms per 30 ms of audio).
 - **Hands-free conversation:** an on-device endpointer detects when you start and stop speaking and sends only the speech.
-- **Local speech and language:** Moonshine STT and KittenTTS on CPU, Qwen on llama.cpp, with replies spoken a sentence at a time so audio starts before the whole reply is ready.
-- **Agent tools over MCP:** web search, notes, reminders, voice switching ("switch to Kokoro Bella"), ESP32 device volume and brightness, and `ask_claude` for questions the local model can't answer well.
+- **Local speech and language:** Moonshine STT on CPU, Qwen on llama.cpp, and Kokoro TTS on the GTX 1650 whenever the LLM doesn't need that card (KittenTTS on CPU when it does). Replies are spoken a sentence at a time, so audio starts before the whole reply is ready.
+- **Agent tools over MCP:** web search, notes, reminders, voice switching ("switch to Kokoro Bella", while TTS runs on the CPU), ESP32 device volume and brightness, and `ask_claude` for questions the local model can't answer well.
 - **Speaks first:** reminders arrive unprompted, with no button press.
 - **Speaker verification:** ECAPA-TDNN matching against an enrolled voiceprint.
 - **Embedded interface:** animated pixel-art face, clock, and pomodoro timer on a 240×135 display.
@@ -41,8 +41,8 @@ flowchart TB
     gateway["<b>gateway</b><br>k3s on always-on node<br>NodePort 30800"]
     stt["<b>stt service</b><br>Moonshine, CPU"]
     agent["<b>agent service</b><br>LLM turn-taking"]
-    tts["<b>tts service</b><br>KittenTTS Bella, CPU"]
-    controller["<b>gpu-scheduler</b><br>selects available llama.cpp"]
+    tts["<b>tts service</b><br>Kokoro on the GTX 1650 when it's free,<br>else KittenTTS on CPU"]
+    controller["<b>gpu-scheduler</b><br>selects available llama.cpp,<br>lends the idle 1650 to TTS"]
     llama1650[("<b>llama.cpp</b><br>GTX 1650 / qwen3.5-4b")]
     llama4060[("<b>llama.cpp</b><br>RTX 4060 / qwen3-8b")]
 
@@ -54,6 +54,7 @@ flowchart TB
     agent -->|"preferred, when laptop is Ready"| llama4060
     agent -. "fallback" .-> llama1650
     controller -. "patches agent target" .-> agent
+    controller -. "repoints tts Service" .-> tts
 
     classDef device fill:#eff1f5,stroke:#7287fd,stroke-width:2px,color:#4c4f69
     classDef service fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
@@ -96,7 +97,7 @@ sequenceDiagram
 <details>
 <summary><b>How a turn runs in each GPU mode</b></summary>
 
-The loop is the same in both modes; the only thing that changes is which llama.cpp server the `agent` calls.
+The loop is the same in both modes; what changes is which llama.cpp server the `agent` calls and where TTS runs: on the GTX 1650 while the laptop serves the LLM, on the CPU while the 1650 runs the standby LLM.
 
 **Laptop offline: GTX 1650 only (fallback).**
 
@@ -147,7 +148,7 @@ flowchart LR
         gw["<b>gateway</b><br>:30800<br>speaker gate"]
         stt["<b>stt</b><br>Moonshine base<br>CPU"]
         agent["<b>agent</b><br>CPU + MCP tools"]
-        tts["<b>tts</b><br>KittenTTS Bella<br>CPU"]
+        tts[("<b>tts-gpu</b><br>Kokoro Bella<br>GTX 1650")]
     end
 
     subgraph lap["laptop — RTX 4060, selected by gpu-scheduler when Ready"]
@@ -171,20 +172,21 @@ flowchart LR
     classDef svc fill:#dce0e8,stroke:#1e66f5,stroke-width:2px,color:#4c4f69
     classDef gpu fill:#eff1f5,stroke:#fe640b,stroke-width:2px,color:#4c4f69
     class stick,phone dev
-    class gw,stt,agent,tts svc
-    class llm gpu
+    class gw,stt,agent svc
+    class llm,tts gpu
 ```
 
 </details>
 
 ## Custom Kubernetes controller
 
-`gpu-scheduler` helps the live service figure out which backend to call: it prefers the laptop's **RTX 4060** for inference and falls back to the home server's **GTX 1650** when the laptop goes away.
+`gpu-scheduler` helps the live service figure out which backend to call: it prefers the laptop's **RTX 4060** for inference and falls back to the home server's **GTX 1650** when the laptop goes away. While the 1650 isn't needed for the LLM, it lends the card to TTS.
 
 ```mermaid
 flowchart TD
     A["Every 10 s and on 4060 node events:<br>read the whole cluster state"] --> B{"4060 node Ready and<br>its llama.cpp server Available?"}
-    B -->|No| C["Scale the 1650 standby up<br>immediately, no debounce"]
+    B -->|No| T["Point tts at KittenTTS on CPU,<br>scale Kokoro on the 1650 to 0"]
+    T --> C["Scale the 1650 standby up<br>immediately, no debounce"]
     C --> D{"Standby ready?"}
     D -->|Yes| E["Point agent at<br>qwen3.5-4b on the 1650"]
     D -->|Not yet| A
@@ -192,11 +194,14 @@ flowchart TD
     F --> G{"Rollout finished and<br>4060 up for 60 s?"}
     G -->|Yes| H["Scale the standby to 0<br>unless pinned warm"]
     G -->|Not yet| A
+    H --> I{"Standby pod gone<br>and not pinned warm?"}
+    I -->|Yes| J["Start Kokoro on the 1650,<br>point tts at it once warm"]
+    I -->|Not yet| A
     E --> A
-    H --> A
+    J --> A
 ```
 
-**Tradeoff:** this is *availability-based failover*, not per-request load balancing. A cold fallback takes about 61 s to load its model, on top of the time k3s takes to notice the node is gone, unless `tools/standby.sh warm` keeps it running at the cost of its RAM and VRAM.
+**Tradeoff:** this is *availability-based failover*, not per-request load balancing. Measured over five runs each (2026-11-10, [`benchmarks/runs/gpu_allocation/`](benchmarks/runs/gpu_allocation/)), the first good reply after the 4060's server goes down comes 4.5 to 5 minutes later from a cold standby, or 30 s with `tools/standby.sh warm` keeping it loaded. A real laptop loss adds the time k3s takes to notice the node is gone. Coming back to the 4060 takes 17 to 29 s with no failed requests. A warm standby can't share the 1650 with Kokoro: together they filled all 3.64 GiB the card offers and Kokoro ran out of memory, so pinning the standby moves TTS to the CPU.
 
 <details>
 <summary><b>Failover details</b></summary>
@@ -214,11 +219,21 @@ serving. Then:
 - **4060 lost** (`NotReady`, deleted, or its server down): it scales the 1650
   standby back up first, and only points `agent` at
   `http://llama-cpp-gtx1650:8080/v1`, `qwen3.5-4b` once the standby reports
-  ready, so `agent` never targets a server that isn't there. From zero that is a
-  model load (about 50 s, 61 s measured end to end) on top of the time k3s takes to
-  notice the node is gone; a turn during that window fails and should be retried.
+  ready, so `agent` never targets a server that isn't there. From zero the
+  standby takes 2 to 3 minutes to be ready (mostly starting its container from
+  the home server's hard disk), and the first request to a fresh server takes
+  about 110 s more while it reads the system prompt and tool definitions; turns
+  during that window fail and should be retried.
 - **Pinned warm**: `tools/standby.sh warm` keeps the standby running for an
   instant failover at the cost of its RAM/VRAM; `auto` hands it back.
+- **TTS on the idle 1650**: once the standby's pod has left the card (and it
+  isn't pinned), it starts `tts-gpu` (Kokoro on CUDA) and, once it has warmed
+  up, points the `tts` Service at it. On any loss of the 4060 it points the
+  Service back at KittenTTS on CPU, which always runs, and scales `tts-gpu` to
+  zero in the same pass that starts the standby, so the LLM gets the card. If
+  Kokoro itself restarts or crashes, TTS goes back to the CPU until it's ready.
+  Repointing a Service restarts nothing. Voice switching only works on the CPU
+  pod; `aicompanion/gpu-tts=off` on `tts-gpu` keeps TTS on the CPU.
 
 Each patch to `agent` rolls its pod, so a turn in flight during a switch can fail.
 Nothing the Stick or phone talks to moves in either case.
@@ -271,7 +286,7 @@ The deployed STT is Moonshine base on CPU: 0.40 s per request in 274 MiB of RAM.
   <img src="assets/charts/tts-gpu-speed-vs-vram-light.svg" alt="Scatter plot of seconds to make 10 seconds of speech against VRAM for each TTS engine on the GTX 1650 and RTX 4060, with both cards' limits marked" width="760">
 </picture>
 
-The deployed backend is KittenTTS nano on CPU at 1.6x speech speed: 3.4x realtime in 250 MiB of RAM. Kokoro and VITS on the GTX 1650 are about seven times faster, using under 1 GB of the card's VRAM. Chatterbox, the voice-cloning engine, is slower than both and needs 2-3 GB of VRAM; on the CPU, VITS manages only 2x realtime in 2 GB of RAM.
+Rina speaks with Kokoro on the GTX 1650 whenever the LLM doesn't need the card: 22x realtime in under 1 GB of VRAM. When the 1650 runs the standby LLM she falls back to KittenTTS nano on CPU at 1.6x speech speed: 3.4x realtime in 250 MiB of RAM. VITS on the 1650 is about as fast as Kokoro. Chatterbox, the voice-cloning engine, is slower than both and needs 2-3 GB of VRAM; on the CPU, VITS manages only 2x realtime in 2 GB of RAM.
 
 ### Language models
 
@@ -301,7 +316,7 @@ With thinking on, both Qwen models passed all 13 tool calls, but the first spoke
 - **Voice device:** M5StickS3 (ESP32-S3)
 - **Relay:** Android phone with BLE and a connection to the backend
 - **Compute:** laptop with an RTX 4060; home server with a GTX 1650
-- **Backend:** k3s, Moonshine, Qwen on llama.cpp, KittenTTS
+- **Backend:** k3s, Moonshine, Qwen on llama.cpp, Kokoro and KittenTTS
 
 ```bash
 git clone https://github.com/adixg/voice-assistant.git
