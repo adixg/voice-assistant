@@ -34,6 +34,11 @@ Still in progress: raise-to-talk, haptic feedback, voice isolation, and a long-d
 
 ## Architecture
 
+The Stick hears the wake word and streams your speech over Bluetooth to a phone relay, which forwards each turn to a gateway on the always-on home server; the gateway runs speech-to-text, the LLM agent and text-to-speech as separate Kubernetes services and streams the spoken reply back the same way.
+
+<details>
+<summary><b>Architecture diagram</b></summary>
+
 ```mermaid
 flowchart TB
     stick["<b>M5StickS3</b><br>wake word, hands-free<br>mic + speaker<br>240×135 pixel-art UI<br>BLE peripheral, no Wi-Fi"]
@@ -64,8 +69,13 @@ flowchart TB
     class llama1650,llama4060 worker
 ```
 
+</details>
+
 ### How the relay works:
 The Android relay translates these messages 1:1 to and from BLE frames.
+
+<details>
+<summary><b>Message sequence for one turn</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -93,6 +103,8 @@ sequenceDiagram
     B->>S: "end"
     Note over S: idle
 ```
+
+</details>
 
 <details>
 <summary><b>How a turn runs in each GPU mode</b></summary>
@@ -182,6 +194,9 @@ flowchart LR
 
 `gpu-scheduler` helps the live service figure out which backend to call: it prefers the laptop's **RTX 4060** for inference and falls back to the home server's **GTX 1650** when the laptop goes away. While the 1650 isn't needed for the LLM, it lends the card to TTS.
 
+<details>
+<summary><b>How the controller decides</b></summary>
+
 ```mermaid
 flowchart TD
     A["Every 10 s and on 4060 node events:<br>read the whole cluster state"] --> B{"4060 node Ready and<br>its llama.cpp server Available?"}
@@ -200,6 +215,8 @@ flowchart TD
     E --> A
     J --> A
 ```
+
+</details>
 
 **Tradeoff:** this is *availability-based failover*, not per-request load balancing. Measured over five runs each (2026-11-10, [`benchmarks/runs/gpu_allocation/`](benchmarks/runs/gpu_allocation/)), the first good reply after the 4060's server goes down comes 4.5 to 5 minutes later from a cold standby, or 30 s with `tools/standby.sh warm` keeping it loaded. A real laptop loss adds the time k3s takes to notice the node is gone. Coming back to the 4060 takes 17 to 29 s with no failed requests. A warm standby can't share the 1650 with Kokoro: together they filled all 3.64 GiB the card offers and Kokoro ran out of memory, so pinning the standby moves TTS to the CPU.
 
@@ -307,7 +324,6 @@ Each model ran on llama.cpp (Q4_K_M) with the same settings as the live server o
 | Ministral 3 3B | GTX 1650 | 0.25 s | 42 tok/s | 0.72 s | 12/13 | 56 s | 3.4 GB |
 | Granite 4.2 3B | GTX 1650 | 0.28 s | 44 tok/s | 1.68 s | 10/13 | 58 s | 2.4 GB |
 | Phi-4 mini | GTX 1650 | 0.11 s | 41 tok/s | 0.58 s | 2/13 | 79 s | 3.0 GB |
-| Gemma 4 E4B | GTX 1650 | — | — | — | — | — | crashed while loading; the 4.8 GB file alone is bigger than the card |
 
 With thinking on, both Qwen models passed all 13 tool calls, but the first spoken word came after 5.8 s on the 4060 and 2.4 s on the 1650, too slow for a voice reply. Ministral 3 3B is the strongest standby candidate: the same tool score as the 8B models at 0.72 s per reply, though at 3.4 GB it leaves the 1650 almost no room for anything else. VRAM on the 4060 is mostly the 40K-token KV cache, not the weights. Load times on the 1650 include starting the container from the home server's hard disk.
 

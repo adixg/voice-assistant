@@ -62,7 +62,9 @@ def chart(theme, runs):
                     "value": f"{s['total_s_p50']:.2f} s · {s['gen_tps_p50']:.0f} tok/s",
                     "place": PLACE.get(label, (12, 4, "start"))})
     note = "dot: median · bar: 5th-95th percentile of 50 replies to 5 sentences · log scale"
-    limits = [(4096, "GTX 1650 limit" + (f" · {', '.join(failed)} didn't load" if failed else "")),
+    # Models that didn't load (Gemma 4 E4B: its 4.8 GB file is bigger than the
+    # 1650) have no point to draw; their run files stay in runs/llm/.
+    limits = [(4096, "GTX 1650 limit"),
               (8192, "RTX 4060 limit")]
     return scatter(theme, title="LLMs: median seconds per reply by VRAM",
                    legend=[("gtx1650", "GTX 1650, 4 GB"), ("rtx4060", "RTX 4060, 8 GB")], points=pts,
