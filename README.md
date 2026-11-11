@@ -250,7 +250,7 @@ Every stage of a voice turn is measured, and the monitoring stack stays up when 
 - **A custom NVML GPU exporter** (`services/gpu_exporter`) replaced NVIDIA's DCGM Exporter, going from about 405 MiB to 37 MiB while adding clocks, throttle reasons, energy, XID errors, and VRAM per pod.
 - **A terminal dashboard** (`tools/obs_tui.py`, standard library only) shows host memory, GPUs, pods, latency, and recent turns without a browser.
 
-<img src="assets/charts/obs-tui.png" alt="Terminal dashboard showing host memory, both GPUs, every pod, turn latency, and the five most recent traces split into STT, LLM, and TTS" width="820">
+<img src="assets/charts/obs-tui.png" alt="Terminal dashboard: the seven most recent voice turns from distributed traces, each split into STT, LLM and TTS time, then turn latency, the speaker gate's accepted and rejected checks, both GPUs with Kokoro on the GTX 1650, every pod, and host memory" width="760">
 
 <!-- Add assets/charts/distributed-trace.png, then uncomment:
 ![Distributed trace of one voice interaction](assets/charts/distributed-trace.png)
