@@ -55,7 +55,9 @@ its node stays `Ready` all heal on their own. Nothing is kept in memory; the
   the card, scale `tts-gpu` (Kokoro on CUDA, `deploy/kubernetes/tts-gpu.yaml`)
   to 1 and, once it's ready, patch the `tts` Service's selector to
   `app: tts-gpu`. In any other state the Service goes back to `app: tts` (Kitten
-  on CPU, always running) and `tts-gpu` is scaled to 0. On a loss of the 4060
+  on CPU, always running) and `tts-gpu` is scaled to 0. The Service also goes
+  back to the CPU pod whenever `tts-gpu` isn't ready (restarting or crashed),
+  so it never selects a pod that isn't there. On a loss of the 4060
   those two steps come first in the same pass that starts the standby, so the
   card is free for the LLM. Repointing a Service needs no restart, so the
   gateway never notices; voice switching (`set_voice`) only works on the CPU
@@ -73,8 +75,17 @@ first pass; pinning it with `tools/standby.sh warm` brought it back and it was
 Ready in **61s** (up to 10s of that is the controller's poll, so the model load
 from the hostPath cache is ~50s), and `auto` scaled it away again. That 61s is
 the floor for a failover from zero -- on a real laptop loss add the time k3s
-takes to mark the node NotReady (not yet measured; the 4060-down test is still
-open). Kopf logs harmless 403s listing namespaces (the ClusterRole doesn't grant
+takes to mark the node NotReady.
+
+**Failover measured end to end (2026-11-10,
+`benchmarks/gpu_allocation/bench_failover.py`, five runs each; trigger:
+`llama-cpp-rtx4060` scaled to 0).** From a cold standby the first good reply
+came 261-299 s after the trigger: the standby was ready at 130-171 s (slower
+than the 61 s above since container images moved to the home server's hard
+disk) and the first request to the fresh server needed ~110 s more for the
+system prompt and tool definitions. With the standby pinned warm: 30 s.
+Returning to the 4060: 17-29 s, no failed requests. In every cold run the
+`tts` Service moved to the CPU and `tts-gpu` was scaled to 0 within 10 s. Kopf logs harmless 403s listing namespaces (the ClusterRole doesn't grant
 it, kopf falls back to `aicompanion`). Also found while rolling out: the live
 standby predated the manifest (no `--jinja`, no readiness probe), and the
 controller's ordering depends on that probe, so the manifest had to be applied.

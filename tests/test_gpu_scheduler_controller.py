@@ -100,6 +100,11 @@ class TestDecideTts:
         assert gs.decide(calm(gpu_tts_replicas=1, gpu_tts_ready=False), NOW) == []
         assert gs.decide(calm(gpu_tts_replicas=1, gpu_tts_ready=True), NOW) == [("tts_target", "gpu")]
 
+    def test_gpu_tts_going_unready_sends_tts_back_to_the_cpu(self):
+        # a restart or crash of tts-gpu must not leave the Service with no pod
+        assert gs.decide(calm(gpu_tts_replicas=1, gpu_tts_ready=False, tts_target="gpu"), NOW) == [
+            ("tts_target", "cpu")]
+
     def test_settled_on_gpu_tts_does_nothing(self):
         assert gs.decide(calm(gpu_tts_replicas=1, gpu_tts_ready=True, tts_target="gpu"), NOW) == []
 

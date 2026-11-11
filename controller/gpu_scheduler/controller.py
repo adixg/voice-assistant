@@ -108,6 +108,9 @@ def decide_tts(state: State, now: datetime) -> list[tuple]:
         return [("scale_gpu_tts", 1)]
     if state.gpu_tts_ready and state.tts_target != "gpu":
         return [("tts_target", "gpu")]
+    if not state.gpu_tts_ready and state.tts_target == "gpu":
+        # tts-gpu restarting or crashed: the Service would have no endpoints.
+        return [("tts_target", "cpu")]
     return []
 
 
