@@ -44,7 +44,9 @@ from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-PANELS = ("memory", "gpu", "pods", "latency", "speaker", "traces")
+# Default top-to-bottom order: what each turn did, how fast overall, who spoke,
+# then the hardware underneath. --only LIST shows its panels in LIST's order.
+PANELS = ("traces", "latency", "speaker", "gpu", "pods", "memory")
 OPT_IN = ("traces",)  # off unless asked for; needs Tempo, which lean-mode pauses
 # process_resident_memory_bytes is only scraped from these Python services.
 RSS_SERVICES = ("gateway", "agent", "stt", "tts")
@@ -596,7 +598,7 @@ def build_frame(args, style, get_json=fetch_json, cache=None, trail=None, **over
     }
     frame = [style("b", "aicompanion") + style("d", f"  {time.strftime('%H:%M:%S')}  "
                                                     f"prometheus={base}  refresh={args.interval:g}s  Ctrl-C quits")]
-    for name in PANELS:
+    for name in getattr(args, "order", PANELS):
         if not getattr(args, name):
             continue
         try:
@@ -622,7 +624,7 @@ def parse_args(argv=None):
     for name in PANELS:
         ap.add_argument(f"--{name}", action=argparse.BooleanOptionalAction, default=name not in OPT_IN,
                         help=f"show the {name} panel (default: {'off' if name in OPT_IN else 'on'})")
-    ap.add_argument("--only", metavar="LIST", help="comma list of panels to show, "
+    ap.add_argument("--only", metavar="LIST", help="comma list of panels to show, in that order, "
                     f"turning all others off (from: {', '.join(PANELS)})")
     ap.add_argument("--prometheus", default=os.environ.get("PROMETHEUS_URL", "http://localhost:9090"))
     ap.add_argument("--speaker-window", default="24h",
@@ -638,13 +640,15 @@ def parse_args(argv=None):
     ap.add_argument("--once", action="store_true", help="print one frame and exit")
     ap.add_argument("--no-color", action="store_true")
     args = ap.parse_args(argv)
+    args.order = PANELS
     if args.only:
-        wanted = {p.strip() for p in args.only.split(",") if p.strip()}
-        unknown = wanted - set(PANELS)
+        listed = list(dict.fromkeys(p.strip() for p in args.only.split(",") if p.strip()))
+        unknown = set(listed) - set(PANELS)
         if unknown:
             ap.error(f"--only: unknown panel(s) {', '.join(sorted(unknown))}; choose from {', '.join(PANELS)}")
         for name in PANELS:
-            setattr(args, name, name in wanted)
+            setattr(args, name, name in listed)
+        args.order = tuple(listed)
     for flag in ("window", "history", "speaker_window"):
         if not WINDOW_RE.match(getattr(args, flag)):
             ap.error(f"--{flag.replace('_', '-')} must look like 30s, 15m, 1h or 1d")

@@ -51,6 +51,11 @@ def test_only_turns_everything_else_off():
     assert (args.memory, args.gpu, args.pods, args.latency) == (True, True, False, False)
 
 
+def test_traces_lead_by_default_and_only_keeps_its_order():
+    assert parse().order[0] == "traces"
+    assert parse("--only", "gpu,traces,latency").order == ("gpu", "traces", "latency")
+
+
 @pytest.mark.parametrize("argv", [
     ["--only", "bogus"],
     ["--window", "5x"],
