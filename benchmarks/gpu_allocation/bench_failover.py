@@ -76,9 +76,10 @@ class Probe(threading.Thread):
     """Asks the agent once a second while `active` is set (only around a
     switch, so the GPU isn't generating nonstop); records (t, ok, seconds)."""
 
-    def __init__(self, url):
+    def __init__(self, url, timeout=30):
         super().__init__(daemon=True)
-        self.url, self.log, self.stop, self.active = url, [], threading.Event(), threading.Event()
+        self.url, self.timeout = url, timeout
+        self.log, self.stop, self.active = [], threading.Event(), threading.Event()
 
     def run(self):
         while not self.stop.is_set():
@@ -88,7 +89,7 @@ class Probe(threading.Thread):
             try:
                 req = urllib.request.Request(self.url + "/ask", data=json.dumps(QUESTION).encode(),
                                              headers={"content-type": "application/json"})
-                ok = bool(json.load(urllib.request.urlopen(req, timeout=30)).get("reply"))
+                ok = bool(json.load(urllib.request.urlopen(req, timeout=self.timeout)).get("reply"))
             except Exception:
                 ok = False
             self.log.append((t0, ok, time.time() - t0))
@@ -184,13 +185,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--warm", action="store_true")
+    ap.add_argument("--probe-timeout", type=float, default=30,
+                    help="seconds a probe waits for a reply; a short one cuts off the first, slow request "
+                         "to a fresh server and retries it")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "runs",
                                                   "gpu_allocation"))
     args = ap.parse_args()
     url = "http://" + kubectl("get", "svc", AGENT, "-o", "jsonpath={.spec.clusterIP}:{.spec.ports[0].port}")
     if args.warm:
         kubectl("annotate", "deployment", STANDBY, "aicompanion/keep-warm=true", "--overwrite")
-    probe = Probe(url)
+    probe = Probe(url, args.probe_timeout)
     probe.start()
     runs = []
     try:
@@ -213,7 +217,8 @@ def main():
     path = os.path.join(args.out, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
                         + f"-failover-{'warm' if args.warm else 'cold'}.json")
     meta = {"trigger": "scale llama-cpp-rtx4060 to 0 and back", "warm_standby": args.warm,
-            "gpu_tts_deployed": gpu_tts_deployed(), "probe": "POST /ask once a second", "runs": len(runs)}
+            "gpu_tts_deployed": gpu_tts_deployed(), "probe": "POST /ask once a second around each switch",
+            "probe_timeout_s": args.probe_timeout, "runs": len(runs)}
     json.dump({"metadata": meta, "runs": runs}, open(path, "w"), indent=1)
     print("saved", path, flush=True)
 
