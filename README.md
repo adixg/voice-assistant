@@ -290,7 +290,7 @@ Rina speaks with Kokoro on the GTX 1650 whenever the LLM doesn't need the card: 
 
 ### Language models
 
-Each model ran on llama.cpp (Q4_K_M) with the same settings as the live server on its card: an 8 GB RTX 4060 with a 40K-token context, and a 4 GB GTX 1650 with a 4K-token context. Every request carried the agent's real 20 tool definitions. Speed is the median over 80 replies to 8 fixed prompts, with thinking off. Tool calls are 13 fixed requests, 11 of which need a specific tool and 2 of which must not call any.
+Each model ran on llama.cpp (Q4_K_M) with the same settings as the live server on its card: an 8 GB RTX 4060 with a 40K-token context, and a 4 GB GTX 1650 with a 4K-token context. Every request carried the agent's real 20 tool definitions. Speed is the median over 50 replies (5 fixed sentences, 10 times each), with thinking off. Tool calls are 13 fixed requests, 11 of which need a specific tool and 2 of which must not call any.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/charts/llm-reply-vs-vram-dark.svg">
@@ -299,17 +299,17 @@ Each model ran on llama.cpp (Q4_K_M) with the same settings as the live server o
 
 | Model | GPU | First token | Generation | Whole reply | Tool calls | Load | VRAM |
 |---|---|---|---|---|---|---|---|
-| **Qwen3 8B** (live) | RTX 4060 | 0.08 s | 27 tok/s | 0.94 s | 12/13 | 10 s | 7.7 GB |
-| Llama 3.1 8B | RTX 4060 | 0.24 s | 42 tok/s | 0.50 s | 11/13 | 10 s | 7.3 GB |
-| Granite 4.2 8B | RTX 4060 | 0.42 s | 19 tok/s | 2.67 s | 12/13 | 17 s | 7.7 GB |
-| **Qwen3.5 4B** (standby) | GTX 1650 | 0.32 s | 41 tok/s | 1.28 s | 10/13 | 87 s | 2.7 GB |
-| Qwen3.5 2B | GTX 1650 | 0.13 s | 72 tok/s | 0.54 s | 8/13 | 76 s | 2.3 GB |
+| **Qwen3 8B** (live) | RTX 4060 | 0.09 s | 28 tok/s | 1.11 s | 12/13 | 10 s | 7.7 GB |
+| Llama 3.1 8B | RTX 4060 | 0.24 s | 42 tok/s | 0.65 s | 11/13 | 10 s | 7.3 GB |
+| Granite 4.2 8B | RTX 4060 | 0.54 s | 19 tok/s | 2.39 s | 12/13 | 17 s | 7.7 GB |
+| **Qwen3.5 4B** (standby) | GTX 1650 | 0.37 s | 40 tok/s | 1.23 s | 10/13 | 87 s | 2.7 GB |
+| Qwen3.5 2B | GTX 1650 | 0.13 s | 72 tok/s | 0.49 s | 8/13 | 76 s | 2.3 GB |
 | Ministral 3 3B | GTX 1650 | 0.25 s | 42 tok/s | 0.72 s | 12/13 | 56 s | 3.4 GB |
-| Granite 4.2 3B | GTX 1650 | 0.25 s | 44 tok/s | 1.96 s | 10/13 | 58 s | 2.4 GB |
-| Phi-4 mini | GTX 1650 | 0.11 s | 41 tok/s | 0.64 s | 2/13 | 79 s | 3.0 GB |
+| Granite 4.2 3B | GTX 1650 | 0.28 s | 44 tok/s | 1.68 s | 10/13 | 58 s | 2.4 GB |
+| Phi-4 mini | GTX 1650 | 0.11 s | 41 tok/s | 0.58 s | 2/13 | 79 s | 3.0 GB |
 | Gemma 4 E4B | GTX 1650 | — | — | — | — | — | crashed while loading; the 4.8 GB file alone is bigger than the card |
 
-With thinking on, both Qwen models passed all 13 tool calls, but the first spoken word came after 6.2 s on the 4060 and 2.4 s on the 1650, too slow for a voice reply. Ministral 3 3B is the strongest standby candidate: the same tool score as the 8B models at 0.72 s per reply, though at 3.4 GB it leaves the 1650 almost no room for anything else. VRAM on the 4060 is mostly the 40K-token KV cache, not the weights. Load times on the 1650 include starting the container from the home server's hard disk.
+With thinking on, both Qwen models passed all 13 tool calls, but the first spoken word came after 5.8 s on the 4060 and 2.4 s on the 1650, too slow for a voice reply. Ministral 3 3B is the strongest standby candidate: the same tool score as the 8B models at 0.72 s per reply, though at 3.4 GB it leaves the 1650 almost no room for anything else. VRAM on the 4060 is mostly the 40K-token KV cache, not the weights. Load times on the 1650 include starting the container from the home server's hard disk.
 
 ## Hardware and setup
 

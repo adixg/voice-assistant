@@ -40,7 +40,8 @@ class Axis:
 def scatter(theme, *, title, legend, points, x, y, xticks, yticks, xlabel, note,
             limits=(), connectors=(), width=820, height=500):
     """points: dicts with x, y, kind, label, value, place=(dx, dy, anchor) or None
-    (a point without place gets no label, e.g. the second of a shared label).
+    (a point without place gets no label, e.g. the second of a shared label),
+    and optionally ylo/yhi: a vertical spread bar drawn behind the marker.
     x/y: (lo, hi, log). limits: (x value, text) dashed verticals."""
     t = THEMES[theme]
     L, R, T, B = 84, width - 30, 104, height - 76
@@ -81,6 +82,25 @@ def scatter(theme, *, title, legend, points, x, y, xticks, yticks, xlabel, note,
         a, b = points[i], points[j]
         out.append(f'<line x1="{sx(a["x"]):.1f}" y1="{sy(a["y"]):.1f}" x2="{sx(b["x"]):.1f}" '
                    f'y2="{sy(b["y"]):.1f}" stroke="{t["axis"]}" stroke-width="1.5"/>')
+    # spread bars first, so the markers sit on top; bars of points that sit
+    # on top of each other are nudged apart so neither hides the other
+    dodge, seen = {}, []
+    for i, p in sorted(enumerate(points), key=lambda ip: sx(ip[1]["x"])):
+        if p.get("ylo") is None and p.get("yhi") is None:
+            continue
+        near = [j for j in seen if abs(sx(points[j]["x"]) + dodge[j] - sx(p["x"])) < 8]
+        dodge[i] = 8 * len(near) if near else 0
+        seen.append(i)
+    for i, p in enumerate(points):
+        if i not in dodge:
+            continue
+        x = sx(p["x"]) + dodge[i]
+        lo, hi = sy(p.get("ylo", p["y"])), sy(p.get("yhi", p["y"]))
+        out.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{lo:.1f}" y2="{hi:.1f}" '
+                   f'stroke="{t[p["kind"]]}" stroke-width="1.5" stroke-opacity="0.7"/>')
+        for yy in {lo, hi} - {sy(p["y"])}:
+            out.append(f'<line x1="{x - 4:.1f}" x2="{x + 4:.1f}" y1="{yy:.1f}" y2="{yy:.1f}" '
+                       f'stroke="{t[p["kind"]]}" stroke-width="1.5" stroke-opacity="0.7"/>')
     for p in points:
         out.append(marker(p["kind"], sx(p["x"]), sy(p["y"]), t))
     for p in points:
@@ -88,10 +108,15 @@ def scatter(theme, *, title, legend, points, x, y, xticks, yticks, xlabel, note,
             continue
         dx, dy, anchor = p["place"]
         ax, ay = sx(p["x"]) + dx, sy(p["y"]) + dy
-        out.append(f'<text x="{ax:.1f}" y="{ay:.1f}" font-size="12.5" font-weight="600" '
-                   f'text-anchor="{anchor}" fill="{t["text"]}">{p["label"]}</text>')
-        out.append(f'<text x="{ax:.1f}" y="{ay + 15:.1f}" font-size="11.5" text-anchor="{anchor}" '
-                   f'fill="{t["muted"]}">{p["value"]}</text>')
+        # each line is drawn twice: first as a halo in the surface colour, then
+        # the text itself, so a label stays readable where it crosses a bar
+        halo = f'fill="{t["surface"]}" stroke="{t["surface"]}" stroke-width="3" stroke-linejoin="round"'
+        for attrs in (halo, f'fill="{t["text"]}"'):
+            out.append(f'<text x="{ax:.1f}" y="{ay:.1f}" font-size="12.5" font-weight="600" '
+                       f'text-anchor="{anchor}" {attrs}>{p["label"]}</text>')
+        for attrs in (halo, f'fill="{t["muted"]}"'):
+            out.append(f'<text x="{ax:.1f}" y="{ay + 15:.1f}" font-size="11.5" text-anchor="{anchor}" '
+                       f'{attrs}>{p["value"]}</text>')
     out.append("</svg>")
     return "\n".join(out) + "\n"
 

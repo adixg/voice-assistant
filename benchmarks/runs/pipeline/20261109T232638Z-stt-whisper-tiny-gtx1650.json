@@ -38,7 +38,8 @@
       "What's the GPU temperature right now, and is anything running hot?",
       "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
     ],
-    "records": 50
+    "records": 50,
+    "stt_ms_p5_added": "2026-11-11, computed from this run's raw records"
   },
   "summary": [
     {
@@ -77,7 +78,8 @@
       "audio_s_p95": 0.0,
       "audio_s_mean": 0.0,
       "audio_s_min": 0.0,
-      "audio_s_max": 0.0
+      "audio_s_max": 0.0,
+      "stt_ms_p5": 568.7
     }
   ]
 }

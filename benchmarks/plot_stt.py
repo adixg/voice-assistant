@@ -32,7 +32,7 @@ LIVE = ("moonshine", "cpu")
 GTX1650_MIB = 4096
 
 # Label placement (dx, dy, anchor) per model; None = no label of its own.
-CPU_PLACE = {"moonshine-tiny": (0, -24, "middle"), "moonshine": (4, 22, "start"),
+CPU_PLACE = {"moonshine-tiny": (8, -24, "start"), "moonshine": (10, 22, "start"),
              "parakeet": (10, 22, "start"), "whisper-tiny": (12, 16, "start"),
              "whisper-base": (-12, -16, "end"), "whisper-small": (12, 4, "start"),
              "whisper-medium": (12, 4, "start"), "whisper-large-v3": (-14, 0, "end"),
@@ -62,6 +62,13 @@ def load_memory(runs=RUNS):
     return mem
 
 
+def spread(s):
+    """The middle 90% of requests (p5-p95), when the run recorded p5."""
+    if s.get("stt_ms_p5") is None:
+        return {}
+    return {"ylo": s["stt_ms_p5"] / 1000, "yhi": s["stt_ms_p95"] / 1000}
+
+
 def cpu_chart(theme, speed, mem):
     pts = []
     for (model, hw), s in sorted(speed.items(), key=lambda kv: kv[1]["stt_ms_p50"]):
@@ -74,6 +81,7 @@ def cpu_chart(theme, speed, mem):
             v2 = speed[("whisper-large-v2", "cpu")]["stt_ms_p50"] / 1000
             label, value = "Whisper large-v2 / v3", f"{v2:.1f} s / {sec:.1f} s · {mib(ram)}"
         pts.append({"x": ram, "y": sec, "kind": "cpu", "label": NAMES[model], "value": value,
+                    **spread(s),
                     "place": CPU_PLACE.get(model, (12, 4, "start"))} | ({"label": label} if label else {}))
     return scatter(theme, title="STT on the home server's CPU: seconds per request by RAM",
                    legend=[("cpu", "Intel i5-10300H, 8 threads")], points=pts,
@@ -82,7 +90,7 @@ def cpu_chart(theme, speed, mem):
                            (1024, "1 GB"), (2048, "2 GB"), (5120, "5 GB")],
                    yticks=[(v, f"{v:g} s") for v in (0.2, 0.5, 1, 2, 5, 10, 20)],
                    xlabel="peak RAM the STT pod held (log scale)",
-                   note="lower is faster, further left is lighter · both axes log scale · 50 requests each")
+                   note="dot: median · bar: 5th-95th percentile over 5 sentences × 10 reps · log axes")
 
 
 def gpu_chart(theme, speed, mem):
@@ -91,7 +99,7 @@ def gpu_chart(theme, speed, mem):
         if hw != "gtx1650" or "vram_peak_mib" not in mem.get((model, hw), {}):
             continue
         sec, vram = s["stt_ms_p50"] / 1000, mem[(model, hw)]["vram_peak_mib"]
-        pts.append({"x": vram, "y": sec, "kind": "gtx1650", "label": NAMES[model],
+        pts.append({"x": vram, "y": sec, "kind": "gtx1650", "label": NAMES[model], **spread(s),
                     "value": f"{sec:.2f} s · {mib(vram)}", "place": GPU_PLACE.get(model, (12, 4, "start"))})
     return scatter(theme, title="STT on the GTX 1650: seconds per request by VRAM",
                    legend=[("gtx1650", "GTX 1650, 4 GB")], points=pts,
@@ -100,7 +108,7 @@ def gpu_chart(theme, speed, mem):
                            (1024, "1 GB"), (2048, "2 GB"), (4096, "4 GB")],
                    yticks=[(v, f"{v} s") for v in (0, 2, 4, 6, 8, 10, 12)],
                    xlabel="VRAM in use on the card during the run (log scale)",
-                   note="lower is faster, further left is lighter · 50 requests each",
+                   note="dot: median · bar: 5th-95th percentile over 5 sentences × 10 reps",
                    limits=[(GTX1650_MIB, "card limit · Whisper large-v2 / v3 ran out of memory")])
 
 

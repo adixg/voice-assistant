@@ -30,7 +30,13 @@ LIVE = {"qwen3-8b-rtx4060": "live", "qwen3.5-4b-gtx1650": "standby"}
 PLACE = {"qwen3-8b-rtx4060": (-12, 4, "end"), "llama-3.1-8b-rtx4060": (-12, 4, "end"),
          "granite-4.2-8b-rtx4060": (-12, 4, "end"), "qwen3.5-2b-gtx1650": (-12, 8, "end"),
          "granite-4.2-3b-gtx1650": (12, 4, "start"), "qwen3.5-4b-gtx1650": (-12, 4, "end"),
-         "phi-4-mini-gtx1650": (0, 30, "middle"), "ministral-3-3b-gtx1650": (4, -30, "end")}
+         "phi-4-mini-gtx1650": (0, 30, "middle"), "ministral-3-3b-gtx1650": (12, 4, "start")}
+
+
+def pct(ordered, p):
+    k = (len(ordered) - 1) * p / 100
+    lo, hi = int(k), min(int(k) + 1, len(ordered) - 1)
+    return ordered[lo] + (ordered[hi] - ordered[lo]) * (k - lo)
 
 
 def load(runs=RUNS):
@@ -50,17 +56,19 @@ def chart(theme, runs):
             failed.append(name)
             continue
         s = run["think_off"]["summary"]
+        totals = sorted(r["total_s"] for r in run["think_off"]["rows"] if r.get("total_s") is not None)
         pts.append({"x": run["vram_loaded_mib"], "y": s["total_s_p50"], "kind": card, "label": name,
+                    "ylo": pct(totals, 5), "yhi": pct(totals, 95),
                     "value": f"{s['total_s_p50']:.2f} s · {s['gen_tps_p50']:.0f} tok/s",
                     "place": PLACE.get(label, (12, 4, "start"))})
-    note = "lower is faster · 4060 VRAM includes a 40K-token context, 1650 a 4K one"
+    note = "dot: median · bar: 5th-95th percentile of 50 replies to 5 sentences · log scale"
     limits = [(4096, "GTX 1650 limit" + (f" · {', '.join(failed)} didn't load" if failed else "")),
               (8192, "RTX 4060 limit")]
     return scatter(theme, title="LLMs: median seconds per reply by VRAM",
                    legend=[("gtx1650", "GTX 1650, 4 GB"), ("rtx4060", "RTX 4060, 8 GB")], points=pts,
-                   x=(0, 8800, False), y=(0, 3, False),
+                   x=(0, 8800, False), y=(0.2, 15, True),
                    xticks=[(v, mib(v) if v else "0") for v in (0, 2048, 4096, 6144, 8192)],
-                   yticks=[(v / 2, f"{v / 2:g} s") for v in range(0, 7)],
+                   yticks=[(v, f"{v:g} s") for v in (0.2, 0.5, 1, 2, 5, 10)],
                    xlabel="VRAM in use on the card with the model loaded",
                    note=note, limits=limits, width=860, height=520)
 

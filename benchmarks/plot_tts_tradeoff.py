@@ -29,7 +29,7 @@ ALIASES = {"Kitten nano 1.6x (deployed)": "Kitten nano 1.6x (live)",
 # Measured but not drawn: plain Kitten nano is the live engine at normal
 # speed and would sit on top of the live point.
 HIDE = {"Kitten nano"}
-CPU_PLACE = {"VITS": (0, -26, "middle")}
+CPU_PLACE = {"VITS": (12, 4, "start")}
 # (label, card) -> label placement on the GPU chart
 GPU_PLACE = {("VITS", "gtx1650"): (4, -26, "end"), ("Kokoro PyTorch", "gtx1650"): (-4, -26, "start"),
              ("Chatterbox Nano", "rtx4060"): (-12, 16, "end"), ("Chatterbox Turbo", "rtx4060"): (4, -26, "end"),
@@ -64,22 +64,28 @@ def load_vram(runs=RUNS):
     return vram
 
 
+def slowest(e):
+    """Bar up to the slowest single call, the only per-call spread the kept
+    summaries have (x_realtime_min)."""
+    return {"yhi": 10 / e["x_realtime_min"]} if e.get("x_realtime_min") else {}
+
+
 def cpu_chart(theme, speed, _vram):
     pts = []
     for (label, kind), e in sorted(speed.items()):
         if kind != "cpu" or label in HIDE or not e.get("rss_peak_mib"):
             continue
         sec = 10 / e["x_realtime"]
-        pts.append({"x": e["rss_peak_mib"], "y": sec, "kind": "cpu", "label": label,
+        pts.append({"x": e["rss_peak_mib"], "y": sec, "kind": "cpu", "label": label, **slowest(e),
                     "value": f"{sec:.1f} s · {mib(e['rss_peak_mib'])} · n={e['n']}",
                     "place": CPU_PLACE.get(label, (12, 4, "start"))})
     return scatter(theme, title="TTS on the home server's CPU: seconds per 10 s of speech by RAM",
                    legend=[("cpu", "Intel i5-10300H, 8 threads")], points=pts,
-                   x=(200, 3000, True), y=(0, 13, False),
+                   x=(200, 3000, True), y=(0, 16, False),
                    xticks=[(200, "200 MiB"), (500, "500 MiB"), (1024, "1 GB"), (2048, "2 GB")],
-                   yticks=[(v, f"{v} s") for v in (0, 2, 4, 6, 8, 10, 12)],
+                   yticks=[(v, f"{v} s") for v in (0, 4, 8, 12, 16)],
                    xlabel="peak RAM of the engine process (log scale)",
-                   note="lower is faster, further left is lighter · below 10 s is faster than realtime")
+                   note="dot: all calls together · bar: up to the slowest call · below 10 s is faster than realtime")
 
 
 def gpu_chart(theme, speed, vram):
@@ -91,18 +97,18 @@ def gpu_chart(theme, speed, vram):
         sec = 10 / e["x_realtime"]
         mem = ("≥" if v.get("lower_bound") else "") + mib(v["vram_peak_mib"])
         both = sum(1 for (other, _c) in vram if other == label) > 1
-        pts.append({"x": v["vram_peak_mib"], "y": sec, "kind": card,
+        pts.append({"x": v["vram_peak_mib"], "y": sec, "kind": card, **slowest(e),
                     "label": label + (f" ({CARD_NAMES[card]})" if both else ""),
                     "value": f"{sec:.1f} s · {mem} · n={e['n']}",
                     "place": GPU_PLACE.get((label, card), (12, 4, "start"))})
     return scatter(theme, title="TTS on a GPU: seconds per 10 s of speech by VRAM",
                    legend=[("gtx1650", "GTX 1650, 4 GB"), ("rtx4060", "RTX 4060, 8 GB")], points=pts,
-                   x=(200, 10000, True), y=(0, 7, False),
+                   x=(200, 10000, True), y=(0, 8.5, False),
                    xticks=[(200, "200 MiB"), (500, "500 MiB"), (1024, "1 GB"), (2048, "2 GB"),
                            (4096, "4 GB"), (8192, "8 GB")],
-                   yticks=[(v, f"{v} s") for v in range(0, 8)],
+                   yticks=[(v, f"{v} s") for v in range(0, 9)],
                    xlabel="VRAM in use on the card during the run (log scale)",
-                   note="lower is faster, further left is lighter",
+                   note="dot: all calls together · bar: up to the slowest call",
                    limits=[(4096, "GTX 1650 limit"), (8192, "RTX 4060 limit")])
 
 

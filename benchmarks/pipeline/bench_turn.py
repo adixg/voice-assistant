@@ -395,6 +395,7 @@ def summarize(records: list[dict]) -> list[dict]:
                  "tts_backend": rows[0].get("tts_backend"), "ok": len(ok), "n": len(rows)}
         for key in ("stt_ms", "llm_ms", "tts_ms", "turn_ms", "tts_x_realtime", "audio_s"):
             vals = [r[key] for r in ok if r.get(key) is not None]
+            entry[f"{key}_p5"] = percentile(vals, 5)
             entry[f"{key}_p50"] = percentile(vals, 50)
             entry[f"{key}_p95"] = percentile(vals, 95)
             entry[f"{key}_mean"] = round(sum(vals) / len(vals), 3) if vals else None

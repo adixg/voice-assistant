@@ -44,7 +44,8 @@ import companion_control_mcp  # noqa: E402
 
 TOOLS = [{"type": "function", "function": {"name": t["name"], "description": t.get("description", ""),
                                            "parameters": t["inputSchema"]}} for t in companion_control_mcp.TOOLS]
-SENTENCES = [l.strip() for l in open(os.path.join(REPO, "benchmarks", "sentences.txt")) if l.strip()]
+SENTENCES = [l.strip() for l in open(os.path.join(REPO, "benchmarks", "sentences.txt"))
+             if l.strip() and not l.lstrip().startswith("#")]
 SYSTEM = ("You are Rina, a friendly voice assistant on a small desk device. "
           "Your replies are spoken aloud, so keep them short, natural and free of markdown. "
           "Use a tool when the request needs one; otherwise just answer.")

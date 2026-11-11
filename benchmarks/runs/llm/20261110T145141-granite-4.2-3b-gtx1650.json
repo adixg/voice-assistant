@@ -22,61 +22,22 @@
  "vram_loaded_mib": 2478,
  "think_off": {
   "summary": {
-   "n": 80,
-   "ttft_s_p50": 0.253,
+   "n": 50,
+   "ttft_s_p50": 0.278,
    "ttft_s_p95": 0.494,
-   "t_first_answer_s_p50": 0.253,
+   "t_first_answer_s_p50": 0.278,
    "t_first_answer_s_p95": 0.494,
-   "total_s_p50": 1.963,
-   "total_s_p95": 4.059,
-   "gen_tps_p50": 44.337,
-   "gen_tps_p95": 44.878,
-   "prompt_tps_p50": 98.899,
-   "prompt_tps_p95": 114.324,
-   "gen_tok_p50": 74.5,
-   "gen_tok_p95": 165.1
+   "total_s_p50": 1.679,
+   "total_s_p95": 4.149,
+   "gen_tps_p50": 44.429,
+   "gen_tps_p95": 44.901,
+   "prompt_tps_p50": 100.18,
+   "prompt_tps_p95": 109.309,
+   "gen_tok_p50": 64.5,
+   "gen_tok_p95": 168.65
   },
   "errors": 0,
   "rows": [
-   {
-    "ttft_s": 0.3548004627227783,
-    "t_first_answer_s": 0.3548007011413574,
-    "total_s": 2.570039987564087,
-    "gen_tok": 99,
-    "gen_tps": 44.24005738567444,
-    "prompt_tok": 33,
-    "prompt_tps": 97.62389359587259,
-    "reasoning_chars": 0,
-    "content_chars": 375,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.2269575595855713,
-    "t_first_answer_s": 0.2269580364227295,
-    "total_s": 2.5316596031188965,
-    "gen_tok": 103,
-    "gen_tps": 44.25919224370673,
-    "prompt_tok": 24,
-    "prompt_tps": 114.40829460135859,
-    "reasoning_chars": 0,
-    "content_chars": 392,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.17592716217041016,
-    "t_first_answer_s": 0.17592763900756836,
-    "total_s": 2.840148448944092,
-    "gen_tok": 119,
-    "gen_tps": 44.293014053272486,
-    "prompt_tok": 15,
-    "prompt_tps": 94.12059986195645,
-    "reasoning_chars": 0,
-    "content_chars": 476,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
-   },
    {
     "ttft_s": 0.17587947845458984,
     "t_first_answer_s": 0.17587995529174805,
@@ -141,45 +102,6 @@
     "content_chars": 762,
     "tool_call_chunks": 0,
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
-   },
-   {
-    "ttft_s": 0.35465025901794434,
-    "t_first_answer_s": 0.35465073585510254,
-    "total_s": 1.729313850402832,
-    "gen_tok": 62,
-    "gen_tps": 44.37651362104348,
-    "prompt_tok": 33,
-    "prompt_tps": 97.70077509281573,
-    "reasoning_chars": 0,
-    "content_chars": 229,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22670435905456543,
-    "t_first_answer_s": 0.22670459747314453,
-    "total_s": 1.6202056407928467,
-    "gen_tok": 63,
-    "gen_tps": 44.4960215532987,
-    "prompt_tok": 24,
-    "prompt_tps": 114.30204314902127,
-    "reasoning_chars": 0,
-    "content_chars": 276,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.17575764656066895,
-    "t_first_answer_s": 0.17575788497924805,
-    "total_s": 1.700404405593872,
-    "gen_tok": 69,
-    "gen_tps": 44.602828212863066,
-    "prompt_tok": 15,
-    "prompt_tps": 94.28447511832702,
-    "reasoning_chars": 0,
-    "content_chars": 263,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
    },
    {
     "ttft_s": 0.17575383186340332,
@@ -247,45 +169,6 @@
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
    },
    {
-    "ttft_s": 0.35451340675354004,
-    "t_first_answer_s": 0.35451388359069824,
-    "total_s": 2.273705005645752,
-    "gen_tok": 86,
-    "gen_tps": 44.29429546796402,
-    "prompt_tok": 33,
-    "prompt_tps": 97.67532721234618,
-    "reasoning_chars": 0,
-    "content_chars": 382,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22669005393981934,
-    "t_first_answer_s": 0.22669053077697754,
-    "total_s": 2.2826344966888428,
-    "gen_tok": 92,
-    "gen_tps": 44.26644899897019,
-    "prompt_tok": 24,
-    "prompt_tps": 114.34070672085144,
-    "reasoning_chars": 0,
-    "content_chars": 335,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.1800398826599121,
-    "t_first_answer_s": 0.1800403594970703,
-    "total_s": 2.8932652473449707,
-    "gen_tok": 121,
-    "gen_tps": 44.23035315356889,
-    "prompt_tok": 15,
-    "prompt_tps": 94.24715373595717,
-    "reasoning_chars": 0,
-    "content_chars": 441,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
-   },
-   {
     "ttft_s": 0.17603516578674316,
     "t_first_answer_s": 0.17603564262390137,
     "total_s": 1.225365161895752,
@@ -349,45 +232,6 @@
     "content_chars": 686,
     "tool_call_chunks": 0,
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
-   },
-   {
-    "ttft_s": 0.35480833053588867,
-    "t_first_answer_s": 0.3548088073730469,
-    "total_s": 2.3259921073913574,
-    "gen_tok": 88,
-    "gen_tps": 44.13624605500594,
-    "prompt_tok": 33,
-    "prompt_tps": 97.65596100863812,
-    "reasoning_chars": 0,
-    "content_chars": 346,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22680997848510742,
-    "t_first_answer_s": 0.22681045532226562,
-    "total_s": 2.814297676086426,
-    "gen_tok": 115,
-    "gen_tps": 44.06018466628276,
-    "prompt_tok": 24,
-    "prompt_tps": 114.2057702465417,
-    "reasoning_chars": 0,
-    "content_chars": 487,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.17586398124694824,
-    "t_first_answer_s": 0.17586445808410645,
-    "total_s": 0.5111868381500244,
-    "gen_tok": 16,
-    "gen_tps": 44.753408717964014,
-    "prompt_tok": 15,
-    "prompt_tps": 94.2187382226577,
-    "reasoning_chars": 0,
-    "content_chars": 54,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
    },
    {
     "ttft_s": 0.1758437156677246,
@@ -455,45 +299,6 @@
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
    },
    {
-    "ttft_s": 0.3548464775085449,
-    "t_first_answer_s": 0.3548471927642822,
-    "total_s": 1.7521862983703613,
-    "gen_tok": 63,
-    "gen_tps": 44.374209137079085,
-    "prompt_tok": 33,
-    "prompt_tps": 97.64642525314095,
-    "reasoning_chars": 0,
-    "content_chars": 246,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22676634788513184,
-    "t_first_answer_s": 0.22676682472229004,
-    "total_s": 1.3044970035552979,
-    "gen_tok": 49,
-    "gen_tps": 44.54297515522762,
-    "prompt_tok": 24,
-    "prompt_tps": 114.32273307547206,
-    "reasoning_chars": 0,
-    "content_chars": 217,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.17601275444030762,
-    "t_first_answer_s": 0.17601323127746582,
-    "total_s": 3.124640941619873,
-    "gen_tok": 131,
-    "gen_tps": 44.09208462288549,
-    "prompt_tok": 15,
-    "prompt_tps": 94.2211055276382,
-    "reasoning_chars": 0,
-    "content_chars": 431,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
-   },
-   {
     "ttft_s": 0.17569303512573242,
     "t_first_answer_s": 0.17569327354431152,
     "total_s": 1.7744224071502686,
@@ -557,45 +362,6 @@
     "content_chars": 712,
     "tool_call_chunks": 0,
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
-   },
-   {
-    "ttft_s": 0.35474658012390137,
-    "t_first_answer_s": 0.35474705696105957,
-    "total_s": 2.5529346466064453,
-    "gen_tok": 98,
-    "gen_tps": 44.13016487848508,
-    "prompt_tok": 33,
-    "prompt_tps": 97.6262040565167,
-    "reasoning_chars": 0,
-    "content_chars": 376,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22675633430480957,
-    "t_first_answer_s": 0.22675657272338867,
-    "total_s": 2.0570321083068848,
-    "gen_tok": 82,
-    "gen_tps": 44.25999743182731,
-    "prompt_tok": 24,
-    "prompt_tps": 114.22261988615813,
-    "reasoning_chars": 0,
-    "content_chars": 328,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.1760420799255371,
-    "t_first_answer_s": 0.1760425567626953,
-    "total_s": 1.6822025775909424,
-    "gen_tok": 68,
-    "gen_tps": 44.48655543257199,
-    "prompt_tok": 15,
-    "prompt_tps": 94.24952246908616,
-    "reasoning_chars": 0,
-    "content_chars": 264,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
    },
    {
     "ttft_s": 0.1756761074066162,
@@ -663,45 +429,6 @@
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
    },
    {
-    "ttft_s": 0.35462450981140137,
-    "t_first_answer_s": 0.35462498664855957,
-    "total_s": 1.7546837329864502,
-    "gen_tok": 63,
-    "gen_tps": 44.2867265537498,
-    "prompt_tok": 33,
-    "prompt_tps": 97.7094535376744,
-    "reasoning_chars": 0,
-    "content_chars": 237,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22682619094848633,
-    "t_first_answer_s": 0.22682666778564453,
-    "total_s": 2.6545305252075195,
-    "gen_tok": 108,
-    "gen_tps": 44.076472267454385,
-    "prompt_tok": 24,
-    "prompt_tps": 114.1498216409037,
-    "reasoning_chars": 0,
-    "content_chars": 434,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.1760265827178955,
-    "t_first_answer_s": 0.1760270595550537,
-    "total_s": 0.6219925880432129,
-    "gen_tok": 21,
-    "gen_tps": 44.8511949479614,
-    "prompt_tok": 15,
-    "prompt_tps": 94.23649591013607,
-    "reasoning_chars": 0,
-    "content_chars": 72,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
-   },
-   {
     "ttft_s": 0.1757667064666748,
     "t_first_answer_s": 0.1757674217224121,
     "total_s": 0.7999138832092285,
@@ -765,45 +492,6 @@
     "content_chars": 522,
     "tool_call_chunks": 0,
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
-   },
-   {
-    "ttft_s": 0.35437488555908203,
-    "t_first_answer_s": 0.35437512397766113,
-    "total_s": 2.010535955429077,
-    "gen_tok": 74,
-    "gen_tps": 44.080794661996926,
-    "prompt_tok": 33,
-    "prompt_tps": 97.7262362368884,
-    "reasoning_chars": 0,
-    "content_chars": 283,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22685956954956055,
-    "t_first_answer_s": 0.22686028480529785,
-    "total_s": 2.1947641372680664,
-    "gen_tok": 88,
-    "gen_tps": 44.21273133549383,
-    "prompt_tok": 24,
-    "prompt_tps": 114.27319864967171,
-    "reasoning_chars": 0,
-    "content_chars": 329,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.17613434791564941,
-    "t_first_answer_s": 0.17613482475280762,
-    "total_s": 2.5774295330047607,
-    "gen_tok": 107,
-    "gen_tps": 44.14777509790602,
-    "prompt_tok": 15,
-    "prompt_tps": 94.28388248456888,
-    "reasoning_chars": 0,
-    "content_chars": 390,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
    },
    {
     "ttft_s": 0.17612004280090332,
@@ -871,45 +559,6 @@
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
    },
    {
-    "ttft_s": 0.3543691635131836,
-    "t_first_answer_s": 0.3543696403503418,
-    "total_s": 2.3048689365386963,
-    "gen_tok": 87,
-    "gen_tps": 44.096300166591725,
-    "prompt_tok": 33,
-    "prompt_tps": 97.73202471139436,
-    "reasoning_chars": 0,
-    "content_chars": 370,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22672581672668457,
-    "t_first_answer_s": 0.22672629356384277,
-    "total_s": 1.990694284439087,
-    "gen_tok": 79,
-    "gen_tps": 44.22182346988238,
-    "prompt_tok": 24,
-    "prompt_tps": 114.40774921821372,
-    "reasoning_chars": 0,
-    "content_chars": 299,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.17611908912658691,
-    "t_first_answer_s": 0.17611932754516602,
-    "total_s": 1.980297565460205,
-    "gen_tok": 81,
-    "gen_tps": 44.346389649552655,
-    "prompt_tok": 15,
-    "prompt_tps": 94.18265155558346,
-    "reasoning_chars": 0,
-    "content_chars": 311,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
-   },
-   {
     "ttft_s": 0.1760265827178955,
     "t_first_answer_s": 0.1760270595550537,
     "total_s": 0.8887934684753418,
@@ -973,45 +622,6 @@
     "content_chars": 389,
     "tool_call_chunks": 0,
     "sentence": "I finished the chapter, but I'm not sure I understood the part about entropy. Can you explain it simply, like you would to a friend?"
-   },
-   {
-    "ttft_s": 0.3546903133392334,
-    "t_first_answer_s": 0.3546907901763916,
-    "total_s": 2.5147793292999268,
-    "gen_tok": 96,
-    "gen_tps": 43.982275605902146,
-    "prompt_tok": 33,
-    "prompt_tps": 97.69094138543517,
-    "reasoning_chars": 0,
-    "content_chars": 355,
-    "tool_call_chunks": 0,
-    "sentence": "# Fixed sentences shared by bench_turn.py and tts_engines/bench_tts_engines.py,"
-   },
-   {
-    "ttft_s": 0.22747588157653809,
-    "t_first_answer_s": 0.2274763584136963,
-    "total_s": 2.0855371952056885,
-    "gen_tok": 83,
-    "gen_tps": 44.1325029964355,
-    "prompt_tok": 24,
-    "prompt_tps": 114.34942325009649,
-    "reasoning_chars": 0,
-    "content_chars": 328,
-    "tool_call_chunks": 0,
-    "sentence": "# so runs on different days measure the same text. Short to long, the kind of"
-   },
-   {
-    "ttft_s": 0.17697954177856445,
-    "t_first_answer_s": 0.17697978019714355,
-    "total_s": 1.4787697792053223,
-    "gen_tok": 59,
-    "gen_tps": 44.56355377437934,
-    "prompt_tok": 15,
-    "prompt_tps": 94.27025396406418,
-    "reasoning_chars": 0,
-    "content_chars": 233,
-    "tool_call_chunks": 0,
-    "sentence": "# thing said to and by the companion."
    },
    {
     "ttft_s": 0.1760408878326416,
@@ -1205,5 +815,6 @@
    ]
   }
  },
- "vram_peak_mib": 2484
+ "vram_peak_mib": 2484,
+ "note": "2026-11-11: replies to the 3 comment lines of benchmarks/sentences.txt, which the first version of bench_llm.py sent as prompts, were removed and the summaries recomputed"
 }
