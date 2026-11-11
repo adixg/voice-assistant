@@ -693,6 +693,22 @@ class TestSpeakPipelining:
             with pytest.raises(httpx.HTTPStatusError):
                 await session._synth("hello")
 
+    async def test_a_connect_timeout_falls_back_and_connects_are_capped(self):
+        import base64
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.extensions["timeout"]["connect"])
+            if request.url.host == "tts":
+                raise httpx.ConnectTimeout("timed out", request=request)
+            return httpx.Response(200, json={"chunks_b64": [base64.b64encode(b"cpu").decode()]})
+
+        async with make_client(handler) as client:
+            session = make_session(client=client)
+            session.urls["tts_fallback"] = "http://tts-cpu"
+            assert await session._synth("hello")
+        assert seen == [3.0, 3.0]
+
     async def test_without_a_fallback_the_error_is_raised_as_before(self):
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("Connection refused", request=request)

@@ -70,6 +70,7 @@ app = FastAPI(title="aicompanion-gateway")
 install_http_metrics(app, "gateway")
 install_tracing(app, "gateway")
 
+SYNTH_TIMEOUT = httpx.Timeout(120.0, connect=3.0)
 MIN_UTTERANCE_BYTES = SAMPLE_RATE * 2 // 4  # ignore stray <0.25s blips, same threshold bridge_server.py uses
 
 _urls = {}
@@ -430,7 +431,11 @@ class GatewaySession:
             return chunks
 
     async def _synth_at(self, base, text):
-        resp = await self.client.post(f"{base}/synth", json={"text": text})
+        # Connecting inside the cluster takes milliseconds. Right after a pod
+        # goes away, connects to its old address can hang instead of being
+        # refused (one did on 2026-11-11), so cap the connect at 3 s and fall
+        # back; synthesis itself keeps the client's full 120 s.
+        resp = await self.client.post(f"{base}/synth", json={"text": text}, timeout=SYNTH_TIMEOUT)
         resp.raise_for_status()
         return resp.json()["chunks_b64"]
 
