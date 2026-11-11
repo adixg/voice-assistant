@@ -515,6 +515,7 @@ def panel_speaker(style, base, window, get_json=fetch_json, graph=True, now=time
 # for a streaming call closes when the response *starts* (5ms for the agent),
 # so the server-side spans are the ones that hold the real duration.
 STAGES = (("stt", "POST /transcribe"), ("agent", "POST /ask_stream"), ("tts", "POST /synth"))
+TURN_GAP_NS = 2_500_000_000
 STAGE_STYLE = {"stt": ("c", "▓"), "agent": ("y", "█"), "tts": ("g", "▒")}
 UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -524,7 +525,9 @@ def window_seconds(window):
 
 
 def tempo_search(base, name, start, end, get_json):
-    query = urlencode({"q": '{ name = "%s" }' % name, "limit": 50, "spss": 100,
+    # limit: direct calls to a service are traces too (filtered out later), and
+    # a batch of them must not crowd the Stick's connection out of the results
+    query = urlencode({"q": '{ name = "%s" }' % name, "limit": 200, "spss": 100,
                        "start": int(start), "end": int(end)})
     try:
         return get_json(f"{base.rstrip('/')}/api/search?{query}").get("traces", [])
@@ -584,8 +587,14 @@ def collect_turns(base, window, get_json=fetch_json, now=time.time):
     for trace_events in events.values():
         current = None
         for start, stage, dur in sorted(trace_events):
-            if stage == "stt" or current is None:
-                current = {"start_ns": start, "end_ns": start, "stt": 0.0, "agent": 0.0, "tts": 0.0}
+            # A turn starts at a transcription and its later steps follow each
+            # other closely (gaps of 0-0.1 s measured). A step that comes later
+            # than TURN_GAP_NS after the last one, with no transcription, was
+            # spoken without a turn: a refusal of an unrecognised voice (no STT,
+            # no LLM) or an announcement such as a reminder.
+            if stage == "stt" or current is None or start > current["end_ns"] + TURN_GAP_NS:
+                current = {"start_ns": start, "end_ns": start, "stt": 0.0, "agent": 0.0, "tts": 0.0,
+                           "spoken_only": stage != "stt"}
                 turns.append(current)
             current[stage] += dur / 1e6
             current["end_ns"] = max(current["end_ns"], start + dur)
@@ -603,7 +612,9 @@ def stage_bar(style, turn, width=30):
 
 def panel_traces(style, base, window, count, get_json=fetch_json, now=time.time):
     lines = heading(style, "traces", f"(Tempo, last {window}, newest first)")
-    turns = collect_turns(base, window, get_json, now)[:count]
+    everything = collect_turns(base, window, get_json, now)
+    spoken = sum(1 for t in everything if t.get("spoken_only"))
+    turns = [t for t in everything if not t.get("spoken_only")][:count]
     if not turns:
         return lines + [style("d", "  no Stick turns in this window (direct calls to a service are excluded)")]
     lines.append("  " + "  ".join(style(STAGE_STYLE[s][0], f"{STAGE_STYLE[s][1]} {s}") for s, _ in STAGES)
@@ -614,6 +625,9 @@ def panel_traces(style, base, window, count, get_json=fetch_json, now=time.time)
         lines.append(f"  {clock}  {_secs((turn['end_ns'] - turn['start_ns']) / 1e9):>7}  {stage_bar(style, turn)}  "
                      + "  ".join(f"{s} {_secs(turn[s] / 1000)}" for s, _ in STAGES)
                      + style("d", f"  slowest: {slowest}"))
+    if spoken:
+        lines.append(style("d", f"  + {spoken} spoken without a turn (refusals of an unrecognised voice, "
+                                "announcements), not shown"))
     return lines
 
 

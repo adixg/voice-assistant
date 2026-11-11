@@ -402,6 +402,20 @@ def test_a_big_trace_is_fetched_whole_when_search_returns_only_some_spans():
     assert [(t["stt"], t["agent"], t["tts"]) for t in turns] == [(1500, 5000, 3000), (1000, 4000, 2000)]
 
 
+def test_refusals_and_announcements_are_not_turns_and_do_not_stretch_one():
+    # a turn, then a refusal's TTS 4 s after it ended, then an announcement
+    search = {"POST /transcribe": [trace("ws", None, [span(9100, 200)])]}
+    full = {"ws": [("POST /transcribe", 9100, 200), ("POST /ask_stream", 9100.2, 3000), ("POST /synth", 9103.3, 400),
+                   ("POST /synth", 9107.7, 300),   # refusal: no STT, 4 s later
+                   ("POST /synth", 9300, 250)]}    # announcement
+    turns = obs_tui.collect_turns("http://t", "1h", tempo(search, full), now=lambda: NOW)
+    real = [t for t in turns if not t["spoken_only"]]
+    assert len(real) == 1 and real[0]["tts"] == 400 and real[0]["end_ns"] == int(9103.7 * NS)
+    assert sum(t["spoken_only"] for t in turns) == 2
+    text = "\n".join(obs_tui.panel_traces(PLAIN, "http://t", "1h", 5, tempo(search, full), now=lambda: NOW))
+    assert "+ 2 spoken without a turn" in text and text.count("slowest:") == 1
+
+
 def test_a_failed_turn_with_no_tts_span_is_still_shown():
     traces = turn_traces()
     traces["POST /synth"] = []
