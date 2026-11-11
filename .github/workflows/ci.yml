@@ -132,7 +132,11 @@ jobs:
         # test_speech_orb.py) dlopen()s these at import time even though the
         # tests never open a real window -- QT_QPA_PLATFORM=offscreen below
         # covers the rest of the no-display gap.
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg libegl1 libgl1 libxkbcommon0
+        # Retries: on 2026-11-11 the runner couldn't resolve security.ubuntu.com
+        # for over an hour and every run failed here before a test ran.
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y ffmpeg libegl1 libgl1 libxkbcommon0
       - name: Install Python deps
         # requirements/chat.txt covers voicepipe/, tests/, and the
         # services/+controller/ test deps (fastapi test client, kopf,

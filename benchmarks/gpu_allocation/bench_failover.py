@@ -16,7 +16,8 @@ every step against the trigger:
              good reply on the 4060 -> standby scaled back to 0 (60 s debounce)
 
 plus the TTS Service moving between CPU and GPU when tts-gpu is deployed. A
-probe asks the agent a short question once a second the whole time. --warm
+probe starts a short question to the agent once a second around each switch,
+each on its own thread so one stuck on the dead target holds nothing back. --warm
 pins the standby (tools/standby.sh warm) for the run and unpins it after.
 
 This does not cover the node itself disappearing (laptop sleep or k3s-agent
@@ -74,32 +75,42 @@ def gpu_tts_deployed():
 
 class Probe(threading.Thread):
     """Asks the agent once a second while `active` is set (only around a
-    switch, so the GPU isn't generating nonstop); records (t, ok, seconds)."""
+    switch, so the GPU isn't generating nonstop), one request at a time;
+    records (start, ok, seconds) per request.
+
+    run_once() keeps the timeout short (SHORT_TIMEOUT) until the agent's
+    rollout to the new server is done, so a request stuck on the old, dead
+    target fails fast, then long (--probe-timeout), so the first request after
+    the switch measures what a real turn waits for. Never in parallel: a burst
+    of parallel requests queued on the standby and none got through
+    (2026-11-11)."""
 
     def __init__(self, url, timeout=30):
         super().__init__(daemon=True)
         self.url, self.timeout = url, timeout
         self.log, self.stop, self.active = [], threading.Event(), threading.Event()
 
+    def ask_once(self, t0):
+        try:
+            req = urllib.request.Request(self.url + "/ask", data=json.dumps(QUESTION).encode(),
+                                         headers={"content-type": "application/json"})
+            ok = bool(json.load(urllib.request.urlopen(req, timeout=self.timeout)).get("reply"))
+        except Exception:
+            ok = False
+        self.log.append((t0, ok, time.time() - t0))
+
     def run(self):
         while not self.stop.is_set():
             if not self.active.wait(0.5):
                 continue
             t0 = time.time()
-            try:
-                req = urllib.request.Request(self.url + "/ask", data=json.dumps(QUESTION).encode(),
-                                             headers={"content-type": "application/json"})
-                ok = bool(json.load(urllib.request.urlopen(req, timeout=self.timeout)).get("reply"))
-            except Exception:
-                ok = False
-            self.log.append((t0, ok, time.time() - t0))
+            self.ask_once(t0)
             self.stop.wait(max(0.0, 1.0 - (time.time() - t0)))
 
     def first_ok_after(self, t, min_ts=0):
-        for ts, ok, dur in self.log:
-            if ts >= max(t, min_ts) and ok:
-                return ts + dur
-        return None
+        """When the first good reply arrived to a request sent at or after t."""
+        ends = [ts + dur for ts, ok, dur in list(self.log) if ok and ts >= max(t, min_ts)]
+        return min(ends) if ends else None
 
     def failures_between(self, a, b):
         return sum(1 for ts, ok, _ in self.log if a <= ts < b and not ok)
@@ -128,9 +139,14 @@ def steady(timeout=900):
     return wait_for(ok, timeout, step=3)
 
 
+SHORT_TIMEOUT = 10
+
+
 def run_once(probe, warm):
+    long_timeout = probe.timeout
     rel = {}
     t0 = time.time()
+    probe.timeout = SHORT_TIMEOUT
     probe.active.set()
     kubectl("scale", "deployment", RTX, "--replicas=0")
     events = {
@@ -149,7 +165,8 @@ def run_once(probe, warm):
     t_rt = t0 + rel.get("agent_retargeted", 0)
     t = wait_for(lambda: agent_host(deploy(AGENT)) == GTX_HOST and rolled_out(deploy(AGENT)), 600, 0.5)
     rel["agent_rolled_out"] = round(t - t0, 1) if t else None
-    t = wait_for(lambda: probe.first_ok_after(t_rt) is not None, 300, 0.5)
+    probe.timeout = long_timeout
+    t = wait_for(lambda: probe.first_ok_after(t_rt) is not None, long_timeout + 60, 0.5)
     first = probe.first_ok_after(t_rt)
     rel["first_good_reply"] = round(first - t0, 1) if first else None
     rel["failed_probes"] = probe.failures_between(t0, first or time.time())
@@ -158,6 +175,7 @@ def run_once(probe, warm):
     # return
     back = {}
     t1 = time.time()
+    probe.timeout = SHORT_TIMEOUT
     probe.active.set()
     kubectl("scale", "deployment", RTX, "--replicas=1")
     t = wait_for(lambda: ready(deploy(RTX)), 600, 0.5)
@@ -167,7 +185,8 @@ def run_once(probe, warm):
     t_rt = t or time.time()
     t = wait_for(lambda: agent_host(deploy(AGENT)) == RTX_HOST and rolled_out(deploy(AGENT)), 600, 0.5)
     back["agent_rolled_out"] = round(t - t1, 1) if t else None
-    t = wait_for(lambda: probe.first_ok_after(t_rt) is not None, 300, 0.5)
+    probe.timeout = long_timeout
+    t = wait_for(lambda: probe.first_ok_after(t_rt) is not None, long_timeout + 60, 0.5)
     first = probe.first_ok_after(t_rt)
     back["first_good_reply"] = round(first - t1, 1) if first else None
     back["failed_probes"] = probe.failures_between(t1, first or time.time())
@@ -185,8 +204,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--warm", action="store_true")
-    ap.add_argument("--probe-timeout", type=float, default=30,
-                    help="seconds a probe waits for a reply; a short one cuts off the first, slow request "
+    ap.add_argument("--probe-timeout", type=float, default=300,
+                    help="seconds a probe waits for a reply once the switch is done (before it, 10 s); "
+                         "a short one cuts off the first, slow request "
                          "to a fresh server and retries it")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "runs",
                                                   "gpu_allocation"))
