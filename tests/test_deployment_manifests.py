@@ -148,7 +148,9 @@ MEASURED_PEAK_MIB = {
     # The manifest's backend, kitten (2026-09-24). PyTorch Kokoro peaked at
     # 2801 and its switch-backend preset keeps a 3Gi limit.
     "tts": 559,
-    "tempo": 384,
+    # Hit its 1Gi limit 171 times (2026-11-17, memory.events max).
+    "tempo": 1024,
+    "grafana": 384,
     "llama-cpp-gtx1650": 2057,
 }
 

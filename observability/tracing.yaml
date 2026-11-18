@@ -31,6 +31,9 @@ kind: Deployment
 metadata: {name: tempo, namespace: aicompanion}
 spec:
   replicas: 1
+  # Recreate: its PVC is ReadWriteOnce, and a rolling update briefly runs two
+  # pods writing the same WAL.
+  strategy: {type: Recreate, rollingUpdate: null}
   selector: {matchLabels: {app: tempo}}
   template:
     metadata: {labels: {app: tempo}}
@@ -45,10 +48,13 @@ spec:
           # Steady state is ~95-315Mi (2026-09-23), but on every start Tempo
           # replays its WAL and flushes a block, which peaked well above 384Mi:
           # a 384Mi limit OOM-killed it in a crash loop within seconds of
-          # each start. The limit has to cover that startup spike.
+          # each start. The limit has to cover that startup spike. At 1Gi it
+          # hit the limit 171 times in ~2 months (memory.events max, 16 s of
+          # reclaim stall; anon only ~95Mi, the rest page cache), so 2Gi since
+          # arch-ssd went to 16 GB (2026-11-17).
           resources:
-            requests: {memory: 128Mi}
-            limits: {memory: 1Gi}
+            requests: {memory: 256Mi}
+            limits: {memory: 2Gi}
           volumeMounts: [{name: config, mountPath: /etc/tempo}, {name: data, mountPath: /var/tempo}]
       volumes: [{name: config, configMap: {name: tempo-config}}, {name: data, persistentVolumeClaim: {claimName: tempo-data-arch}}]
 ---
